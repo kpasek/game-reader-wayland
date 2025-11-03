@@ -45,7 +45,7 @@ except ImportError:
 
 # --- Importowanie zależności (jak poprzednio) ---
 try:
-    from PIL import Image
+    from PIL import Image, ImageOps, ImageEnhance
 except ImportError:
     print("Błąd: Nie znaleziono biblioteki 'Pillow'. Zainstaluj ją: pip install Pillow", file=sys.stderr)
     sys.exit(1)
@@ -68,6 +68,8 @@ except ImportError:
     print("Błąd: Nie znaleziono biblioteki 'thefuzz'. Zainstaluj ją: pip install thefuzz", file=sys.stderr)
     sys.exit(1)
 
+from pydub import AudioSegment
+
 # --- Konfiguracja globalna ---
 OCR_LANGUAGE = 'pol'
 MIN_MATCH_THRESHOLD = 85
@@ -83,8 +85,12 @@ stop_event = threading.Event()
 # KLASA WĄTKU ODTWARZACZA (PLAYER THREAD)
 # ==============================================================================
 
+# ==============================================================================
+# KLASA WĄTKU ODTWARZACZA (PLAYER THREAD) - ZMODYFIKOWANA
+# ==============================================================================
+
 class PlayerThread(threading.Thread):
-    """Wątek, który obsługuje odtwarzanie audio z kolejki."""
+    """Wątek, który obsługuje odtwarzanie audio z kolejki z dynamiczną prędkością."""
     def __init__(self):
         super().__init__(daemon=True)
         self.name = "PlayerThread"
@@ -96,7 +102,7 @@ class PlayerThread(threading.Thread):
         
         while not stop_event.is_set():
             try:
-                # Czekaj na element w kolejce (z timeoutem, by móc sprawdzić stop_event)
+                # Czekaj na element w kolejce
                 file_path = audio_queue.get(timeout=0.5)
             except queue.Empty:
                 continue
@@ -107,22 +113,51 @@ class PlayerThread(threading.Thread):
                 continue
             
             try:
-                print(f"Odtwarzam z kolejki: {os.path.basename(file_path)}")
-                pygame.mixer.music.load(file_path)
-                pygame.mixer.music.play()
+                # 1. Sprawdź rozmiar kolejki (PRZED pobraniem elementu)
+                queue_size = audio_queue.qsize()
+
+                if queue_size >= 3:
+                    speed = 1.3
+                elif queue_size == 2:
+                    speed = 1.2
+                elif queue_size == 1:
+                    speed = 1.1
+                else:
+                    speed = 1.0
+
+                print(
+                    f"Odtwarzam: {os.path.basename(file_path)} (Kolejka: {queue_size}, Prędkość: {speed}x)")
+
+                # 2. Załaduj dźwięk przez pydub
+                sound = AudioSegment.from_ogg(file_path)
+
+                # 3. Przyspiesz, jeśli trzeba
+                if speed > 1.0:
+                    sound = sound.speedup(playback_speed=speed)
+
+                # 4. Wyeksportuj do bufora w pamięci RAM
+                # Używamy formatu 'wav', ponieważ jest szybszy do załadowania
+                # dla pygame i nie wymaga ponownej kompresji.
+                with io.BytesIO() as temp_wav:
+                    sound.export(temp_wav, format="wav")
+                    temp_wav.seek(0)  # Przewiń na początek pliku w pamięci
+
+                    # 5. Załaduj z bufora i odtwórz
+                    pygame.mixer.music.load(temp_wav)
+                    pygame.mixer.music.play()
                 
-                # Czekaj, aż muzyka skończy grać (bez blokowania)
+                # 6. Czekaj na koniec odtwarzania
                 while pygame.mixer.music.get_busy() and not stop_event.is_set():
                     time.sleep(0.1)
                     
             except Exception as e:
-                print(f"BŁĄD: Nie można odtworzyć pliku audio {file_path}: {e}", file=sys.stderr)
+                print(
+                    f"BŁĄD: Nie można przetworzyć/odtworzyć pliku {file_path}: {e}", file=sys.stderr)
             finally:
                 audio_queue.task_done()
         
         pygame.mixer.quit()
         print("Odtwarzacz audio zatrzymany.")
-
 # ==============================================================================
 # KLASA WĄTKU CZYTELNIKA (READER THREAD)
 # ==============================================================================
@@ -130,26 +165,55 @@ class PlayerThread(threading.Thread):
 class ReaderThread(threading.Thread):
     """Wątek, który wykonuje OCR i dodaje napisy do kolejki."""
 
-    def __init__(self, config_path: str, regex_pattern: str, subtitle_mode: str):
+    # ZMODYFIKOWANE
+    def __init__(self, config_path: str, regex_pattern: str, app_settings: Dict[str, Any]):
         super().__init__(daemon=True)
         self.name = "ReaderThread"
         print(f"Inicjalizacja wątku czytelnika z presetem: {config_path}")
 
-        # Nowe parametry
         self.config_path = config_path
         self.regex_pattern = regex_pattern
-        self.subtitle_mode = subtitle_mode
+        self.app_settings = app_settings  # <-- NOWE
+        self.subtitle_mode = app_settings.get('subtitle_mode', 'Full Lines')
 
-        # Zmieniony bufor: z 1 na 5 (używa deque)
-        self.recent_indices: Deque[int] = deque(maxlen=5)
-
+        self.recent_indices: Deque[int] = deque(maxlen=5)  # Bufor 5 ostatnich
         self.last_ocr_text = ""
+
+        # Pobierz ustawienia OCR
+        self.ocr_scale = self.app_settings.get('ocr_scale_factor', 1.0)
+        self.ocr_grayscale = self.app_settings.get('ocr_grayscale', False)
+        self.ocr_contrast = self.app_settings.get('ocr_contrast', False)
+
+    def preprocess_image(self, image: Image.Image) -> Image.Image:
+        """Stosuje skalowanie, skalę szarości i kontrast do obrazu przed OCR."""
+        try:
+            # 1. Skalowanie (jeśli trzeba)
+            if self.ocr_scale < 1.0:
+                new_width = int(image.width * self.ocr_scale)
+                new_height = int(image.height * self.ocr_scale)
+                image = image.resize(
+                    (new_width, new_height), Image.LANCZOS)  # type: ignore
+
+            # 2. Skala szarości
+            if self.ocr_grayscale:
+                image = ImageOps.grayscale(image)
+
+            # 3. Kontrast
+            if self.ocr_contrast:
+                # Ustawienie na 2.0 mocno podbija kontrast
+                enhancer = ImageEnhance.Contrast(image)
+                image = enhancer.enhance(2.0)
+
+            return image
+        except Exception as e:
+            print(
+                f"BŁĄD: Błąd podczas preprocessingu obrazu: {e}", file=sys.stderr)
+            return image  # Zwróć oryginał w razie błędu
 
     def run(self):
         try:
             print("Wątek czytelnika uruchomiony.")
-            
-            # 1. Wczytaj konfigurację
+
             config = load_config(self.config_path)
             subtitles = load_text_file(config['text_file_path'])
             if not subtitles:
@@ -164,20 +228,25 @@ class ReaderThread(threading.Thread):
                 f"Czytelnik rozpoczyna pętlę (Tryb: {self.subtitle_mode}, Bufor: {self.recent_indices.maxlen})...")
             while not stop_event.is_set():
                 start_time = time.monotonic()
-                
-                # 2. Przechwyć i zrób OCR
+
                 image = capture_screen_region(monitor_config)
                 if not image:
                     time.sleep(capture_interval)
                     continue
 
-                ocr_text = ocr_and_clean_image(image, self.regex_pattern)
+                # 2. NOWY KROK: Preprocessing obrazu
+                processed_image = self.preprocess_image(image)
+
+                # 3. OCR
+                ocr_text = ocr_and_clean_image(
+                    processed_image, self.regex_pattern)
+
+                # ... reszta logiki (kroki 3, 4, 5, 6 z poprzedniej wersji) ...
                 if not ocr_text:
                     self.last_ocr_text = ""
                     time.sleep(capture_interval)
                     continue
-                
-                # 3. Sprawdź, czy to ten sam tekst co ostatnio (bufor)
+
                 if ocr_text == self.last_ocr_text:
                     time.sleep(capture_interval)
                     continue
@@ -185,24 +254,21 @@ class ReaderThread(threading.Thread):
                 
                 print(f"\nOCR odczytał: '{ocr_text}'")
 
-                # 4. Znajdź dopasowanie (z uwzględnieniem trybu)
                 best_match_index = find_best_match(
                     ocr_text, subtitles, self.subtitle_mode)
 
-                # 5. Jeśli znaleziono i jest *unikalne* (poza buforem 5 ostatnich) - dodaj do kolejki
-                if best_match_index is not None and best_match_index not in self.recent_indices:
+                if best_match_index is not None and best_match_index not in self.recent_indices:  # ZMODYFIKOWANE
                     print(f"Dopasowano (Indeks: {best_match_index}). Dodaję do kolejki.")
 
-                    # Dodaj do bufora
-                    self.recent_indices.append(best_match_index)
+                    self.recent_indices.append(
+                        best_match_index)  # ZMODYFIKOWANE
                     
                     line_number = best_match_index + 1
                     file_name = f"output1 ({line_number}).ogg"
                     file_path = os.path.join(audio_dir, file_name)
 
                     audio_queue.put(file_path)
-                
-                # 6. Odczekaj resztę interwału
+
                 elapsed = time.monotonic() - start_time
                 wait_time = max(0, capture_interval - elapsed)
                 time.sleep(wait_time)
@@ -256,7 +322,8 @@ def load_text_file(filepath: str) -> List[str]:
         return []
 
 def capture_screen_region(monitor_config: Dict[str, int]) -> Optional[Image.Image]:
-    """Wykonuje zrzut całego ekranu (KDE - spectacle) i kadruje go."""
+    """Wykonuje zrzut całego ekranu (KDE) przy użyciu pliku tymczasowego (w RAM) i kadruje go."""
+
     temp_file_path = None
     try:
         left = monitor_config['left']
@@ -266,18 +333,30 @@ def capture_screen_region(monitor_config: Dict[str, int]) -> Optional[Image.Imag
         
         crop_box = (left, top, left + width, top + height)
         
-        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tf:
+        # NOWA LOGIKA: Użyj /dev/shm (RAM dysk) jeśli to możliwe
+        ram_disk = '/dev/shm'
+        temp_dir = ram_disk if os.path.isdir(
+            ram_disk) and os.access(ram_disk, os.W_OK) else None
+
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False, dir=temp_dir) as tf:
             temp_file_path = tf.name
             
         command = ['spectacle', '-f', '-b', '-n', '-o', temp_file_path]
-        subprocess.run(command, check=True, timeout=2.0)
+        subprocess.run(command, check=True, timeout=2.0,
+                       stderr=subprocess.DEVNULL)  # Dodano stderr=DEVNULL
         
         with Image.open(temp_file_path) as full_screenshot:
             cropped_image = full_screenshot.crop(crop_box)
             return cropped_image.copy()
 
     except Exception as e:
-        print(f"BŁĄD: Nieoczekiwany błąd podczas przechwytywania (KDE): {e}", file=sys.stderr)
+        # Pomiń błędy timeout, zdarzają się, gdy ekran jest zablokowany
+        if isinstance(e, subprocess.TimeoutExpired):
+            print(
+                "OSTRZEŻENIE: Timeout 'spectacle' (czy ekran jest zablokowany?)", file=sys.stderr)
+        else:
+            print(
+                f"BŁĄD: Nieoczekiwany błąd podczas przechwytywania (KDE): {e}", file=sys.stderr)
         return None
     finally:
         if temp_file_path and os.path.exists(temp_file_path):
@@ -313,43 +392,35 @@ def ocr_and_clean_image(image: Image.Image, regex_pattern: str) -> str:
 def find_best_match(ocr_text: str, subtitles_list: List[str], mode: str) -> Optional[int]:
     """Znajduje najlepsze dopasowanie dla tekstu OCR w zależności od trybu."""
 
+    # ... (kod dla "Partial Lines" pozostaje bez zmian) ...
     if mode == "Partial Lines":
-        # TRYB CZĘŚCIOWY: Znajdź *wszystkie* linie pasujące częściowo z wysoką pewnością
-        # "fuzz.partial_ratio" jest dobre do znajdowania 'fragmentu' w 'całości'
-        # Używamy 90 jako progu, aby uniknąć fałszywych dopasowań (np. "Tak" pasujące do wielu linii)
-
-        # Zwiększamy próg dla bardzo krótkich tekstów OCR, aby uniknąć fałszywych dopasowań
+        # ... (bez zmian) ...
         threshold = 95 if len(ocr_text) < 15 else 90
 
         matches = []
         for i, line in enumerate(subtitles_list):
-            # Porównujemy tylko, jeśli linia napisów jest dłuższa od tekstu OCR
             if len(line) >= len(ocr_text):
                 score = fuzz.partial_ratio(ocr_text, line)
                 if score >= threshold:
                     matches.append((i, score))
 
         if len(matches) == 1:
-            # Dokładnie jedno dopasowanie - super!
             index, score = matches[0]
             print(f"Dopasowano częściowo (wynik: {score}%): Linia {index + 1}")
             return index
         elif len(matches) > 1:
-            # Wiele dopasowań - niepewność. Czekamy na kolejny fragment.
             print(
                 f"Znaleziono {len(matches)} częściowych dopasowań. Czekam na więcej tekstu.")
             return None
         else:
-            # Brak dopasowań
             print(f"Brak dopasowania częściowego (Próg: {threshold}%)")
             return None
 
     else:
-        # TRYB PEŁNY (domyślny, jak poprzednio)
+        # TRYB PEŁNY (domyślny) - ZMODYFIKOWANY
         best_score = 0
         best_index = -1
 
-        # Używamy 'token_set_ratio' - dobry na drobne błędy OCR
         for i, sub_line in enumerate(subtitles_list):
             score = fuzz.token_set_ratio(ocr_text, sub_line)
             if score > best_score:
@@ -357,6 +428,18 @@ def find_best_match(ocr_text: str, subtitles_list: List[str], mode: str) -> Opti
                 best_index = i
 
         if best_score >= MIN_MATCH_THRESHOLD:
+            # NOWA WERYFIKACJA: Sprawdź stosunek długości
+            ocr_len = len(ocr_text)
+            sub_len = len(subtitles_list[best_index])
+
+            # Jeśli tekst OCR jest o ponad 40% krótszy niż linia napisów,
+            # to prawdopodobnie złe dopasowanie (np. "Gotowi" pasujące do "Jesteśmy gotowi...")
+            # Ignoruj dla bardzo krótkich linii
+            if ocr_len < (sub_len * 0.6) and sub_len > 20:
+                print(
+                    f"Odrzucono dopasowanie (wynik: {best_score}%): Tekst OCR ('{ocr_text}') za krótki w stosunku do linii ({best_index+1}).")
+                return None
+
             print(
                 f"Dopasowano w trybie pełnym (wynik: {best_score}%): Linia {best_index + 1}")
             return best_index
@@ -364,7 +447,6 @@ def find_best_match(ocr_text: str, subtitles_list: List[str], mode: str) -> Opti
             print(
                 f"Brak dopasowania w trybie pełnym (Najlepszy wynik: {best_score}%)")
             return None
-
 # ==============================================================================
 # KLASA OKNA USTAWIEŃ
 # ==============================================================================
@@ -379,11 +461,17 @@ class SettingsDialog(tk.Toplevel):
         self.title("Ustawienia")
 
         self.settings = settings
-        self.result = None  # Przechowa zaktualizowane ustawienia
+        self.result = None
 
         # Zmienne Tkinter
         self.subtitle_mode_var = tk.StringVar(
             value=self.settings.get('subtitle_mode', 'Full Lines'))
+        self.ocr_scale_var = tk.DoubleVar(
+            value=self.settings.get('ocr_scale_factor', 1.0))
+        self.ocr_grayscale_var = tk.BooleanVar(
+            value=self.settings.get('ocr_grayscale', False))
+        self.ocr_contrast_var = tk.BooleanVar(
+            value=self.settings.get('ocr_contrast', False))
 
         frame = ttk.Frame(self, padding="10")
         frame.pack(fill=tk.BOTH, expand=True)
@@ -392,49 +480,136 @@ class SettingsDialog(tk.Toplevel):
         mode_group = ttk.LabelFrame(
             frame, text="Tryb dopasowania napisów", padding="10")
         mode_group.pack(fill=tk.X, pady=5)
-
+        # ... (Radiobuttony bez zmian) ...
         ttk.Radiobutton(
-            mode_group,
-            text="Pełne linie",
-            value="Full Lines",
-            variable=self.subtitle_mode_var
+            mode_group, text="Pełne linie", value="Full Lines", variable=self.subtitle_mode_var
+        ).pack(anchor=tk.W)
+        ttk.Radiobutton(
+            mode_group, text="Częściowe linie (eksperymentalne)", value="Partial Lines", variable=self.subtitle_mode_var
         ).pack(anchor=tk.W)
 
-        ttk.Radiobutton(
-            mode_group,
-            text="Częściowe linie (eksperymentalne)",
-            value="Partial Lines",
-            variable=self.subtitle_mode_var
-        ).pack(anchor=tk.W)
+        # --- NOWA GRUPA: Ustawienia OCR ---
+        ocr_group = ttk.LabelFrame(
+            frame, text="Wydajność i Preprocessing OCR", padding="10")
+        ocr_group.pack(fill=tk.X, pady=5)
 
-        ttk.Label(
-            mode_group,
-            text="Użyj 'Częściowe', jeśli gra wyświetla napisy w kawałkach.",
-            wraplength=300,
-            justify=tk.LEFT,
-            font=("TkDefaultFont", 9)
+        # Skalowanie
+        scale_frame = ttk.Frame(ocr_group)
+        scale_frame.pack(fill=tk.X)
+        ttk.Label(scale_frame, text="Skala obrazu:").pack(side=tk.LEFT)
+        scale_combo = ttk.Combobox(
+            scale_frame,
+            textvariable=self.ocr_scale_var,
+            values=[1.0, 0.75, 0.5],  # 100%, 75%, 50% # type: ignore
+            state="readonly",
+            width=5
+        )
+        scale_combo.pack(side=tk.LEFT, padx=5)
+        ttk.Label(scale_frame, text="(mniejsza = szybszy OCR, niższa jakość)").pack(
+            side=tk.LEFT)
+
+        # Checkboxy
+        ttk.Checkbutton(
+            ocr_group, text="Konwertuj do skali szarości", variable=self.ocr_grayscale_var
         ).pack(anchor=tk.W, pady=(5, 0))
+
+        ttk.Checkbutton(
+            ocr_group, text="Zwiększ kontrast (może pomóc z dziwnymi czcionkami)", variable=self.ocr_contrast_var
+        ).pack(anchor=tk.W)
 
         # --- Przyciski Zapisz/Anuluj ---
         button_frame = ttk.Frame(frame)
         button_frame.pack(fill=tk.X, side=tk.BOTTOM, pady=(10, 0))
+        # ... (Przyciski bez zmian) ...
+        ttk.Button(button_frame, text="Anuluj",
+                   command=self.destroy).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(button_frame, text="Zapisz",
+                   command=self.save_and_close).pack(side=tk.RIGHT)
 
-        ttk.Button(
-            button_frame, text="Anuluj", command=self.destroy
-        ).pack(side=tk.RIGHT, padx=5)
-
-        ttk.Button(
-            button_frame, text="Zapisz", command=self.save_and_close
-        ).pack(side=tk.RIGHT)
-
-        self.geometry("350x220")
-        self.grab_set()  # Zablokuj okno nadrzędne
-        self.wait_window()  # Czekaj na zamknięcie tego okna
+        self.geometry("450x380")  # Zwiększono wysokość
+        self.grab_set()
+        self.wait_window()
 
     def save_and_close(self):
         """Aktualizuje słownik ustawień i zamyka okno."""
         self.settings['subtitle_mode'] = self.subtitle_mode_var.get()
+        self.settings['ocr_scale_factor'] = self.ocr_scale_var.get()
+        self.settings['ocr_grayscale'] = self.ocr_grayscale_var.get()
+        self.settings['ocr_contrast'] = self.ocr_contrast_var.get()
+
         self.result = self.settings
+        self.destroy()
+# ==============================================================================
+# KLASA WYBORU OBSZARU
+# ==============================================================================
+
+
+class AreaSelector(tk.Toplevel):
+    """Półprzezroczyste okno do zaznaczania obszaru na ekranie."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.parent = parent
+        self.geometry = None  # (x, y, w, h)
+
+        # Zmienne do rysowania
+        self.start_x = None
+        self.start_y = None
+        self.rect = None
+
+        # Konfiguracja okna
+        self.attributes('-fullscreen', True)
+        self.attributes('-alpha', 0.2)  # Lekko widoczne tło
+        self.attributes('-topmost', True)  # Zawsze na wierzchu
+
+        # Ustawienie "przeklikiwalności" (tylko Linux/X11, może nie działać na Wayland)
+        # Niestety, Wayland jest tu trudny. Ale na KDE powinno działać.
+
+        # Płótno do rysowania
+        self.canvas = tk.Canvas(self, cursor="cross", bg="black")
+        self.canvas.pack(fill=tk.BOTH, expand=True)
+
+        # Powiązania myszy
+        self.canvas.bind("<ButtonPress-1>", self.on_mouse_down)
+        self.canvas.bind("<B1-Motion>", self.on_mouse_drag)
+        self.canvas.bind("<ButtonRelease-1>", self.on_mouse_up)
+
+        # Powiązanie klawisza Escape
+        self.bind("<Escape>", lambda e: self.destroy())
+
+        print("Gotowy do wyboru obszaru. Naciśnij Esc aby anulować.")
+        self.grab_set()
+        self.wait_window()
+
+    def on_mouse_down(self, event):
+        self.start_x = event.x_root
+        self.start_y = event.y_root
+        if self.rect:
+            self.canvas.delete(self.rect)
+        self.rect = self.canvas.create_rectangle(
+            self.start_x, self.start_y, self.start_x, self.start_y, outline='red', width=2)
+
+    def on_mouse_drag(self, event):
+        cur_x, cur_y = (event.x_root, event.y_root)
+        self.canvas.coords(self.rect, self.start_x, self.start_y, cur_x, cur_y)  # type: ignore
+
+    def on_mouse_up(self, event):
+        end_x, end_y = (event.x_root, event.y_root)
+
+        # Popraw współrzędne (zawsze od lewego-górnego do prawego-dolnego)
+        x = min(self.start_x, end_x)  # type: ignore
+        y = min(self.start_y, end_y)  # type: ignore
+        w = abs(self.start_x - end_x)
+        h = abs(self.start_y - end_y)
+
+        if w > 10 and h > 10:  # Minimalny rozmiar
+            self.geometry = {'top': y, 'left': x, 'width': w, 'height': h}
+            print(f"Wybrano geometrię: {self.geometry}")
+        else:
+            print("Wybór anulowany (za mały obszar).")
+            self.geometry = None
+
+        self.grab_release()
         self.destroy()
 
 # ==============================================================================
@@ -507,6 +682,7 @@ class GameReaderApp:
         file_menu = tk.Menu(menubar, tearoff=0)
         
         file_menu.add_command(label="Wybierz nowy preset...", command=self.select_new_preset)
+        file_menu.add_command(label="Wybierz obszar dla aktywnego presetu...", command=self.select_area_for_preset)
         file_menu.add_command(label="Ustawienia...",
                               command=self.open_settings_dialog)
         file_menu.add_separator()
@@ -514,6 +690,47 @@ class GameReaderApp:
         
         menubar.add_cascade(label="Plik", menu=file_menu)
         self.root.config(menu=menubar)
+
+    def select_area_for_preset(self):
+        """Uruchamia selektor obszaru i nadpisuje plik presetu."""
+        preset_path = self.preset_var.get()
+        if not preset_path or not os.path.exists(preset_path):
+            messagebox.showerror(
+                "Błąd", "Wybierz prawidłowy plik presetu z listy, zanim wybierzesz obszar.")
+            return
+
+        # Ukryj główne okno, aby nie przeszkadzało
+        self.root.withdraw()
+        time.sleep(0.5)  # Daj systemowi chwilę na ukrycie okna
+
+        try:
+            selector = AreaSelector(self.root)
+            new_geometry = selector.geometry  # Pobierz wynik (None lub dict)
+        finally:
+            # Pokaż główne okno z powrotem
+            self.root.deiconify()
+
+        if new_geometry:
+            try:
+                # Wczytaj, zmodyfikuj, zapisz
+                with open(preset_path, 'r', encoding='utf-8') as f:
+                    preset_data = json.load(f)
+
+                # Nadpisz sekcję 'monitor'
+                preset_data['monitor'] = new_geometry
+
+                with open(preset_path, 'w', encoding='utf-8') as f:
+                    json.dump(preset_data, f, indent=4)
+
+                messagebox.showinfo(
+                    "Sukces", f"Obszar dla presetu '{os.path.basename(preset_path)}' został zaktualizowany.")
+            except Exception as e:
+                print(
+                    f"BŁĄD: Nie można zapisać presetu {preset_path}: {e}", file=sys.stderr)
+                messagebox.showerror(
+                    "Błąd zapisu", f"Nie można było zapisać pliku presetu: {e}")
+        else:
+            print("Wybór obszaru anulowany.")
 
     def open_settings_dialog(self):
         """Otwiera okno ustawień i zapisuje zmiany."""
@@ -529,13 +746,16 @@ class GameReaderApp:
         config = {
             'recent_presets': [],
             'last_regex': r"^[\w\s]+:",
-            'subtitle_mode': 'Full Lines'  # Domyślna wartość
+            'subtitle_mode': 'Full Lines',
+            'ocr_scale_factor': 1.0,
+            'ocr_grayscale': False,
+            'ocr_contrast': False
         }
 
         try:
             with open(APP_CONFIG_FILE, 'r', encoding='utf-8') as f:
                 config_from_file = json.load(f)
-                config.update(config_from_file)  # Nadpisz domyślne wczytanymi
+                config.update(config_from_file)
         except FileNotFoundError:
             print("Plik app_config.json nie znaleziony, tworzę domyślny.")
         except json.JSONDecodeError:
@@ -582,8 +802,6 @@ class GameReaderApp:
     def start_reading(self):
         config_path = self.preset_var.get()
         regex_pattern = self.regex_var.get()
-        subtitle_mode = self.settings.get(
-            'subtitle_mode', 'Full Lines')  # <-- NOWA LINIA
         
         if not config_path or not os.path.exists(config_path):
             messagebox.showerror("Błąd", "Nie wybrano prawidłowego pliku presetu.")
@@ -600,8 +818,9 @@ class GameReaderApp:
         
         # Uruchom wątki
         self.player_thread = PlayerThread()
+        # Przekaż CAŁY słownik ustawień do wątku czytelnika
         self.reader_thread = ReaderThread(
-            config_path, regex_pattern, subtitle_mode)  # <-- ZMODYFIKOWANE
+            config_path, regex_pattern, self.settings)  # <-- ZMODYFIKOWANE
         
         self.player_thread.start()
         self.reader_thread.start()

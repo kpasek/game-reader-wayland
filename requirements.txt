@@ -2,3 +2,5 @@ Pillow
 pytesseract
 pygame
 thefuzz
+pydub
+audioop-lts

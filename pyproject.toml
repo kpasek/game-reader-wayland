@@ -22,6 +22,8 @@ dependencies = [
     "pytesseract",
     "pygame",
     "thefuzz",
+    "pydub",
+    "audioop-lts",
 ]
 
 [project.scripts]

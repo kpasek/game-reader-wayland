@@ -3,3 +3,4 @@ build
 .venv
 preset.json
 app_config.json
+dist
