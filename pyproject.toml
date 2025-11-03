@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "game_reader_wayland"
+version = "1.0.0"
+authors = [
+    { name = "Kamil Pasek", email = "kamilpasek@gmail.com" },
+]
+description = "Aplikacja lektora do gier dla Wayland"
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+]
+# Wymagania są ładowane z requirements.txt
+dependencies = [
+    "Pillow",
+    "pytesseract",
+    "pygame",
+    "thefuzz",
+]
+
+[project.scripts]
+# To tworzy polecenie "game_reader" w systemie
+game_reader = "game_reader_gui:main"

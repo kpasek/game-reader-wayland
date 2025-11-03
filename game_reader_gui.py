@@ -28,7 +28,9 @@ import tempfile
 import threading
 import queue
 import re
-from typing import List, Dict, Any, Optional
+import argparse
+from typing import Deque, List, Dict, Any, Optional
+from collections import deque
 
 # --- Importy GUI (Tkinter) ---
 try:
@@ -127,14 +129,21 @@ class PlayerThread(threading.Thread):
 
 class ReaderThread(threading.Thread):
     """Wątek, który wykonuje OCR i dodaje napisy do kolejki."""
-    def __init__(self, config_path: str, regex_pattern: str):
+
+    def __init__(self, config_path: str, regex_pattern: str, subtitle_mode: str):
         super().__init__(daemon=True)
         self.name = "ReaderThread"
+        print(f"Inicjalizacja wątku czytelnika z presetem: {config_path}")
+
+        # Nowe parametry
         self.config_path = config_path
         self.regex_pattern = regex_pattern
-        self.last_added_index = -1
+        self.subtitle_mode = subtitle_mode
+
+        # Zmieniony bufor: z 1 na 5 (używa deque)
+        self.recent_indices: Deque[int] = deque(maxlen=5)
+
         self.last_ocr_text = ""
-        print(f"Inicjalizacja wątku czytelnika z presetem: {config_path}")
 
     def run(self):
         try:
@@ -151,7 +160,8 @@ class ReaderThread(threading.Thread):
             capture_interval = config.get('CAPTURE_INTERVAL', 0.5)
             audio_dir = config['audio_dir']
 
-            print("Czytelnik rozpoczyna pętlę monitorowania...")
+            print(
+                f"Czytelnik rozpoczyna pętlę (Tryb: {self.subtitle_mode}, Bufor: {self.recent_indices.maxlen})...")
             while not stop_event.is_set():
                 start_time = time.monotonic()
                 
@@ -175,19 +185,21 @@ class ReaderThread(threading.Thread):
                 
                 print(f"\nOCR odczytał: '{ocr_text}'")
 
-                # 4. Znajdź dopasowanie
-                best_match_index = find_best_match(ocr_text, subtitles)
+                # 4. Znajdź dopasowanie (z uwzględnieniem trybu)
+                best_match_index = find_best_match(
+                    ocr_text, subtitles, self.subtitle_mode)
 
-                # 5. Jeśli znaleziono i jest *unikalne* - dodaj do kolejki
-                if best_match_index is not None and best_match_index != self.last_added_index:
+                # 5. Jeśli znaleziono i jest *unikalne* (poza buforem 5 ostatnich) - dodaj do kolejki
+                if best_match_index is not None and best_match_index not in self.recent_indices:
                     print(f"Dopasowano (Indeks: {best_match_index}). Dodaję do kolejki.")
-                    self.last_added_index = best_match_index
+
+                    # Dodaj do bufora
+                    self.recent_indices.append(best_match_index)
                     
                     line_number = best_match_index + 1
                     file_name = f"output1 ({line_number}).ogg"
                     file_path = os.path.join(audio_dir, file_name)
-                    
-                    # Dodaj ścieżkę do kolejki audio
+
                     audio_queue.put(file_path)
                 
                 # 6. Odczekaj resztę interwału
@@ -197,10 +209,8 @@ class ReaderThread(threading.Thread):
 
         except Exception as e:
             print(f"KRYTYCZNY BŁĄD w wątku czytelnika: {e}", file=sys.stderr)
-            # W prawdziwej aplikacji można by tu użyć callbacku do GUI, by poinformować użytkownika
         finally:
             print("Wątek czytelnika zatrzymany.")
-
 # ==============================================================================
 # FUNKCJE POMOCNICZE (Z POPRZEDNIEJ WERSJI + MODYFIKACJE)
 # ==============================================================================
@@ -299,37 +309,151 @@ def ocr_and_clean_image(image: Image.Image, regex_pattern: str) -> str:
         print(f"BŁĄD: Błąd podczas OCR: {e}", file=sys.stderr)
         return ""
 
-def find_best_match(ocr_text: str, subtitles_list: List[str]) -> Optional[int]:
-    """Znajduje najlepsze dopasowanie dla tekstu OCR."""
-    best_score = 0
-    best_index = -1
 
-    for i, sub_line in enumerate(subtitles_list):
-        score = fuzz.token_set_ratio(ocr_text, sub_line)
-        if score > best_score:
-            best_score = score
-            best_index = i
+def find_best_match(ocr_text: str, subtitles_list: List[str], mode: str) -> Optional[int]:
+    """Znajduje najlepsze dopasowanie dla tekstu OCR w zależności od trybu."""
 
-    if best_score >= MIN_MATCH_THRESHOLD:
-        print(f"Dopasowano (wynik: {best_score}%): Linia {best_index + 1}")
-        return best_index
+    if mode == "Partial Lines":
+        # TRYB CZĘŚCIOWY: Znajdź *wszystkie* linie pasujące częściowo z wysoką pewnością
+        # "fuzz.partial_ratio" jest dobre do znajdowania 'fragmentu' w 'całości'
+        # Używamy 90 jako progu, aby uniknąć fałszywych dopasowań (np. "Tak" pasujące do wielu linii)
+
+        # Zwiększamy próg dla bardzo krótkich tekstów OCR, aby uniknąć fałszywych dopasowań
+        threshold = 95 if len(ocr_text) < 15 else 90
+
+        matches = []
+        for i, line in enumerate(subtitles_list):
+            # Porównujemy tylko, jeśli linia napisów jest dłuższa od tekstu OCR
+            if len(line) >= len(ocr_text):
+                score = fuzz.partial_ratio(ocr_text, line)
+                if score >= threshold:
+                    matches.append((i, score))
+
+        if len(matches) == 1:
+            # Dokładnie jedno dopasowanie - super!
+            index, score = matches[0]
+            print(f"Dopasowano częściowo (wynik: {score}%): Linia {index + 1}")
+            return index
+        elif len(matches) > 1:
+            # Wiele dopasowań - niepewność. Czekamy na kolejny fragment.
+            print(
+                f"Znaleziono {len(matches)} częściowych dopasowań. Czekam na więcej tekstu.")
+            return None
+        else:
+            # Brak dopasowań
+            print(f"Brak dopasowania częściowego (Próg: {threshold}%)")
+            return None
+
     else:
-        print(f"Brak dopasowania (Najlepszy wynik: {best_score}%)")
-        return None
+        # TRYB PEŁNY (domyślny, jak poprzednio)
+        best_score = 0
+        best_index = -1
+
+        # Używamy 'token_set_ratio' - dobry na drobne błędy OCR
+        for i, sub_line in enumerate(subtitles_list):
+            score = fuzz.token_set_ratio(ocr_text, sub_line)
+            if score > best_score:
+                best_score = score
+                best_index = i
+
+        if best_score >= MIN_MATCH_THRESHOLD:
+            print(
+                f"Dopasowano w trybie pełnym (wynik: {best_score}%): Linia {best_index + 1}")
+            return best_index
+        else:
+            print(
+                f"Brak dopasowania w trybie pełnym (Najlepszy wynik: {best_score}%)")
+            return None
+
+# ==============================================================================
+# KLASA OKNA USTAWIEŃ
+# ==============================================================================
+
+
+class SettingsDialog(tk.Toplevel):
+    """Okno dialogowe do edycji ustawień aplikacji."""
+
+    def __init__(self, parent, settings: Dict[str, Any]):
+        super().__init__(parent)
+        self.transient(parent)
+        self.title("Ustawienia")
+
+        self.settings = settings
+        self.result = None  # Przechowa zaktualizowane ustawienia
+
+        # Zmienne Tkinter
+        self.subtitle_mode_var = tk.StringVar(
+            value=self.settings.get('subtitle_mode', 'Full Lines'))
+
+        frame = ttk.Frame(self, padding="10")
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        # --- Grupa Trybu Napisów ---
+        mode_group = ttk.LabelFrame(
+            frame, text="Tryb dopasowania napisów", padding="10")
+        mode_group.pack(fill=tk.X, pady=5)
+
+        ttk.Radiobutton(
+            mode_group,
+            text="Pełne linie",
+            value="Full Lines",
+            variable=self.subtitle_mode_var
+        ).pack(anchor=tk.W)
+
+        ttk.Radiobutton(
+            mode_group,
+            text="Częściowe linie (eksperymentalne)",
+            value="Partial Lines",
+            variable=self.subtitle_mode_var
+        ).pack(anchor=tk.W)
+
+        ttk.Label(
+            mode_group,
+            text="Użyj 'Częściowe', jeśli gra wyświetla napisy w kawałkach.",
+            wraplength=300,
+            justify=tk.LEFT,
+            font=("TkDefaultFont", 9)
+        ).pack(anchor=tk.W, pady=(5, 0))
+
+        # --- Przyciski Zapisz/Anuluj ---
+        button_frame = ttk.Frame(frame)
+        button_frame.pack(fill=tk.X, side=tk.BOTTOM, pady=(10, 0))
+
+        ttk.Button(
+            button_frame, text="Anuluj", command=self.destroy
+        ).pack(side=tk.RIGHT, padx=5)
+
+        ttk.Button(
+            button_frame, text="Zapisz", command=self.save_and_close
+        ).pack(side=tk.RIGHT)
+
+        self.geometry("350x220")
+        self.grab_set()  # Zablokuj okno nadrzędne
+        self.wait_window()  # Czekaj na zamknięcie tego okna
+
+    def save_and_close(self):
+        """Aktualizuje słownik ustawień i zamyka okno."""
+        self.settings['subtitle_mode'] = self.subtitle_mode_var.get()
+        self.result = self.settings
+        self.destroy()
 
 # ==============================================================================
 # KLASA APLIKACJI GUI (TKINTER)
 # ==============================================================================
 
 class GameReaderApp:
-    def __init__(self, root: tk.Tk):
+    def __init__(self, root: tk.Tk, autostart_preset: Optional[str], game_command: Optional[List[str]]):        
         self.root = root
         self.root.title("Game Reader (Wayland)")
         self.root.geometry("500x200")
         
-        self.recent_presets = []
-        self.last_regex = r"^[\w\s]+:" # Domyślny regex: usuwa "IMIĘ: "
-        
+        # Zapisz argumenty startowe
+        self.autostart_preset = autostart_preset
+        self.game_command = game_command
+        self.game_process = None  # Do śledzenia procesu gry
+
+        self.settings = {}  # Zostanie wypełnione przez load_app_config
+
         self.reader_thread: Optional[ReaderThread] = None
         self.player_thread: Optional[PlayerThread] = None
 
@@ -363,61 +487,86 @@ class GameReaderApp:
         self.stop_button.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5)
         
         # --- Załaduj konfigurację ---
-        self.load_app_config()
+        self.settings = self.load_app_config()  # ZMODYFIKOWANE
+        self.update_gui_from_config()
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+        # --- Logika Autostartu ---
+        if self.autostart_preset:
+            if os.path.exists(self.autostart_preset):
+                print(f"Wykryto autostart z presetem: {self.autostart_preset}")
+                self.preset_var.set(self.autostart_preset)
+                # Użyj 'after', aby dać GUI chwilę na "złapanie oddechu"
+                self.root.after(100, self.start_reading)
+            else:
+                print(
+                    f"BŁĄD Autostartu: Plik presetu nie istnieje: {self.autostart_preset}")
 
     def create_menu(self):
         menubar = tk.Menu(self.root)
         file_menu = tk.Menu(menubar, tearoff=0)
         
         file_menu.add_command(label="Wybierz nowy preset...", command=self.select_new_preset)
+        file_menu.add_command(label="Ustawienia...",
+                              command=self.open_settings_dialog)
         file_menu.add_separator()
         file_menu.add_command(label="Wyjdź", command=self.on_closing)
         
         menubar.add_cascade(label="Plik", menu=file_menu)
         self.root.config(menu=menubar)
 
-    def load_app_config(self):
-        """Wczytuje ostatnio używane presety i regex z pliku JSON."""
+    def open_settings_dialog(self):
+        """Otwiera okno ustawień i zapisuje zmiany."""
+        dialog = SettingsDialog(
+            self.root, self.settings.copy())  # type: ignore
+        if dialog.result:
+            self.settings = dialog.result  # Pobierz zaktualizowane
+            self.save_app_config()  # Zapisz do pliku
+            print("Zapisano nowe ustawienia.")
+
+    def load_app_config(self) -> Dict[str, Any]:
+        """Wczytuje konfigurację aplikacji i ZWRACA ją."""
+        config = {
+            'recent_presets': [],
+            'last_regex': r"^[\w\s]+:",
+            'subtitle_mode': 'Full Lines'  # Domyślna wartość
+        }
+
         try:
             with open(APP_CONFIG_FILE, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-                self.recent_presets = config.get('recent_presets', [])
-                self.last_regex = config.get('last_regex', r"^[\w\s]+:")
+                config_from_file = json.load(f)
+                config.update(config_from_file)  # Nadpisz domyślne wczytanymi
         except FileNotFoundError:
             print("Plik app_config.json nie znaleziony, tworzę domyślny.")
         except json.JSONDecodeError:
             print("Błąd odczytu app_config.json, używam domyślnych.")
             
-        self.update_gui_from_config()
+        return config
 
     def save_app_config(self, new_preset: Optional[str] = None):
         """Zapisuje listę presetów i regex do pliku JSON."""
         if new_preset:
-            if new_preset in self.recent_presets:
-                self.recent_presets.remove(new_preset) # Przesuń na górę
-            self.recent_presets.insert(0, new_preset)
-            self.recent_presets = self.recent_presets[:10] # Ogranicz do 10
+            if new_preset in self.settings['recent_presets']:
+                self.settings['recent_presets'].remove(
+                    new_preset)  # Przesuń na górę
+            self.settings['recent_presets'].insert(0, new_preset)
+            # Ogranicz do 10
+            self.settings['recent_presets'] = self.settings['recent_presets'][:10]
             
-        self.last_regex = self.regex_var.get()
-            
-        config = {
-            'recent_presets': self.recent_presets,
-            'last_regex': self.last_regex
-        }
-        
+        self.settings['last_regex'] = self.regex_var.get()
+
         try:
             with open(APP_CONFIG_FILE, 'w', encoding='utf-8') as f:
-                json.dump(config, f, indent=2)
+                json.dump(self.settings, f, indent=2)
         except Exception as e:
             print(f"Błąd zapisu app_config.json: {e}", file=sys.stderr)
 
     def update_gui_from_config(self):
-        """Aktualizuje Combobox i pole Regex na podstawie wczytanej konfiguracji."""
-        self.preset_combo['values'] = self.recent_presets
-        if self.recent_presets:
-            self.preset_var.set(self.recent_presets[0])
-        self.regex_var.set(self.last_regex)
+        """Aktualizuje GUI na podstawie wczytanego self.settings."""
+        self.preset_combo['values'] = self.settings.get('recent_presets', [])
+        if self.settings.get('recent_presets'):
+            self.preset_var.set(self.settings['recent_presets'][0])
+        self.regex_var.set(self.settings.get('last_regex', r"^[\w\s]+:"))
 
     def select_new_preset(self):
         """Otwiera dialog wyboru pliku i dodaje go do listy."""
@@ -433,12 +582,14 @@ class GameReaderApp:
     def start_reading(self):
         config_path = self.preset_var.get()
         regex_pattern = self.regex_var.get()
+        subtitle_mode = self.settings.get(
+            'subtitle_mode', 'Full Lines')  # <-- NOWA LINIA
         
         if not config_path or not os.path.exists(config_path):
             messagebox.showerror("Błąd", "Nie wybrano prawidłowego pliku presetu.")
             return
 
-        # Zapisz obecne ustawienia jako domyślne na następny raz
+        # Zapisz obecne ustawienia
         self.save_app_config()
 
         # Wyczyść flagę stop i kolejkę
@@ -449,12 +600,24 @@ class GameReaderApp:
         
         # Uruchom wątki
         self.player_thread = PlayerThread()
-        self.reader_thread = ReaderThread(config_path, regex_pattern)
+        self.reader_thread = ReaderThread(
+            config_path, regex_pattern, subtitle_mode)  # <-- ZMODYFIKOWANE
         
         self.player_thread.start()
         self.reader_thread.start()
         
         self.toggle_ui_state(running=True)
+
+        # Uruchom grę, jeśli została podana w argumentach
+        if self.game_command and not self.game_process:
+            try:
+                print(
+                    f"Uruchamianie procesu gry: {' '.join(self.game_command)}")
+                self.game_process = subprocess.Popen(self.game_command)
+            except Exception as e:
+                print(f"BŁĄD: Nie można uruchomić gry: {e}", file=sys.stderr)
+                messagebox.showerror(
+                    "Błąd uruchamiania gry", f"Nie można uruchomić polecenia: {e}")
 
     def stop_reading(self):
         print("Wysyłanie sygnału stop...")
@@ -488,32 +651,87 @@ class GameReaderApp:
 
     def on_closing(self):
         """Obsługuje zamknięcie okna."""
+        print("Zamykanie aplikacji...")
+
+        # 1. Zatrzymaj wątki czytelnika i odtwarzacza
         if self.reader_thread and self.reader_thread.is_alive():
-            print("Zamykanie - zatrzymywanie wątków...")
+            print("Zatrzymywanie wątków...")
             self.stop_reading()
+
+        # 2. Zatrzymaj proces gry, jeśli my go uruchomiliśmy
+        if self.game_process:
+            if self.game_process.poll() is None:  # Sprawdź, czy proces nadal działa
+                print("Zatrzymywanie procesu gry...")
+                try:
+                    self.game_process.terminate()  # Wyślij SIGTERM
+                    # Daj mu 3s na zamknięcie
+                    self.game_process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    print(
+                        "Proces gry nie odpowiedział, wymuszam zamknięcie (SIGKILL)...")
+                    self.game_process.kill()  # Wyślij SIGKILL
+                except Exception as e:
+                    print(f"Błąd podczas zamykania gry: {e}", file=sys.stderr)
+            self.game_process = None
+
+        # 3. Zniszcz okno GUI
         self.root.destroy()
 
 # ==============================================================================
 # GŁÓWNA FUNKCJA URUCHOMIENIOWA
 # ==============================================================================
 
+# ==============================================================================
+# GŁÓWNA FUNKCJA URUCHOMIENIOWA (NOWA)
+# ==============================================================================
+
 def main():
+    # --- Parser argumentów ---
+    parser = argparse.ArgumentParser(description="Game Reader dla Wayland.")
+    parser.add_argument(
+        '--preset',
+        type=str,
+        help="Ścieżka do pliku presetu (.json) do automatycznego wczytania."
+    )
+    # Używamy 'nargs' aby zebrać wszystkie pozostałe argumenty jako polecenie gry
+    parser.add_argument(
+        'game_command',
+        nargs=argparse.REMAINDER,
+        help="Polecenie uruchomienia gry (np. %command% ze Steam)."
+    )
+    
+    args = parser.parse_args()
+    
+    autostart_preset = args.preset
+    game_command = args.game_command
+    
+    # Obsługa '--' (częste w Steam, np. --exec %command%)
+    if game_command and game_command[0] == '--':
+        game_command.pop(0)
+    
+    if not game_command:
+        game_command = None
+        
+    # --- Sprawdzenie zależności ---
     if not check_dependencies():
         print("\nNie spełniono zależności. Zamykanie.", file=sys.stderr)
-        # Pokaż błąd także w okienku, jeśli tkinter jest dostępny
         try:
             root = tk.Tk()
-            root.withdraw() # Ukryj główne okno
+            root.withdraw()
             messagebox.showerror("Błąd zależności", "Nie znaleziono wymaganych programów (np. spectacle, tesseract).\nZainstaluj je i spróbuj ponownie.\n\nSzczegóły znajdziesz w konsoli.")
             root.destroy()
         except tk.TclError:
-            pass # Nie można nawet uruchomić tkinter
+            pass
         sys.exit(1)
 
+    # --- Uruchomienie GUI ---
     print("Uruchamianie aplikacji GUI...")
     root = tk.Tk()
-    app = GameReaderApp(root)
+    app = GameReaderApp(root, autostart_preset, game_command)
     root.mainloop()
+
+if __name__ == "__main__":
+    main()
 
 if __name__ == "__main__":
     main()

@@ -1,0 +1,4 @@
+Pillow
+pytesseract
+pygame
+thefuzz
