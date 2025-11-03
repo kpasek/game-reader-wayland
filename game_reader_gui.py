@@ -45,7 +45,7 @@ except ImportError:
 
 # --- Importowanie zależności (jak poprzednio) ---
 try:
-    from PIL import Image, ImageOps, ImageEnhance
+    from PIL import Image, ImageOps, ImageEnhance, ImageTk
 except ImportError:
     print("Błąd: Nie znaleziono biblioteki 'Pillow'. Zainstaluj ją: pip install Pillow", file=sys.stderr)
     sys.exit(1)
@@ -102,7 +102,6 @@ class PlayerThread(threading.Thread):
         
         while not stop_event.is_set():
             try:
-                # Czekaj na element w kolejce
                 file_path = audio_queue.get(timeout=0.5)
             except queue.Empty:
                 continue
@@ -112,8 +111,10 @@ class PlayerThread(threading.Thread):
                 audio_queue.task_done()
                 continue
             
+            # Twórz bufor poza blokiem try, aby 'finally' zawsze miało do niego dostęp
+            temp_wav = io.BytesIO()
             try:
-                # 1. Sprawdź rozmiar kolejki (PRZED pobraniem elementu)
+                # 1. Sprawdź rozmiar kolejki
                 queue_size = audio_queue.qsize()
 
                 if queue_size >= 3:
@@ -135,18 +136,15 @@ class PlayerThread(threading.Thread):
                 if speed > 1.0:
                     sound = sound.speedup(playback_speed=speed)
 
-                # 4. Wyeksportuj do bufora w pamięci RAM
-                # Używamy formatu 'wav', ponieważ jest szybszy do załadowania
-                # dla pygame i nie wymaga ponownej kompresji.
-                with io.BytesIO() as temp_wav:
-                    sound.export(temp_wav, format="wav")
-                    temp_wav.seek(0)  # Przewiń na początek pliku w pamięci
+                # 4. Wyeksportuj do bufora (BEZ 'WITH')
+                sound.export(temp_wav, format="wav")
+                temp_wav.seek(0)
 
-                    # 5. Załaduj z bufora i odtwórz
-                    pygame.mixer.music.load(temp_wav)
-                    pygame.mixer.music.play()
+                # 5. Załaduj z bufora i odtwórz
+                pygame.mixer.music.load(temp_wav)
+                pygame.mixer.music.play()
                 
-                # 6. Czekaj na koniec odtwarzania
+                # 6. Czekaj na koniec odtwarzania (bufor 'temp_wav' jest wciąż otwarty)
                 while pygame.mixer.music.get_busy() and not stop_event.is_set():
                     time.sleep(0.1)
                     
@@ -154,6 +152,8 @@ class PlayerThread(threading.Thread):
                 print(
                     f"BŁĄD: Nie można przetworzyć/odtworzyć pliku {file_path}: {e}", file=sys.stderr)
             finally:
+                # 7. ZAWSZE zamknij bufor i oznacz zadanie jako wykonane
+                temp_wav.close()
                 audio_queue.task_done()
         
         pygame.mixer.quit()
@@ -321,19 +321,11 @@ def load_text_file(filepath: str) -> List[str]:
         print(f"BŁĄD: Nie można wczytać pliku {filepath}: {e}", file=sys.stderr)
         return []
 
-def capture_screen_region(monitor_config: Dict[str, int]) -> Optional[Image.Image]:
-    """Wykonuje zrzut całego ekranu (KDE) przy użyciu pliku tymczasowego (w RAM) i kadruje go."""
 
+def _capture_fullscreen_image() -> Optional[Image.Image]:
+    """Wykonuje zrzut całego ekranu (KDE) przy użyciu pliku tymczasowego (w RAM)."""
     temp_file_path = None
     try:
-        left = monitor_config['left']
-        top = monitor_config['top']
-        width = monitor_config['width']
-        height = monitor_config['height']
-        
-        crop_box = (left, top, left + width, top + height)
-        
-        # NOWA LOGIKA: Użyj /dev/shm (RAM dysk) jeśli to możliwe
         ram_disk = '/dev/shm'
         temp_dir = ram_disk if os.path.isdir(
             ram_disk) and os.access(ram_disk, os.W_OK) else None
@@ -343,14 +335,12 @@ def capture_screen_region(monitor_config: Dict[str, int]) -> Optional[Image.Imag
             
         command = ['spectacle', '-f', '-b', '-n', '-o', temp_file_path]
         subprocess.run(command, check=True, timeout=2.0,
-                       stderr=subprocess.DEVNULL)  # Dodano stderr=DEVNULL
+                       stderr=subprocess.DEVNULL)
         
-        with Image.open(temp_file_path) as full_screenshot:
-            cropped_image = full_screenshot.crop(crop_box)
-            return cropped_image.copy()
+        # Zwróć obiekt obrazu, nie zamykaj go od razu
+        return Image.open(temp_file_path)
 
     except Exception as e:
-        # Pomiń błędy timeout, zdarzają się, gdy ekran jest zablokowany
         if isinstance(e, subprocess.TimeoutExpired):
             print(
                 "OSTRZEŻENIE: Timeout 'spectacle' (czy ekran jest zablokowany?)", file=sys.stderr)
@@ -359,11 +349,37 @@ def capture_screen_region(monitor_config: Dict[str, int]) -> Optional[Image.Imag
                 f"BŁĄD: Nieoczekiwany błąd podczas przechwytywania (KDE): {e}", file=sys.stderr)
         return None
     finally:
+        # Posprzątaj plik tymczasowy
         if temp_file_path and os.path.exists(temp_file_path):
             try:
                 os.remove(temp_file_path)
             except OSError:
                 pass
+
+
+def capture_screen_region(monitor_config: Dict[str, int]) -> Optional[Image.Image]:
+    """Wykonuje zrzut całego ekranu i kadruje go do pożądanego regionu."""
+    try:
+        left = monitor_config['left']
+        top = monitor_config['top']
+        width = monitor_config['width']
+        height = monitor_config['height']
+
+        crop_box = (left, top, left + width, top + height)
+
+        # 1. Zrób pełny zrzut ekranu
+        with _capture_fullscreen_image() as full_screenshot:  # type: ignore
+            if not full_screenshot:
+                return None
+
+            # 2. Wykadruj obraz i zwróć jego kopię
+            cropped_image = full_screenshot.crop(crop_box)
+            return cropped_image.copy()
+
+    except Exception as e:
+        print(
+            f"BŁĄD: Błąd podczas kadrowania przechwyconego obrazu: {e}", file=sys.stderr)
+        return None
 
 def ocr_and_clean_image(image: Image.Image, regex_pattern: str) -> str:
     """Wykonuje OCR i usuwa tekst pasujący do regex."""
@@ -542,12 +558,10 @@ class SettingsDialog(tk.Toplevel):
 # ==============================================================================
 # KLASA WYBORU OBSZARU
 # ==============================================================================
-
-
 class AreaSelector(tk.Toplevel):
-    """Półprzezroczyste okno do zaznaczania obszaru na ekranie."""
+    """Okno ze zrzutem ekranu do zaznaczania obszaru."""
 
-    def __init__(self, parent):
+    def __init__(self, parent, screenshot_image: Image.Image):
         super().__init__(parent)
         self.parent = parent
         self.geometry = None  # (x, y, w, h)
@@ -559,15 +573,18 @@ class AreaSelector(tk.Toplevel):
 
         # Konfiguracja okna
         self.attributes('-fullscreen', True)
-        self.attributes('-alpha', 0.2)  # Lekko widoczne tło
         self.attributes('-topmost', True)  # Zawsze na wierzchu
 
-        # Ustawienie "przeklikiwalności" (tylko Linux/X11, może nie działać na Wayland)
-        # Niestety, Wayland jest tu trudny. Ale na KDE powinno działać.
+        # Konwertuj obraz PIL na obraz Tkinter
+        # WAŻNE: Musimy trzymać referencję (self.bg_tk), inaczej Python go usunie!
+        self.bg_tk = ImageTk.PhotoImage(screenshot_image)
 
         # Płótno do rysowania
-        self.canvas = tk.Canvas(self, cursor="cross", bg="black")
+        self.canvas = tk.Canvas(self, cursor="cross")
         self.canvas.pack(fill=tk.BOTH, expand=True)
+
+        # Ustaw zrzut ekranu jako tło płótna
+        self.canvas.create_image(0, 0, image=self.bg_tk, anchor=tk.NW)
 
         # Powiązania myszy
         self.canvas.bind("<ButtonPress-1>", self.on_mouse_down)
@@ -577,32 +594,32 @@ class AreaSelector(tk.Toplevel):
         # Powiązanie klawisza Escape
         self.bind("<Escape>", lambda e: self.destroy())
 
-        print("Gotowy do wyboru obszaru. Naciśnij Esc aby anulować.")
+        print("Gotowy do wyboru obszaru. Narysuj prostokąt. Naciśnij Esc aby anulować.")
         self.grab_set()
         self.wait_window()
 
     def on_mouse_down(self, event):
-        self.start_x = event.x_root
-        self.start_y = event.y_root
+        # Współrzędne są teraz względem płótna (czyli ekranu)
+        self.start_x = event.x
+        self.start_y = event.y
         if self.rect:
             self.canvas.delete(self.rect)
         self.rect = self.canvas.create_rectangle(
-            self.start_x, self.start_y, self.start_x, self.start_y, outline='red', width=2)
+            self.start_x, self.start_y, self.start_x, self.start_y, outline='red', width=3, dash=(5, 2))
 
     def on_mouse_drag(self, event):
-        cur_x, cur_y = (event.x_root, event.y_root)
+        cur_x, cur_y = (event.x, event.y)
         self.canvas.coords(self.rect, self.start_x, self.start_y, cur_x, cur_y)  # type: ignore
 
     def on_mouse_up(self, event):
-        end_x, end_y = (event.x_root, event.y_root)
+        end_x, end_y = (event.x, event.y)
 
-        # Popraw współrzędne (zawsze od lewego-górnego do prawego-dolnego)
         x = min(self.start_x, end_x)  # type: ignore
         y = min(self.start_y, end_y)  # type: ignore
         w = abs(self.start_x - end_x)
         h = abs(self.start_y - end_y)
 
-        if w > 10 and h > 10:  # Minimalny rozmiar
+        if w > 10 and h > 10:
             self.geometry = {'top': y, 'left': x, 'width': w, 'height': h}
             print(f"Wybrano geometrię: {self.geometry}")
         else:
@@ -611,7 +628,6 @@ class AreaSelector(tk.Toplevel):
 
         self.grab_release()
         self.destroy()
-
 # ==============================================================================
 # KLASA APLIKACJI GUI (TKINTER)
 # ==============================================================================
@@ -695,43 +711,51 @@ class GameReaderApp:
         """Uruchamia selektor obszaru i nadpisuje plik presetu."""
         preset_path = self.preset_var.get()
         if not preset_path or not os.path.exists(preset_path):
-            messagebox.showerror(
-                "Błąd", "Wybierz prawidłowy plik presetu z listy, zanim wybierzesz obszar.")
+            messagebox.showerror("Błąd", "Wybierz prawidłowy plik presetu z listy, zanim wybierzesz obszar.")
             return
 
-        # Ukryj główne okno, aby nie przeszkadzało
+        # Ukryj główne okno
         self.root.withdraw()
-        time.sleep(0.5)  # Daj systemowi chwilę na ukrycie okna
+        time.sleep(0.5) # Daj systemowi chwilę
 
+        # Zrób pełny zrzut ekranu PRZED otwarciem okna wyboru
+        screenshot = None
         try:
-            selector = AreaSelector(self.root)
-            new_geometry = selector.geometry  # Pobierz wynik (None lub dict)
+            screenshot = _capture_fullscreen_image()
+            if not screenshot:
+                messagebox.showerror("Błąd", "Nie można było zrobić zrzutu ekranu. Sprawdź 'spectacle'.")
+                return
+
+            selector = AreaSelector(self.root, screenshot)
+            new_geometry = selector.geometry
+        
+        except Exception as e:
+            print(f"Błąd podczas wyboru obszaru: {e}", file=sys.stderr)
+            new_geometry = None
         finally:
             # Pokaż główne okno z powrotem
             self.root.deiconify()
+            # Zamknij obraz (ważne)
+            if screenshot:
+                screenshot.close()
 
         if new_geometry:
             try:
                 # Wczytaj, zmodyfikuj, zapisz
                 with open(preset_path, 'r', encoding='utf-8') as f:
                     preset_data = json.load(f)
-
-                # Nadpisz sekcję 'monitor'
+                
                 preset_data['monitor'] = new_geometry
-
+                
                 with open(preset_path, 'w', encoding='utf-8') as f:
                     json.dump(preset_data, f, indent=4)
-
-                messagebox.showinfo(
-                    "Sukces", f"Obszar dla presetu '{os.path.basename(preset_path)}' został zaktualizowany.")
+                    
+                messagebox.showinfo("Sukces", f"Obszar dla presetu '{os.path.basename(preset_path)}' został zaktualizowany.")
             except Exception as e:
-                print(
-                    f"BŁĄD: Nie można zapisać presetu {preset_path}: {e}", file=sys.stderr)
-                messagebox.showerror(
-                    "Błąd zapisu", f"Nie można było zapisać pliku presetu: {e}")
+                print(f"BŁĄD: Nie można zapisać presetu {preset_path}: {e}", file=sys.stderr)
+                messagebox.showerror("Błąd zapisu", f"Nie można było zapisać pliku presetu: {e}")
         else:
             print("Wybór obszaru anulowany.")
-
     def open_settings_dialog(self):
         """Otwiera okno ustawień i zapisuje zmiany."""
         dialog = SettingsDialog(
