@@ -59,7 +59,7 @@ class GameReaderApp:
     def __init__(self, root: tk.Tk, autostart_preset: Optional[str], game_command: Optional[List[str]]):        
         self.root = root
         self.root.title("Game Reader (Wayland)")
-        self.root.geometry("500x200")
+        self.root.geometry("500x250")
         
         # Zapisz argumenty startowe
         self.autostart_preset = autostart_preset
@@ -368,18 +368,6 @@ def main():
     
     if not game_command:
         game_command = None
-        
-    # --- Sprawdzenie zależności ---
-    if not check_dependencies():
-        print("\nNie spełniono zależności. Zamykanie.", file=sys.stderr)
-        try:
-            root = tk.Tk()
-            root.withdraw()
-            messagebox.showerror("Błąd zależności", "Nie znaleziono wymaganych programów (np. spectacle, tesseract).\nZainstaluj je i spróbuj ponownie.\n\nSzczegóły znajdziesz w konsoli.")
-            root.destroy()
-        except tk.TclError:
-            pass
-        sys.exit(1)
 
     # --- Uruchomienie GUI ---
     print("Uruchamianie aplikacji GUI...")

@@ -1,10 +1,13 @@
 from collections import deque
+from datetime import date
+import datetime
 import os
 import sys
 import threading
 import time
 from typing import Any, Deque, Dict
 
+from app.dbus_ss import FreedesktopDBusWrapper
 from app.utils import capture_screen_region, find_best_match, load_config, load_text_file, ocr_and_clean_image
 
 try:
@@ -26,10 +29,10 @@ class ReaderThread(threading.Thread):
         self.audio_queue = audio_queue
         self.config_path = config_path
         self.regex_pattern = regex_pattern
-        self.app_settings = app_settings  # <-- NOWE
+        self.app_settings = app_settings
         self.subtitle_mode = app_settings.get('subtitle_mode', 'Full Lines')
 
-        self.recent_indices: Deque[int] = deque(maxlen=5)  # Bufor 5 ostatnich
+        self.recent_indices: Deque[int] = deque(maxlen=5)
         self.last_ocr_text = ""
 
         self.ocr_scale = self.app_settings.get('ocr_scale_factor', 1.0)
@@ -67,57 +70,63 @@ class ReaderThread(threading.Thread):
             print("Wątek czytelnika uruchomiony.")
 
             config = load_config(self.config_path)
+            print(f"Wczytano konfigurację: {config}")
             subtitles = load_text_file(config['text_file_path'])
             if not subtitles:
                 print("BŁĄD: Plik napisów jest pusty lub nie istnieje. Zatrzymuję wątek.", file=sys.stderr)
                 return
 
             monitor_config = config['monitor']
-            capture_interval = config.get('CAPTURE_INTERVAL', 0.5)
+            capture_interval = 0.3 # config.get('CAPTURE_INTERVAL', 0.3)
             audio_dir = config['audio_dir']
 
             print(
                 f"Czytelnik rozpoczyna pętlę (Tryb: {self.subtitle_mode}, Bufor: {self.recent_indices.maxlen})...")
-            while not self.stop_event.is_set():
-                start_time = time.monotonic()
+            with FreedesktopDBusWrapper() as dbus:
+                while not self.stop_event.is_set():
+                    start_time = time.monotonic()
+                    # print(f"\n{datetime.datetime.now()} - Start")
 
-                image = capture_screen_region(monitor_config)
-                if not image:
-                    time.sleep(capture_interval)
-                    continue
+                    image = capture_screen_region(dbus, monitor_config)
+                    if not image:
+                        time.sleep(capture_interval)
+                        continue
+                    # print(f"\n{datetime.datetime.now()} - Screen captured.")
+                    processed_image = self.preprocess_image(image)
+                    # print(f"\n{datetime.datetime.now()} - Image processed.")
+                    ocr_text = ocr_and_clean_image(
+                        processed_image, self.regex_pattern)
+                    # print(f"\n{datetime.datetime.now()} - OCR completed.")
+                    if not ocr_text:
+                        self.last_ocr_text = ""
+                        time.sleep(capture_interval)
+                        continue
 
-                processed_image = self.preprocess_image(image)
-                ocr_text = ocr_and_clean_image(
-                    processed_image, self.regex_pattern)
-
-                if not ocr_text:
-                    self.last_ocr_text = ""
-                    time.sleep(capture_interval)
-                    continue
-
-                if ocr_text == self.last_ocr_text:
-                    time.sleep(capture_interval)
-                    continue
-                self.last_ocr_text = ocr_text
-                
-                print(f"\nOCR odczytał: '{ocr_text}'")
-
-                best_match_index = find_best_match(ocr_text, subtitles, self.subtitle_mode)
-
-                if best_match_index is not None and best_match_index not in self.recent_indices:
-                    print(f"Dopasowano (Indeks: {best_match_index}). Dodaję do kolejki.")
-
-                    self.recent_indices.append(best_match_index)
+                    if ocr_text == self.last_ocr_text:
+                        time.sleep(capture_interval)
+                        continue
+                    self.last_ocr_text = ocr_text
                     
-                    line_number = best_match_index + 1
-                    file_name = f"output1 ({line_number}).ogg"
-                    file_path = os.path.join(audio_dir, file_name)
+                    print(f"\n{datetime.datetime.now()} - OCR odczytał: '{ocr_text}'")
 
-                    self.audio_queue.put(file_path)
+                    best_match_index = find_best_match(ocr_text, subtitles, self.subtitle_mode)
 
-                elapsed = time.monotonic() - start_time
-                wait_time = max(0, capture_interval - elapsed)
-                time.sleep(wait_time)
+                    if best_match_index is not None and best_match_index not in self.recent_indices:
+                        print(f"Dopasowano (Indeks: {best_match_index}). Dodaję do kolejki.")
+
+                        self.recent_indices.append(best_match_index)
+                        
+                        line_number = best_match_index + 1
+                        file_name = f"output1 ({line_number}).ogg"
+                        file_path = os.path.join(audio_dir, file_name)
+
+                        self.audio_queue.put(file_path)
+
+                    elapsed = time.monotonic() - start_time
+                    wait_time = max(0, capture_interval - elapsed)
+
+                    print (f"{datetime.datetime.now()} - Czas cyklu: {elapsed:.2f}s, oczekiwanie: {wait_time:.2f}s")
+                    time.sleep(wait_time)
 
         except Exception as e:
             print(f"KRYTYCZNY BŁĄD w wątku czytelnika: {e}", file=sys.stderr)

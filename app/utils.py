@@ -7,6 +7,7 @@ import sys
 import tempfile
 from typing import Any, Dict, List, Optional
 
+import pyscreenshot as ImageGrab
 import pytesseract
 
 try:
@@ -22,8 +23,8 @@ except ImportError:
     sys.exit(1)
 
 OCR_LANGUAGE = 'pol'
-MIN_MATCH_THRESHOLD = 85
-MAX_LEN_DIFF = 0.1  # Maksymalna różnica długości między OCR a linią napisów (10%)
+MIN_MATCH_THRESHOLD = 75
+MAX_LEN_DIFF = 0.15  # Maksymalna różnica długości między OCR a linią napisów (15%)
 
 def check_dependencies():
     """Sprawdza 'spectacle' (dla KDE)."""
@@ -70,17 +71,19 @@ def _capture_fullscreen_image() -> Optional[Image.Image]:
     """Wykonuje zrzut całego ekranu (KDE) przy użyciu pliku tymczasowego (w RAM)."""
     temp_file_path = None
     try:
-        ram_disk = '/dev/shm'
-        temp_dir = ram_disk if os.path.isdir(
-            ram_disk) and os.access(ram_disk, os.W_OK) else None
+        # ram_disk = '/dev/shm'
+        # temp_dir = ram_disk if os.path.isdir(ram_disk) and os.access(ram_disk, os.W_OK) else None
 
-        with tempfile.NamedTemporaryFile(suffix='.png', delete=False, dir=temp_dir) as tf:
-            temp_file_path = tf.name
+        # with tempfile.NamedTemporaryFile(suffix='.png', delete=False, dir=temp_dir) as tf:
+        #     temp_file_path = tf.name
             
-        command = ['spectacle', '-f', '-b', '-n', '-o', temp_file_path]
-        subprocess.run(command, check=True, timeout=2.0, stderr=subprocess.DEVNULL)
+        # command = ['spectacle', '-f', '-b', '-n', '-o', temp_file_path]
+        # subprocess.run(command, check=True, timeout=2.0, stderr=subprocess.DEVNULL)
+
+        return ImageGrab.grab() # type: ignore
+
         
-        return Image.open(temp_file_path)
+        # return Image.open(temp_file_path)
 
     except Exception as e:
         if isinstance(e, subprocess.TimeoutExpired):
@@ -97,7 +100,7 @@ def _capture_fullscreen_image() -> Optional[Image.Image]:
                 pass
 
 
-def capture_screen_region(monitor_config: Dict[str, int]) -> Optional[Image.Image]:
+def capture_screen_region(dbus, monitor_config: Dict[str, int]) -> Optional[Image.Image]:
     """Wykonuje zrzut całego ekranu i kadruje go do pożądanego regionu."""
     try:
         left = monitor_config['left']
@@ -106,6 +109,7 @@ def capture_screen_region(monitor_config: Dict[str, int]) -> Optional[Image.Imag
         height = monitor_config['height']
 
         crop_box = (left, top, left + width, top + height)
+        return dbus.grab(bbox=crop_box) # type: ignore
 
         # 1. Zrób pełny zrzut ekranu
         with _capture_fullscreen_image() as full_screenshot:  # type: ignore
