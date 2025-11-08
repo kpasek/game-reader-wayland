@@ -94,63 +94,96 @@ def ocr_and_clean_image(image: Image.Image, regex_pattern: str) -> str:
         print(f"BŁĄD: Błąd podczas OCR: {e}", file=sys.stderr)
         return ""
 
-def find_best_match(ocr_text: str, subtitles_list: List[str], mode: str) -> Optional[int]:
-    """Znajduje najlepsze dopasowanie dla tekstu OCR w zależności od trybu."""
+def _clean(text: str) -> str:
+    """Szybkie czyszczenie tekstu z artefaktów OCR (bez dużego kosztu)."""
+    if not text:
+        return ""
+    # usuń numerki, interpunkcję, podwójne spacje
+    text = re.sub(r"^[\d\W_]+", "", text)        # leading liczby i znaki
+    text = re.sub(r"[^0-9A-Za-zÀ-žąćęłńóśżźĄĆĘŁŃÓŚŻŹ\s]", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip().lower()
 
+
+def _best_prefix_match(ocr_text: str, line: str, max_shift: int = 8) -> int:
+    """Zwraca najlepszy wynik dopasowania OCR do początku linii (szybko)."""
+    ocr_len = len(ocr_text)
+    if not line or ocr_len == 0:
+        return 0
+
+    best_score = 0
+
+    for shift in range(0, min(max_shift, max(1, len(line) - ocr_len)) + 1):
+        fragment = line[shift:shift + ocr_len + 3]  # +3 żeby uwzględnić różnice końcowe
+        score = fuzz.ratio(ocr_text, fragment)
+        if score > best_score:
+            best_score = score
+    return best_score
+
+
+def find_best_match(ocr_text: str, subtitles_list: List[str], mode: str) -> Optional[int]:
+    """Szybka wersja dopasowania OCR do dialogu."""
+    if not ocr_text:
+        return None
+
+    ocr_text = _clean(ocr_text)
     if not ocr_text:
         return None
 
     if mode == "Partial Lines":
-        threshold = 95 if len(ocr_text) < 15 else 90
-
-        matches = []
-        for i, line in enumerate(subtitles_list):
-            if len(line) >= len(ocr_text):
-                score = fuzz.partial_ratio(ocr_text, line)
-                if score >= threshold:
-                    matches.append((i, score))
-
-        if len(matches) == 1:
-            index, score = matches[0]
-            print(f"Dopasowano częściowo (wynik: {score}%): Linia {index + 1}")
-            return index
-        elif len(matches) > 1:
-            print(
-                f"Znaleziono {len(matches)} częściowych dopasowań. Czekam na więcej tekstu.")
-            return None
-        else:
-            print(f"Brak dopasowania częściowego (Próg: {threshold}%)")
-            return None
-
-    else:
-        
         best_score = 0
         best_index = -1
-        
-        TOKEN_SET_THRESHOLD = 90
-        
-        MIN_LEN_RATIO = 0.8
-        MAX_LEN_RATIO = 1.5
+        threshold = 90 if len(ocr_text) < 20 else 75
 
-        for i, sub_line in enumerate(subtitles_list):
-            
-            score = fuzz.token_set_ratio(ocr_text, sub_line)
-            is_long_enough = len(sub_line) >= len(ocr_text) * MIN_LEN_RATIO
-            is_not_too_long = len(ocr_text) <= len(sub_line) * MAX_LEN_RATIO
-            
-            if score >= TOKEN_SET_THRESHOLD and is_long_enough and is_not_too_long:
-                
-                if score > best_score:
-                    best_score = score
-                    best_index = i
-                elif score == best_score:
-                    if best_index == -1 or abs(len(sub_line) - len(ocr_text)) < abs(len(subtitles_list[best_index]) - len(ocr_text)):
-                        best_index = i
+        for i, line in enumerate(subtitles_list):
+            if not line:
+                continue
 
-        if best_index >= 0:
-            print(f"Dopasowano w trybie pełnym (token_set_ratio: {best_score}%): Linia {best_index + 1}")
+            # if len(line) * 0.7 > len(ocr_text):
+            #     continue
+
+            score = _best_prefix_match(ocr_text, line)
+            if score > best_score:
+                best_score = score
+                best_index = i
+
+        if best_index >= 0 and best_score >= threshold:
+            print(f"Dopasowano fragment (prefix): Linia {best_index + 1}, wynik: {best_score}%")
             return best_index
         else:
-            print(
-                f"Brak dopasowania w trybie pełnym (Najlepszy wynik: {best_score}%)")
+            print(f"Brak dopasowania fragmentu (najlepszy: {best_score}%)")
             return None
+
+    # --- Tryb pełny ---
+    best_score = 0
+    best_index = -1
+
+    for i, sub_line in enumerate(subtitles_list):
+        sub_line = _clean(sub_line)
+        if not sub_line:
+            continue
+
+        # szybki filtr długości
+        ocr_len = len(ocr_text)
+        sub_len = len(sub_line)
+        if sub_len == 0:
+            continue
+        if ocr_len < sub_len * 0.5 or ocr_len > sub_len * 2.0:
+            continue
+
+        # szybki fuzzy
+        score = fuzz.token_set_ratio(sub_line, ocr_text)
+
+        # dynamiczny próg (bardziej rygorystyczny dla krótkich)
+        min_score = 85 if ocr_len < 30 else 75
+
+        if score >= min_score and score > best_score:
+            best_score = score
+            best_index = i
+
+    if best_index >= 0:
+        print(f"Dopasowano (token_set_ratio: {best_score}%): Linia {best_index + 1}")
+        return best_index
+    else:
+        print(f"Brak dopasowania (Najlepszy wynik: {best_score}%)")
+        return None

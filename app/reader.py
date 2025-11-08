@@ -55,7 +55,6 @@ class ReaderThread(threading.Thread):
 
             # 3. Kontrast
             if self.ocr_contrast:
-                # Ustawienie na 2.0 mocno podbija kontrast
                 enhancer = ImageEnhance.Contrast(image)
                 image = enhancer.enhance(2.0)
 
@@ -77,7 +76,7 @@ class ReaderThread(threading.Thread):
                 return
 
             monitor_config = config['monitor']
-            capture_interval = 0.3 # config.get('CAPTURE_INTERVAL', 0.3)
+            capture_interval = config.get('CAPTURE_INTERVAL', 0.3)
             audio_dir = config['audio_dir']
 
             print(
@@ -85,18 +84,14 @@ class ReaderThread(threading.Thread):
             with FreedesktopDBusWrapper() as dbus:
                 while not self.stop_event.is_set():
                     start_time = time.monotonic()
-                    # print(f"\n{datetime.datetime.now()} - Start")
 
                     image = capture_screen_region(dbus, monitor_config)
                     if not image:
                         time.sleep(capture_interval)
                         continue
-                    # print(f"\n{datetime.datetime.now()} - Screen captured.")
                     processed_image = self.preprocess_image(image)
-                    # print(f"\n{datetime.datetime.now()} - Image processed.")
                     ocr_text = ocr_and_clean_image(
                         processed_image, self.regex_pattern)
-                    # print(f"\n{datetime.datetime.now()} - OCR completed.")
                     if not ocr_text:
                         self.last_ocr_text = ""
                         time.sleep(capture_interval)
