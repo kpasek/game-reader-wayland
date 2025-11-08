@@ -1,22 +1,5 @@
 #!/usr/bin/env python3
 
-"""
-Game Reader - zamiennik dla Wayland (Wersja z GUI i kolejką audio)
-Autor: AI (Gemini)
-Data: 03.11.2025
-
-Wymagania systemowe:
-- spectacle (dla KDE) lub gnome-screenshot (dla GNOME)
-- tesseract-ocr (silnik OCR)
-- tesseract-data-pol
-
-Wymagania Python (pip install):
-- pillow (PIL)
-- pytesseract
-- pygame
-- thefuzz
-"""
-
 import json
 import os
 import sys
@@ -31,7 +14,7 @@ from app.area_selector import AreaSelector
 from app.player import PlayerThread
 from app.reader import ReaderThread
 from app.settings import SettingsDialog
-from app.utils import _capture_fullscreen_image, check_dependencies
+from app.utils import _capture_fullscreen_image
 
 # --- Importy GUI (Tkinter) ---
 try:
@@ -146,7 +129,7 @@ class GameReaderApp:
         try:
             screenshot = _capture_fullscreen_image()
             if not screenshot:
-                messagebox.showerror("Błąd", "Nie można było zrobić zrzutu ekranu. Sprawdź 'spectacle'.")
+                messagebox.showerror("Błąd", "Nie można było zrobić zrzutu ekranu.")
                 return
 
             selector = AreaSelector(self.root, screenshot)
@@ -288,11 +271,10 @@ class GameReaderApp:
         print("Wysyłanie sygnału stop...")
         stop_event.set()
         
-        # Poczekaj na zakończenie wątków
         if self.reader_thread:
             self.reader_thread.join(timeout=2.0)
         if self.player_thread:
-            self.player_thread.join(timeout=3.0) # Player może kończyć grać
+            self.player_thread.join(timeout=3.0)
 
         self.reader_thread = None
         self.player_thread = None
@@ -310,9 +292,6 @@ class GameReaderApp:
         
         self.preset_combo.config(state=combo_state)
         self.regex_entry.config(state=state)
-        
-        # Zablokuj menu podczas działania (trochę bardziej skomplikowane)
-        # Na razie pomijamy dla prostoty
 
     def on_closing(self):
         """Obsługuje zamknięcie okna."""

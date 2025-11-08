@@ -10,36 +10,14 @@ from typing import Any, Dict, List, Optional
 import pyscreenshot as ImageGrab
 import pytesseract
 
-try:
-    from PIL import Image
-except ImportError:
-    print("Błąd: Nie znaleziono biblioteki 'Pillow'. Zainstaluj ją: pip install Pillow", file=sys.stderr)
-    sys.exit(1)
+from PIL import Image
+from thefuzz import fuzz
 
-try:
-    from thefuzz import fuzz
-except ImportError:
-    print("Błąd: Nie znaleziono biblioteki 'thefuzz'. Zainstaluj ją: pip install thefuzz", file=sys.stderr)
-    sys.exit(1)
+from app.dbus_ss import FreedesktopDBusWrapper
 
 OCR_LANGUAGE = 'pol'
 MIN_MATCH_THRESHOLD = 75
-MAX_LEN_DIFF = 0.15  # Maksymalna różnica długości między OCR a linią napisów (15%)
-
-def check_dependencies():
-    """Sprawdza 'spectacle' (dla KDE)."""
-    print("Sprawdzanie zależności systemowych...")
-    if not shutil.which("spectacle"):
-        print("BŁĄD: Nie znaleziono polecenia 'spectacle'.", file=sys.stderr)
-        print("Ten skrypt jest skonfigurowany dla KDE. Upewnij się, że 'spectacle' jest zainstalowane.", file=sys.stderr)
-        return False
-        
-    if not shutil.which("tesseract"):
-        print("BŁĄD: Nie znaleziono polecenia 'tesseract'.", file=sys.stderr)
-        return False
-        
-    print("Zależności systemowe OK.")
-    return True
+MAX_LEN_DIFF = 0.1
 
 def load_config(filename: str) -> Dict[str, Any]:
     """Wczytuje plik konfiguracyjny JSON."""
@@ -69,35 +47,13 @@ def load_text_file(filepath: str) -> List[str]:
 
 def _capture_fullscreen_image() -> Optional[Image.Image]:
     """Wykonuje zrzut całego ekranu (KDE) przy użyciu pliku tymczasowego (w RAM)."""
-    temp_file_path = None
     try:
-        # ram_disk = '/dev/shm'
-        # temp_dir = ram_disk if os.path.isdir(ram_disk) and os.access(ram_disk, os.W_OK) else None
-
-        # with tempfile.NamedTemporaryFile(suffix='.png', delete=False, dir=temp_dir) as tf:
-        #     temp_file_path = tf.name
-            
-        # command = ['spectacle', '-f', '-b', '-n', '-o', temp_file_path]
-        # subprocess.run(command, check=True, timeout=2.0, stderr=subprocess.DEVNULL)
-
-        return ImageGrab.grab() # type: ignore
-
-        
-        # return Image.open(temp_file_path)
+        with FreedesktopDBusWrapper() as dbus:
+            ss = dbus.grab()
+        return ss
 
     except Exception as e:
-        if isinstance(e, subprocess.TimeoutExpired):
-            print("OSTRZEŻENIE: Timeout 'spectacle' (czy ekran jest zablokowany?)", file=sys.stderr)
-        else:
-            print(f"BŁĄD: Nieoczekiwany błąd podczas przechwytywania (KDE): {e}", file=sys.stderr)
-        return None
-    finally:
-        # Posprzątaj plik tymczasowy
-        if temp_file_path and os.path.exists(temp_file_path):
-            try:
-                os.remove(temp_file_path)
-            except OSError:
-                pass
+        print(f"BŁĄD: Nieoczekiwany błąd podczas przechwytywania (KDE): {e}", file=sys.stderr)
 
 
 def capture_screen_region(dbus, monitor_config: Dict[str, int]) -> Optional[Image.Image]:
@@ -110,15 +66,6 @@ def capture_screen_region(dbus, monitor_config: Dict[str, int]) -> Optional[Imag
 
         crop_box = (left, top, left + width, top + height)
         return dbus.grab(bbox=crop_box) # type: ignore
-
-        # 1. Zrób pełny zrzut ekranu
-        with _capture_fullscreen_image() as full_screenshot:  # type: ignore
-            if not full_screenshot:
-                return None
-
-            # 2. Wykadruj obraz i zwróć jego kopię
-            cropped_image = full_screenshot.crop(crop_box)
-            return cropped_image.copy()
 
     except Exception as e:
         print(
@@ -146,11 +93,15 @@ def ocr_and_clean_image(image: Image.Image, regex_pattern: str) -> str:
         print(f"BŁĄD: Błąd podczas OCR: {e}", file=sys.stderr)
         return ""
 
-
 def find_best_match(ocr_text: str, subtitles_list: List[str], mode: str) -> Optional[int]:
     """Znajduje najlepsze dopasowanie dla tekstu OCR w zależności od trybu."""
 
+    if not ocr_text:
+        return None
+
     if mode == "Partial Lines":
+        # Ten tryb jest na inny przypadek (np. gdy OCR widzi tylko "Włamano się")
+        # i może dopasować wiele linii. Logika jest OK, ale progi są wysokie.
         threshold = 95 if len(ocr_text) < 15 else 90
 
         matches = []
@@ -173,29 +124,28 @@ def find_best_match(ocr_text: str, subtitles_list: List[str], mode: str) -> Opti
             return None
 
     else:
+        
         best_score = 0
         best_index = -1
+        
+        TOKEN_SET_THRESHOLD = 90
 
         for i, sub_line in enumerate(subtitles_list):
-            length_ratio = min(len(ocr_text), len(sub_line)) / max(len(ocr_text), len(sub_line))
-            adjusted_threshold = MIN_MATCH_THRESHOLD + (1 - length_ratio) * 20
-            score = fuzz.ratio(ocr_text, sub_line)
-            if score < adjusted_threshold:
-                continue
-            ocr_len = len(ocr_text)
-            sub_len = len(sub_line)
-            if sub_len < 10 and ocr_len > 20:
-                continue
-            if abs(len(ocr_text) - len(sub_line)) > 0.5 * max(len(ocr_text), len(sub_line)):
-                continue
-            if not (sub_len * (1 - MAX_LEN_DIFF) <= ocr_len <= sub_len * (1 + MAX_LEN_DIFF)):
-                continue
-            if score > best_score:
-                best_score = score
-                best_index = i
+            
+            score = fuzz.token_set_ratio(ocr_text, sub_line)
+
+            if score >= TOKEN_SET_THRESHOLD and len(ocr_text) > len(sub_line) * (1 - MAX_LEN_DIFF):
+                if score > best_score:
+                    best_score = score
+                    best_index = i
+                elif score == best_score:
+                    # Preferuj linię o długości bliższej OCR
+                    if best_index == -1 or abs(len(sub_line) - len(ocr_text)) < abs(len(subtitles_list[best_index]) - len(ocr_text)):
+                        best_index = i
+
 
         if best_index >= 0:
-            print(f"Dopasowano w trybie pełnym (wynik: {best_score}%): Linia {best_index + 1}")
+            print(f"Dopasowano w trybie pełnym (token_set_ratio: {best_score}%): Linia {best_index + 1}")
             return best_index
         else:
             print(
