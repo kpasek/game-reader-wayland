@@ -17,7 +17,7 @@ from app.dbus_ss import FreedesktopDBusWrapper
 
 OCR_LANGUAGE = 'pol'
 MIN_MATCH_THRESHOLD = 75
-MAX_LEN_DIFF = 0.1
+# MAX_LEN_DIFF = 0.1 # Zastąpione nową logiką
 
 def load_config(filename: str) -> Dict[str, Any]:
     """Wczytuje plik konfiguracyjny JSON."""
@@ -65,11 +65,12 @@ def capture_screen_region(dbus, monitor_config: Dict[str, int]) -> Optional[Imag
         height = monitor_config['height']
 
         crop_box = (left, top, left + width, top + height)
-        return dbus.grab(bbox=crop_box) # type: ignore
+        return ImageGrab.grab(crop_box, False)
+        # return dbus.grab(bbox=crop_box) # type: ignore
 
     except Exception as e:
         print(
-            f"BŁĄD: Błąd podczas kadrowania przechwyconego obrazu: {e}", file=sys.stderr)
+            f"BŁĄD: Błąd podczas przechwytywania regionu: {e}", file=sys.stderr)
         return None
 
 def ocr_and_clean_image(image: Image.Image, regex_pattern: str) -> str:
@@ -100,8 +101,6 @@ def find_best_match(ocr_text: str, subtitles_list: List[str], mode: str) -> Opti
         return None
 
     if mode == "Partial Lines":
-        # Ten tryb jest na inny przypadek (np. gdy OCR widzi tylko "Włamano się")
-        # i może dopasować wiele linii. Logika jest OK, ale progi są wysokie.
         threshold = 95 if len(ocr_text) < 15 else 90
 
         matches = []
@@ -129,20 +128,24 @@ def find_best_match(ocr_text: str, subtitles_list: List[str], mode: str) -> Opti
         best_index = -1
         
         TOKEN_SET_THRESHOLD = 90
+        
+        MIN_LEN_RATIO = 0.8
+        MAX_LEN_RATIO = 1.5
 
         for i, sub_line in enumerate(subtitles_list):
             
             score = fuzz.token_set_ratio(ocr_text, sub_line)
-
-            if score >= TOKEN_SET_THRESHOLD and len(ocr_text) > len(sub_line) * (1 - MAX_LEN_DIFF):
+            is_long_enough = len(sub_line) >= len(ocr_text) * MIN_LEN_RATIO
+            is_not_too_long = len(ocr_text) <= len(sub_line) * MAX_LEN_RATIO
+            
+            if score >= TOKEN_SET_THRESHOLD and is_long_enough and is_not_too_long:
+                
                 if score > best_score:
                     best_score = score
                     best_index = i
                 elif score == best_score:
-                    # Preferuj linię o długości bliższej OCR
                     if best_index == -1 or abs(len(sub_line) - len(ocr_text)) < abs(len(subtitles_list[best_index]) - len(ocr_text)):
                         best_index = i
-
 
         if best_index >= 0:
             print(f"Dopasowano w trybie pełnym (token_set_ratio: {best_score}%): Linia {best_index + 1}")

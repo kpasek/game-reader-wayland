@@ -107,11 +107,55 @@ class GameReaderApp:
         file_menu.add_command(label="Wybierz obszar dla aktywnego presetu...", command=self.select_area_for_preset)
         file_menu.add_command(label="Ustawienia...",
                               command=self.open_settings_dialog)
+        
+        file_menu.add_separator()
+        file_menu.add_command(label="Wygeneruj polecenie startowe Steam...",
+                              command=self.generate_steam_command)
+        
         file_menu.add_separator()
         file_menu.add_command(label="Wyjdź", command=self.on_closing)
         
         menubar.add_cascade(label="Plik", menu=file_menu)
         self.root.config(menu=menubar)
+
+    def generate_steam_command(self):
+        """Generuje polecenie startowe dla Steam i kopiuje do schowka."""
+        preset_path = self.preset_var.get()
+        if not preset_path:
+            messagebox.showerror("Błąd", "Najpierw wybierz preset z listy.")
+            return
+        
+        if not os.path.exists(preset_path):
+                messagebox.showerror("Błąd", f"Wybrany plik presetu nie istnieje: {preset_path}")
+                return
+
+        try:
+            python_executable = sys.executable
+            script_path = os.path.abspath(__file__) 
+            
+            abs_preset_path = os.path.abspath(preset_path)
+
+            command = f'"{python_executable}" "{script_path}" --preset "{abs_preset_path}" -- '
+            
+            # Spróbuj skopiować do schowka
+            self.root.clipboard_clear()
+            self.root.clipboard_append(command)
+            self.root.update()
+            
+            messagebox.showinfo(
+                "Polecenie Steam wygenerowane",
+                "Polecenie startowe zostało skopiowane do schowka.\n\n"
+                "Wklej je w opcjach uruchamiania Steam *przed* poleceniem gry, np.:\n\n"
+                f'{command} game-performance %command%'
+            )
+        except tk.TclError:
+            messagebox.showwarning(
+                "Błąd schowka",
+                "Nie można skopiować do schowka. Oto polecenie do skopiowania ręcznego:\n\n"
+                f"{command}"
+            )
+        except Exception as e:
+                messagebox.showerror("Błąd", f"Wystąpił nieoczekiwany błąd: {e}")
 
     def select_area_for_preset(self):
         """Uruchamia selektor obszaru i nadpisuje plik presetu."""
