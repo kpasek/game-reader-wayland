@@ -5,7 +5,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pyscreenshot as ImageGrab
 import pytesseract
@@ -121,8 +121,8 @@ def _best_prefix_match(ocr_text: str, line: str, max_shift: int = 8) -> int:
     return best_score
 
 
-def find_best_match(ocr_text: str, subtitles_list: List[str], mode: str) -> Optional[int]:
-    """Szybka wersja dopasowania OCR do dialogu."""
+def find_best_match(ocr_text: str, subtitles_list: List[str], mode: str) -> Optional[Tuple[int, int]]:
+    """Szybka wersja dopasowania OCR do dialogu. Zwraca (index, score) lub None."""
     if not ocr_text:
         return None
 
@@ -149,7 +149,7 @@ def find_best_match(ocr_text: str, subtitles_list: List[str], mode: str) -> Opti
 
         if best_index >= 0 and best_score >= threshold:
             print(f"Dopasowano fragment (prefix): Linia {best_index + 1}, wynik: {best_score}%")
-            return best_index
+            return best_index, best_score
         else:
             print(f"Brak dopasowania fragmentu (najlepszy: {best_score}%)")
             return None
@@ -171,12 +171,20 @@ def find_best_match(ocr_text: str, subtitles_list: List[str], mode: str) -> Opti
         if ocr_len < sub_len * 0.5 or ocr_len > sub_len * 2.0:
             continue
 
+        # Logika dopasowania:
+        # Dla bardzo krótkich tekstów (np. "Tak", "OK") 'ratio' jest bezpieczniejsze,
+        # bo 'token_set_ratio' da 100% dla "Tak" vs "Nie tak".
+        # Dla dłuższych, 'token_set_ratio' jest lepsze, bo ignoruje kolejność
+        # i drobne błędy OCR (np. "Cześć Adam" vs "Adam cześć").
         if ocr_len < 15:
             score = fuzz.ratio(sub_line, ocr_text)
-            min_score = 90
+            min_score = 90  # Musi być prawie identyczne
         else:
             score = fuzz.token_set_ratio(sub_line, ocr_text)
-            min_score = 82 if ocr_len else 75
+            if ocr_len < 30:
+                min_score = 82  # Średni próg
+            else:
+                min_score = 75  # Standardowy próg
 
         if score >= min_score and score > best_score:
             best_score = score
@@ -184,7 +192,7 @@ def find_best_match(ocr_text: str, subtitles_list: List[str], mode: str) -> Opti
 
     if best_index >= 0:
         print(f"Dopasowano (token_set_ratio: {best_score}%): Linia {best_index + 1}")
-        return best_index
+        return best_index, best_score
     else:
         print(f"Brak dopasowania (Najlepszy wynik: {best_score}%)")
         return None

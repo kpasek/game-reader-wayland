@@ -3,10 +3,9 @@ from datetime import date
 import datetime
 import os
 import sys
+import re
 import threading
 import time
-import re
-from typing import Any, Deque, Dict
 from typing import Any, Deque, Dict, Optional, Tuple
 
 from app.dbus_ss import FreedesktopDBusWrapper
@@ -32,114 +31,20 @@ class ReaderThread(threading.Thread):
         self.stop_event = stop_event
         self.audio_queue = audio_queue
         self.config_path = config_path
-        self.regex_template = regex_template
-        self.combined_regex_pattern = ""
+        self.regex_template = regex_template # Wzorzec z GUI (może zawierać {NAMES})
+        self.combined_regex_pattern = ""   # Finalny regex po wczytaniu imion
         self.app_settings = app_settings
         self.subtitle_mode = app_settings.get('subtitle_mode', 'Full Lines')
 
         self.recent_indices: Deque[int] = deque(maxlen=5)
+        # NOWY BUFOR LOGÓW
+        self.log_buffer: Deque[str] = deque(maxlen=1000)
         self.last_ocr_text = ""
 
         self.ocr_scale = self.app_settings.get('ocr_scale_factor', 1.0)
         self.ocr_grayscale = self.app_settings.get('ocr_grayscale', False)
         self.ocr_contrast = self.app_settings.get('ocr_contrast', False)
         self.target_resolution = target_resolution
-
-    def preprocess_image(self, image: Image.Image) -> Image.Image:
-        """Stosuje skalowanie, skalę szarości i kontrast do obrazu przed OCR."""
-        try:
-            # 1. Skalowanie (jeśli trzeba)
-            if self.ocr_scale < 1.0:
-                new_width = int(image.width * self.ocr_scale)
-                new_height = int(image.height * self.ocr_scale)
-                image = image.resize(
-                    (new_width, new_height), Image.LANCZOS)  # type: ignore
-
-            # 2. Skala szarości
-            if self.ocr_grayscale:
-                image = ImageOps.grayscale(image)
-
-            # 3. Kontrast
-            if self.ocr_contrast:
-                enhancer = ImageEnhance.Contrast(image)
-                image = enhancer.enhance(2.0)
-
-            return image
-        except Exception as e:
-            print(
-                f"BŁĄD: Błąd podczas preprocessingu obrazu: {e}", file=sys.stderr)
-            return image  # Zwróć oryginał w razie błędu
-
-    def run(self):
-        try:
-            print("Wątek czytelnika uruchomiony.")
-
-            config = load_config(self.config_path)
-
-            # 1. Zbuduj finalny Regex
-            self.combined_regex_pattern = self._build_combined_regex(config, self.regex_template)
-
-            # 2. Przelicz obszar monitora
-            monitor_config = self._recalculate_monitor_area(config, self.target_resolution)
-
-            subtitles = load_text_file(config['text_file_path'])
-            if not subtitles:
-                print("BŁĄD: Plik napisów jest pusty lub nie istnieje. Zatrzymuję wątek.", file=sys.stderr)
-                return
-
-            monitor_config = config['monitor']
-            capture_interval = config.get('CAPTURE_INTERVAL', 0.3)
-            audio_dir = config['audio_dir']
-
-            print(
-                f"Czytelnik rozpoczyna pętlę (Tryb: {self.subtitle_mode}, Bufor: {self.recent_indices.maxlen})...")
-            with FreedesktopDBusWrapper() as dbus:
-                while not self.stop_event.is_set():
-                    start_time = time.monotonic()
-
-                    image = capture_screen_region(dbus, monitor_config)
-                    if not image:
-                        time.sleep(capture_interval)
-                        continue
-                    processed_image = self.preprocess_image(image)
-                    ocr_text = ocr_and_clean_image(
-                        processed_image, self.combined_regex_pattern)
-                    if not ocr_text:
-                        self.last_ocr_text = ""
-                        time.sleep(capture_interval)
-                        continue
-
-                    if ocr_text == self.last_ocr_text:
-                        time.sleep(capture_interval)
-                        continue
-                    self.last_ocr_text = ocr_text
-                    
-                    print(f"\n{datetime.datetime.now()} - OCR odczytał: '{ocr_text}'")
-
-                    best_match_index = find_best_match(ocr_text, subtitles, self.subtitle_mode)
-
-                    if best_match_index is not None and best_match_index not in self.recent_indices:
-                        print(f"Dopasowano (Indeks: {best_match_index}). Dodaję do kolejki.")
-
-                        self.recent_indices.append(best_match_index)
-                        
-                        line_number = best_match_index + 1
-                        file_name = f"output1 ({line_number}).ogg"
-                        file_path = os.path.join(audio_dir, file_name)
-
-                        self.audio_queue.put(file_path)
-
-                    elapsed = time.monotonic() - start_time
-                    wait_time = max(0, capture_interval - elapsed)
-
-                    print (f"{datetime.datetime.now()} - Czas cyklu: {elapsed:.2f}s, oczekiwanie: {wait_time:.2f}s")
-                    time.sleep(wait_time)
-
-        except Exception as e:
-            print(f"KRYTYCZNY BŁĄD w wątku czytelnika: {e}", file=sys.stderr)
-        finally:
-            print("Wątek czytelnika zatrzymany.")
-
 
     def _build_combined_regex(self, config: Dict[str, Any], template: str) -> str:
         """Łączy wzorzec regex z GUI z listą imion z pliku."""
@@ -199,3 +104,104 @@ class ReaderThread(threading.Thread):
         except Exception as e:
             print(f"BŁĄD: Nie można przeliczyć rozdzielczości: {e}. Używam domyślnej.", file=sys.stderr)
             return original_monitor_config
+
+    def preprocess_image(self, image: Image.Image) -> Image.Image:
+        """Stosuje skalowanie, skalę szarości i kontrast do obrazu przed OCR."""
+        try:
+            # 1. Skalowanie (jeśli trzeba)
+            if self.ocr_scale < 1.0:
+                new_width = int(image.width * self.ocr_scale)
+                new_height = int(image.height * self.ocr_scale)
+                image = image.resize(
+                    (new_width, new_height), Image.LANCZOS)  # type: ignore
+
+            # 2. Skala szarości
+            if self.ocr_grayscale:
+                image = ImageOps.grayscale(image)
+
+            # 3. Kontrast
+            if self.ocr_contrast:
+                enhancer = ImageEnhance.Contrast(image)
+                image = enhancer.enhance(2.0)
+
+            return image
+        except Exception as e:
+            print(
+                f"BŁĄD: Błąd podczas preprocessingu obrazu: {e}", file=sys.stderr)
+            return image  # Zwróć oryginał w razie błędu
+
+    def run(self):
+        try:
+            print("Wątek czytelnika uruchomiony.")
+
+            config = load_config(self.config_path)
+            
+            # 1. Zbuduj finalny Regex
+            self.combined_regex_pattern = self._build_combined_regex(config, self.regex_template)
+
+            # 2. Przelicz obszar monitora
+            monitor_config = self._recalculate_monitor_area(config, self.target_resolution)
+            
+            subtitles = load_text_file(config['text_file_path'])
+            if not subtitles:
+                print("BŁĄD: Plik napisów jest pusty lub nie istnieje. Zatrzymuję wątek.", file=sys.stderr)
+                return
+            capture_interval = config.get('CAPTURE_INTERVAL', 0.3)
+            audio_dir = config['audio_dir']
+
+            print(
+                f"Czytelnik rozpoczyna pętlę (Tryb: {self.subtitle_mode}, Bufor: {self.recent_indices.maxlen})...")
+            with FreedesktopDBusWrapper() as dbus:
+                while not self.stop_event.is_set():
+                    start_time = time.monotonic()
+
+                    image = capture_screen_region(dbus, monitor_config)
+                    if not image:
+                        time.sleep(capture_interval)
+                        continue
+                    processed_image = self.preprocess_image(image)
+                    ocr_text = ocr_and_clean_image(
+                        processed_image, self.combined_regex_pattern)
+                    if not ocr_text:
+                        self.last_ocr_text = ""
+                        time.sleep(capture_interval)
+                        continue
+
+                    if ocr_text == self.last_ocr_text:
+                        time.sleep(capture_interval)
+                        continue
+                    self.last_ocr_text = ocr_text
+                    
+                    print(f"\n{datetime.datetime.now().strftime('%H:%M:%S')} - OCR odczytał: '{ocr_text}'")
+
+                    # ZMIANA: Zwraca teraz krotkę (index, score) lub None
+                    match_result = find_best_match(ocr_text, subtitles, self.subtitle_mode)
+
+                    if match_result is not None:
+                        best_match_index, best_match_score = match_result
+                        
+                        if best_match_index not in self.recent_indices:
+                            print(f"Dopasowano (Indeks: {best_match_index}, Wynik: {best_match_score}%). Dodaję do kolejki.")
+
+                            timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                            log_entry = f"[{timestamp}] Match (Score: {best_match_score}%) | OCR: '{ocr_text}' | Index: {best_match_index} | Line: '{subtitles[best_match_index]}'"
+                            self.log_buffer.append(log_entry)
+
+                            self.recent_indices.append(best_match_index)
+                            
+                            line_number = best_match_index + 1
+                            file_name = f"output1 ({line_number}).ogg"
+                            file_path = os.path.join(audio_dir, file_name)
+
+                            self.audio_queue.put(file_path)
+
+                    elapsed = time.monotonic() - start_time
+                    wait_time = max(0, capture_interval - elapsed)
+
+                    print (f"{datetime.datetime.now().strftime('%H:%M:%S')} - Czas cyklu: {elapsed:.2f}s, oczekiwanie: {wait_time:.2f}s")
+                    time.sleep(wait_time)
+
+        except Exception as e:
+            print(f"KRYTYCZNY BŁĄD w wątku czytelnika: {e}", file=sys.stderr)
+        finally:
+            print("Wątek czytelnika zatrzymany.")
