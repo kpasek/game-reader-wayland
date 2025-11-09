@@ -16,12 +16,9 @@ from app.reader import ReaderThread
 from app.settings import SettingsDialog
 from app.utils import _capture_fullscreen_image
 
-# --- Importy GUI (Tkinter) ---
 try:
     import tkinter as tk
-    from tkinter import ttk
-    from tkinter import filedialog
-    from tkinter import messagebox
+    from tkinter import ttk,filedialog,messagebox
 except ImportError:
     print("Błąd: Nie znaleziono biblioteki 'tkinter'.", file=sys.stderr)
     print("Zazwyczaj jest dołączona do Pythona. W Debian/Ubuntu: sudo apt install python3-tk", file=sys.stderr)
@@ -42,7 +39,16 @@ class GameReaderApp:
     def __init__(self, root: tk.Tk, autostart_preset: Optional[str], game_command: Optional[List[str]]):        
         self.root = root
         self.root.title("Game Reader (Wayland)")
-        self.root.geometry("500x250")
+        self.root.geometry("600x320")
+
+        self.resolutions = {
+            "1080p (1920x1080)": (1920, 1080),
+            "1440p (2560x1440)": (2560, 1440),
+            "4K (3840x2160)": (3840, 2160),
+            "800p (1280x800)": (1280, 800),
+            "1600p (2560x1600)": (2560, 1600),
+            "Niestandardowa (z presetu)": None
+        }
         
         # Zapisz argumenty startowe
         self.autostart_preset = autostart_preset
@@ -68,10 +74,16 @@ class GameReaderApp:
         self.preset_combo.pack(fill=tk.X, anchor=tk.W, pady=5)
         
         # --- Pole Regex ---
-        ttk.Label(main_frame, text="Regex do usuwania imion:").pack(anchor=tk.W, pady=(10, 0))
+        ttk.Label(main_frame, text="Wzorzec Regex (użyj {NAMES} dla imion z pliku):").pack(anchor=tk.W, pady=(10, 0))
         self.regex_var = tk.StringVar()
         self.regex_entry = ttk.Entry(main_frame, textvariable=self.regex_var, width=60)
         self.regex_entry.pack(fill=tk.X, anchor=tk.W, pady=5)
+        ttk.Label(main_frame, text="Przelicz obszar do rozdzielczości:").pack(anchor=tk.W, pady=(10, 0))
+        self.resolution_var = tk.StringVar(value="Niestandardowa (z presetu)")
+        self.res_combo = ttk.Combobox(main_frame, textvariable=self.resolution_var,
+                                      state="readonly", width=60,
+                                      values=list(self.resolutions.keys()))
+        self.res_combo.pack(fill=tk.X, anchor=tk.W, pady=5)
 
         # --- Przyciski ---
         button_frame = ttk.Frame(main_frame)
@@ -130,12 +142,9 @@ class GameReaderApp:
                 return
 
         try:
-            python_executable = sys.executable
-            script_path = os.path.abspath(__file__) 
-            
             abs_preset_path = os.path.abspath(preset_path)
 
-            command = f'"{python_executable}" "{script_path}" --preset "{abs_preset_path}" -- '
+            command = f'reader --preset "{abs_preset_path}" game-performance %command%'
             
             # Spróbuj skopiować do schowka
             self.root.clipboard_clear()
@@ -220,7 +229,7 @@ class GameReaderApp:
         """Wczytuje konfigurację aplikacji i ZWRACA ją."""
         config = {
             'recent_presets': [],
-            'last_regex': r"^[\w\s]+:",
+            'last_regex': r"^(?i)({NAMES})\s*[:：]",
             'subtitle_mode': 'Full Lines',
             'ocr_scale_factor': 1.0,
             'ocr_grayscale': False,
@@ -261,7 +270,7 @@ class GameReaderApp:
         self.preset_combo['values'] = self.settings.get('recent_presets', [])
         if self.settings.get('recent_presets'):
             self.preset_var.set(self.settings['recent_presets'][0])
-        self.regex_var.set(self.settings.get('last_regex', r"^[\w\s]+:"))
+        self.regex_var.set(self.settings.get('last_regex', r"^(?i)({NAMES})\s*[:：]"))
 
     def select_new_preset(self):
         """Otwiera dialog wyboru pliku i dodaje go do listy."""
@@ -277,6 +286,7 @@ class GameReaderApp:
     def start_reading(self):
         config_path = self.preset_var.get()
         regex_pattern = self.regex_var.get()
+        selected_res_key = self.resolution_var.get()
         
         if not config_path or not os.path.exists(config_path):
             messagebox.showerror("Błąd", "Nie wybrano prawidłowego pliku presetu.")
@@ -291,9 +301,11 @@ class GameReaderApp:
             try: audio_queue.get_nowait()
             except queue.Empty: break
         
+        target_res_tuple = self.resolutions.get(selected_res_key)
+        
         self.player_thread = PlayerThread(stop_event, audio_queue)
         self.reader_thread = ReaderThread(
-            config_path, regex_pattern, self.settings, stop_event, audio_queue)
+            config_path, regex_pattern, self.settings, stop_event, audio_queue, target_resolution=target_res_tuple)
         
         self.player_thread.start()
         self.reader_thread.start()
@@ -336,6 +348,7 @@ class GameReaderApp:
         
         self.preset_combo.config(state=combo_state)
         self.regex_entry.config(state=state)
+        self.res_combo.config(state=combo_state)
 
     def on_closing(self):
         """Obsługuje zamknięcie okna."""

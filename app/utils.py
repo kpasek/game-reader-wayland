@@ -171,11 +171,12 @@ def find_best_match(ocr_text: str, subtitles_list: List[str], mode: str) -> Opti
         if ocr_len < sub_len * 0.5 or ocr_len > sub_len * 2.0:
             continue
 
-        # szybki fuzzy
-        score = fuzz.token_set_ratio(sub_line, ocr_text)
-
-        # dynamiczny próg (bardziej rygorystyczny dla krótkich)
-        min_score = 85 if ocr_len < 30 else 75
+        if ocr_len < 15:
+            score = fuzz.ratio(sub_line, ocr_text)
+            min_score = 90
+        else:
+            score = fuzz.token_set_ratio(sub_line, ocr_text)
+            min_score = 82 if ocr_len else 75
 
         if score >= min_score and score > best_score:
             best_score = score
