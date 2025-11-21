@@ -17,7 +17,7 @@ except ImportError:
 class AreaSelector(tk.Toplevel):
     """Okno ze zrzutem ekranu do zaznaczania obszaru."""
 
-    def __init__(self, parent, screenshot_image: Image.Image):
+    def __init__(self, parent, screenshot_image: Image.Image, current_geometry: dict = None):
         super().__init__(parent)
         self.parent = parent
         self.geometry = None  # (x, y, w, h)
@@ -29,25 +29,34 @@ class AreaSelector(tk.Toplevel):
 
         # Konfiguracja okna
         self.attributes('-fullscreen', True)
-        self.attributes('-topmost', True)  # Zawsze na wierzchu
+        self.attributes('-topmost', True)
 
-        # Konwertuj obraz PIL na obraz Tkinter
-        # WAŻNE: Musimy trzymać referencję (self.bg_tk), inaczej Python go usunie!
         self.bg_tk = ImageTk.PhotoImage(screenshot_image)
 
-        # Płótno do rysowania
         self.canvas = tk.Canvas(self, cursor="cross")
         self.canvas.pack(fill=tk.BOTH, expand=True)
 
-        # Ustaw zrzut ekranu jako tło płótna
         self.canvas.create_image(0, 0, image=self.bg_tk, anchor=tk.NW)
 
-        # Powiązania myszy
+        if current_geometry:
+            cx = current_geometry.get('left', 0)
+            cy = current_geometry.get('top', 0)
+            cw = current_geometry.get('width', 0)
+            ch = current_geometry.get('height', 0)
+            
+            # Rysujemy na niebiesko, przerywaną linią, żeby odróżnić od nowego zaznaczenia
+            self.canvas.create_rectangle(
+                cx, cy, cx + cw, cy + ch,
+                outline='blue', width=2, dash=(2, 4), tags="current_area"
+            )
+            self.canvas.create_text(
+                cx + 5, cy - 10, text="Aktualny obszar", fill="blue", anchor=tk.NW
+            )
+
         self.canvas.bind("<ButtonPress-1>", self.on_mouse_down)
         self.canvas.bind("<B1-Motion>", self.on_mouse_drag)
         self.canvas.bind("<ButtonRelease-1>", self.on_mouse_up)
 
-        # Powiązanie klawisza Escape
         self.bind("<Escape>", lambda e: self.destroy())
 
         print("Gotowy do wyboru obszaru. Narysuj prostokąt. Naciśnij Esc aby anulować.")
@@ -55,11 +64,13 @@ class AreaSelector(tk.Toplevel):
         self.wait_window()
 
     def on_mouse_down(self, event):
-        # Współrzędne są teraz względem płótna (czyli ekranu)
-        self.start_x = event.x
-        self.start_y = event.y
+        # Usuń stare zaznaczenie (czerwone) oraz wizualizację z presetu (niebieskie)
         if self.rect:
             self.canvas.delete(self.rect)
+        self.canvas.delete("current_area") # Usuwa stary obszar po kliknięciu
+
+        self.start_x = event.x
+        self.start_y = event.y
         self.rect = self.canvas.create_rectangle(
             self.start_x, self.start_y, self.start_x, self.start_y, outline='red', width=3, dash=(5, 2))
 
@@ -84,4 +95,3 @@ class AreaSelector(tk.Toplevel):
 
         self.grab_release()
         self.destroy()
-

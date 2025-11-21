@@ -210,51 +210,102 @@ class GameReaderApp:
                 messagebox.showerror("Błąd", f"Wystąpił nieoczekiwany błąd: {e}")
 
     def select_area_for_preset(self):
-        """Uruchamia selektor obszaru i nadpisuje plik presetu."""
+        """Uruchamia selektor obszaru, przelicza na 1080p i nadpisuje plik presetu."""
         preset_path = self.preset_var.get()
         if not preset_path or not os.path.exists(preset_path):
-            messagebox.showerror("Błąd", "Wybierz prawidłowy plik presetu z listy, zanim wybierzesz obszar.")
+            messagebox.showerror("Błąd", "Wybierz prawidłowy plik presetu z listy.")
             return
+
+        # Wczytaj obecny preset, aby pobrać starą geometrię
+        old_geometry_scaled = None
+        try:
+            with open(preset_path, 'r', encoding='utf-8') as f:
+                preset_data = json.load(f)
+                old_monitor = preset_data.get('monitor')
+                old_res_str = preset_data.get('resolution', '1920x1080') # Domyślne 1080p
+        except Exception:
+            old_monitor = None
+            old_res_str = '1920x1080'
 
         # Ukryj główne okno
         self.root.withdraw()
-        time.sleep(0.5) # Daj systemowi chwilę
+        time.sleep(0.5)
 
-        # Zrób pełny zrzut ekranu PRZED otwarciem okna wyboru
         screenshot = None
         try:
             screenshot = _capture_fullscreen_image()
             if not screenshot:
                 messagebox.showerror("Błąd", "Nie można było zrobić zrzutu ekranu.")
+                self.root.deiconify()
                 return
 
-            selector = AreaSelector(self.root, screenshot)
-            new_geometry = selector.geometry
+            screen_w, screen_h = screenshot.size
+
+            # --- PRZELICZANIE STAREGO OBSZARU DO AKTUALNEGO EKRANU ---
+            # Jeśli mamy stary obszar, musimy go przeskalować z "resolution" w JSON
+            # do aktualnej rozdzielczości zrzutu ekranu, żeby wyświetlić go poprawnie.
+            if old_monitor:
+                try:
+                    orig_w, orig_h = map(int, old_res_str.lower().split('x'))
+                    scale_x = screen_w / orig_w
+                    scale_y = screen_h / orig_h
+                    
+                    old_geometry_scaled = {
+                        'left': int(old_monitor['left'] * scale_x),
+                        'top': int(old_monitor['top'] * scale_y),
+                        'width': int(old_monitor['width'] * scale_x),
+                        'height': int(old_monitor['height'] * scale_y)
+                    }
+                except Exception as e:
+                    print(f"Nie udało się przeskalować starego obszaru: {e}")
+
+            # Przekazujemy old_geometry_scaled do selektora
+            selector = AreaSelector(self.root, screenshot, current_geometry=old_geometry_scaled)
+            new_geometry_screen = selector.geometry
         
         except Exception as e:
             print(f"Błąd podczas wyboru obszaru: {e}", file=sys.stderr)
-            new_geometry = None
+            new_geometry_screen = None
         finally:
-            # Pokaż główne okno z powrotem
             self.root.deiconify()
-            # Zamknij obraz (ważne)
             if screenshot:
                 screenshot.close()
 
-        if new_geometry:
+        if new_geometry_screen:
             try:
-                # Wczytaj, zmodyfikuj, zapisz
+                # Niezależnie od tego jaki masz monitor (4K, 1440p, 800p),
+                # zapisujemy współrzędne przeliczone na bazę 1920x1080.
+                
+                base_w, base_h = 1920, 1080
+                current_w, current_h = screen_w, screen_h # type: ignore (zdefiniowane wyżej)
+
+                # Obliczamy faktor skalowania W DÓŁ (lub w górę) do 1080p
+                scale_to_base_x = base_w / current_w
+                scale_to_base_y = base_h / current_h
+
+                final_geometry = {
+                    'left': int(new_geometry_screen['left'] * scale_to_base_x),
+                    'top': int(new_geometry_screen['top'] * scale_to_base_y),
+                    'width': int(new_geometry_screen['width'] * scale_to_base_x),
+                    'height': int(new_geometry_screen['height'] * scale_to_base_y)
+                }
+
                 with open(preset_path, 'r', encoding='utf-8') as f:
                     preset_data = json.load(f)
                 
-                preset_data['monitor'] = new_geometry
+                preset_data['monitor'] = final_geometry
+                preset_data['resolution'] = "1920x1080" # Wymuszamy standard 1080p
                 
                 with open(preset_path, 'w', encoding='utf-8') as f:
                     json.dump(preset_data, f, indent=4)
                     
-                messagebox.showinfo("Sukces", f"Obszar dla presetu '{os.path.basename(preset_path)}' został zaktualizowany.")
+                messagebox.showinfo("Sukces", 
+                    f"Obszar zaktualizowany.\n\n"
+                    f"Zrzut ekranu: {current_w}x{current_h}\n"
+                    f"Zapisano jako (Baza 1080p): {final_geometry}")
+
             except Exception as e:
-                print(f"BŁĄD: Nie można zapisać presetu {preset_path}: {e}", file=sys.stderr)
+                print(f"BŁĄD: Nie można zapisać presetu: {e}", file=sys.stderr)
                 messagebox.showerror("Błąd zapisu", f"Nie można było zapisać pliku presetu: {e}")
         else:
             print("Wybór obszaru anulowany.")
@@ -360,7 +411,6 @@ class GameReaderApp:
             self.names_file_var.set("")
 
     def select_audio_dir(self):
-        """Otwiera dialog wyboru folderu audio i aktualizuje zmienną."""
         current_dir = self.audio_dir_var.get()
         path = filedialog.askdirectory(
             title="Wybierz folder z plikami audio",
@@ -368,11 +418,10 @@ class GameReaderApp:
         )
         if path:
             self.audio_dir_var.set(path)
-            messagebox.showinfo("Zmieniono ścieżkę", f"Zmieniono katalog audio (tymczasowo).\n\nNaciśnij 'Zapisz zmiany...' w menu Preset, aby utrwalić.", master=self.root)
-
+            self._update_preset_field('audio_dir', path) # AUTO-ZAPIS
+            messagebox.showinfo("Zapisano", f"Zmieniono i zapisano katalog audio:\n{path}", master=self.root)
 
     def select_subtitles_file(self):
-        """Otwiera dialog wyboru pliku napisów i aktualizuje zmienną."""
         current_file = self.subtitles_file_var.get()
         path = filedialog.askopenfilename(
             title="Wybierz plik z napisami",
@@ -381,11 +430,10 @@ class GameReaderApp:
         )
         if path:
             self.subtitles_file_var.set(path)
-            messagebox.showinfo("Zmieniono ścieżkę", f"Zmieniono plik napisów (tymczasowo).\n\nNaciśnij 'Zapisz zmiany...' w menu Preset, aby utrwalić.", master=self.root)
-
+            self._update_preset_field('text_file_path', path) # AUTO-ZAPIS
+            messagebox.showinfo("Zapisano", f"Zmieniono i zapisano plik napisów:\n{os.path.basename(path)}", master=self.root)
 
     def select_names_file(self):
-        """Otwiera dialog wyboru pliku imion i aktualizuje zmienną."""
         current_file = self.names_file_var.get()
         path = filedialog.askopenfilename(
             title="Wybierz plik z imionami (opcjonalnie)",
@@ -394,8 +442,8 @@ class GameReaderApp:
         )
         if path:
             self.names_file_var.set(path)
-            messagebox.showinfo("Zmieniono ścieżkę", f"Zmieniono plik imion (tymczasowo).\n\nNaciśnij 'Zapisz zmiany...' w menu Preset, aby utrwalić.", master=self.root)
-
+            self._update_preset_field('names_file_path', path) # AUTO-ZAPIS
+            messagebox.showinfo("Zapisano", f"Zmieniono i zapisano plik imion:\n{os.path.basename(path)}", master=self.root)
             
     def save_paths_to_preset(self):
         """Zapisuje ścieżki ze zmiennych z powrotem do pliku presetu."""
@@ -583,6 +631,26 @@ class GameReaderApp:
 
         # 4. Zniszcz okno GUI
         self.root.destroy()
+
+    def _update_preset_field(self, key: str, value: str):
+        """Pomocnicza funkcja do szybkiej aktualizacji pojedynczego pola w presecie."""
+        preset_path = self.preset_var.get()
+        if not preset_path or not os.path.exists(preset_path):
+            return
+
+        try:
+            with open(preset_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            data[key] = value
+            
+            with open(preset_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=4)
+            
+            print(f"Zaktualizowano preset: {key} -> {value}")
+        except Exception as e:
+            print(f"Błąd auto-zapisu presetu: {e}", file=sys.stderr)
+            messagebox.showerror("Błąd zapisu", f"Nie udało się zapisać zmiany w presecie: {e}")
 
 def main():
     
