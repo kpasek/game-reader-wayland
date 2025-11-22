@@ -42,7 +42,17 @@ class GameReaderApp:
         self.root = root
         self.root.title("Game Reader (Wayland)")
         # Zmniejszono rozmiar okna po usunięciu sekcji ścieżek
-        self.root.geometry("600x320") 
+        self.root.geometry("700x380")
+
+        # Zmienne
+        self.preset_var = tk.StringVar()
+        self.audio_dir_var = tk.StringVar()
+        self.subtitles_file_var = tk.StringVar()
+        self.names_file_var = tk.StringVar()
+        
+        # Zmienne dla Regex
+        self.regex_mode_var = tk.StringVar()
+        self.custom_regex_var = tk.StringVar()
 
         self.resolutions = {
             "1080p (1920x1080)": (1920, 1080),
@@ -77,27 +87,43 @@ class GameReaderApp:
         
         # --- Wybór presetu ---
         ttk.Label(main_frame, text="Wybierz preset:").pack(anchor=tk.W)
-        self.preset_var = tk.StringVar()
         self.preset_combo = ttk.Combobox(main_frame, textvariable=self.preset_var, state="readonly", width=60)
         self.preset_combo.pack(fill=tk.X, anchor=tk.W, pady=5)
-        # Powiązanie funkcji z wyborem presetu
         self.preset_combo.bind("<<ComboboxSelected>>", self.on_preset_selected)
         
-        # --- Pole Regex ---
-        ttk.Label(main_frame, text="Wzorzec Regex (użyj {NAMES} dla imion z pliku):").pack(anchor=tk.W, pady=(10, 0))
-        self.regex_var = tk.StringVar()
-        self.regex_entry = ttk.Entry(main_frame, textvariable=self.regex_var, width=60)
-        self.regex_entry.pack(fill=tk.X, anchor=tk.W, pady=5)
+        ttk.Label(main_frame, text="Wzorzec wycinania imion:").pack(anchor=tk.W, pady=(10, 0))
+        
+        regex_frame = ttk.Frame(main_frame)
+        regex_frame.pack(fill=tk.X, pady=5)
+        
+        self.regex_patterns = {
+            "Nie wycinaj imion": r"",
+            "Standardowy (Imie: Kwestia)": r"^(?i)({NAMES})\s*[:：]",
+            "W nawiasach ([Imie] Kwestia)": r"^\[({NAMES})\]",
+            "Samo imię na początku": r"^({NAMES})\s+",
+            "Inne (wpisz własny)": "CUSTOM"
+        }
+        
+        self.regex_combo = ttk.Combobox(
+            regex_frame, 
+            textvariable=self.regex_mode_var,
+            values=list(self.regex_patterns.keys()),
+            state="readonly", 
+            width=35
+        )
+        self.regex_combo.pack(side=tk.LEFT, padx=(0, 5))
+        self.regex_combo.bind("<<ComboboxSelected>>", self._toggle_regex_entry)
 
-        # --- Wybór Rozdzielczości ---
-        ttk.Label(main_frame, text="Przelicz obszar do rozdzielczości:").pack(anchor=tk.W, pady=(10, 0))
-        self.resolution_var = tk.StringVar(value="Niestandardowa (z presetu)")
+        self.custom_regex_entry = ttk.Entry(regex_frame, textvariable=self.custom_regex_var)
+        self.custom_regex_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        ttk.Label(main_frame, text="Docelowa rozdzielczość gry (skalowanie obszaru):").pack(anchor=tk.W, pady=(10, 0))
+        
+        self.resolution_var = tk.StringVar()
         self.res_combo = ttk.Combobox(main_frame, textvariable=self.resolution_var,
-                                      state="readonly", width=60,
+                                      width=60,
                                       values=list(self.resolutions.keys()))
         self.res_combo.pack(fill=tk.X, anchor=tk.W, pady=5)
-        
-        # --- Sekcja ścieżek została usunięta z tego miejsca ---
 
         # --- Przyciski ---
         button_frame = ttk.Frame(main_frame)
@@ -111,7 +137,7 @@ class GameReaderApp:
         
         # --- Załaduj konfigurację ---
         self.settings = self.load_app_config()
-        self.update_gui_from_config() # To musi być przed logiką autostartu
+        self.update_gui_from_config()
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         # --- Logika Autostartu ---
@@ -330,7 +356,8 @@ class GameReaderApp:
             'ocr_contrast': False,
             'last_resolution_key': 'Niestandardowa (z presetu)'
         }
-
+        if 'last_regex_mode' not in config: config['last_regex_mode'] = list(self.regex_patterns.keys())[0]
+        if 'last_custom_regex' not in config: config['last_custom_regex'] = r"^(?i)({NAMES})\s*[:：]"
         try:
             with open(APP_CONFIG_FILE, 'r', encoding='utf-8') as f:
                 config_from_file = json.load(f)
@@ -345,14 +372,15 @@ class GameReaderApp:
     def save_app_config(self, new_preset: Optional[str] = None):
         """Zapisuje listę presetów, regex i rozdzielczość do pliku JSON."""
         if new_preset:
-            if new_preset in self.settings['recent_presets']:
-                self.settings['recent_presets'].remove(
-                    new_preset)  # Przesuń na górę
-            self.settings['recent_presets'].insert(0, new_preset)
-            # Ogranicz do 10
-            self.settings['recent_presets'] = self.settings['recent_presets'][:10]
-            
-        self.settings['last_regex'] = self.regex_var.get()
+             if new_preset in self.settings['recent_presets']:
+                self.settings['recent_presets'].remove(new_preset)
+             self.settings['recent_presets'].insert(0, new_preset)
+             self.settings['recent_presets'] = self.settings['recent_presets'][:10]
+
+        # Zapisywanie nowych pól
+        self.settings['last_regex_mode'] = self.regex_mode_var.get()
+        self.settings['last_custom_regex'] = self.custom_regex_var.get()
+        # Zapisujemy to co jest wpisane w Combobox (nawet jak to custom string "1366x768")
         self.settings['last_resolution_key'] = self.resolution_var.get()
 
         try:
@@ -366,11 +394,16 @@ class GameReaderApp:
         self.preset_combo['values'] = self.settings.get('recent_presets', [])
         if self.settings.get('recent_presets'):
             self.preset_var.set(self.settings['recent_presets'][0])
+            
+        # Regex GUI
+        last_mode = self.settings.get('last_regex_mode', list(self.regex_patterns.keys())[0])
+        self.regex_mode_var.set(last_mode)
+        self.custom_regex_var.set(self.settings.get('last_custom_regex', ""))
+        self._toggle_regex_entry() # Odśwież stan pola tekstowego
         
-        self.regex_var.set(self.settings.get('last_regex', r"^(?i)({NAMES})\s*[:：]"))
-        
+        # Rozdzielczość
         self.resolution_var.set(self.settings.get('last_resolution_key', 'Niestandardowa (z presetu)'))
-
+        
         self.on_preset_selected()
 
     def select_new_preset(self):
@@ -388,27 +421,22 @@ class GameReaderApp:
     # --- Funkcje do zarządzania ścieżkami (teraz wywoływane z menu) ---
 
     def on_preset_selected(self, event=None):
-        """Wczytuje ścieżki z wybranego presetu i zapisuje w zmiennych."""
         preset_path = self.preset_var.get()
         if not preset_path or not os.path.exists(preset_path):
-            self.audio_dir_var.set("")
-            self.subtitles_file_var.set("")
-            self.names_file_var.set("")
             return
         
+        # 1. Automatyczna naprawa rozdzielczości w pliku presetu
+        self._ensure_preset_1080p(preset_path)
+
+        # 2. Wczytanie ścieżek (bez zmian)
         try:
             with open(preset_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            
             self.audio_dir_var.set(data.get('audio_dir', ''))
             self.subtitles_file_var.set(data.get('text_file_path', ''))
             self.names_file_var.set(data.get('names_file_path', ''))
-
         except Exception as e:
-            messagebox.showerror("Błąd odczytu presetu", f"Nie można wczytać pliku presetu: {e}")
-            self.audio_dir_var.set("")
-            self.subtitles_file_var.set("")
-            self.names_file_var.set("")
+            print(f"Błąd odczytu presetu: {e}")
 
     def select_audio_dir(self):
         current_dir = self.audio_dir_var.get()
@@ -520,14 +548,35 @@ class GameReaderApp:
 
     def start_reading(self):
         config_path = self.preset_var.get()
-        regex_pattern = self.regex_var.get()
-        selected_res_key = self.resolution_var.get()
         
+        # 1. Pobieranie Regexa z nowego UI
+        regex_mode = self.regex_mode_var.get()
+        if regex_mode == "Inne (wpisz własny)":
+            regex_pattern = self.custom_regex_var.get()
+        else:
+            regex_pattern = self.regex_patterns.get(regex_mode, "")
+
+        # 2. Obsługa Niestandardowej Rozdzielczości
+        res_input = self.resolution_var.get()
+        target_res_tuple = None
+        
+        # Sprawdź czy to klucz ze słownika (np. "1080p ...")
+        if res_input in self.resolutions:
+            target_res_tuple = self.resolutions[res_input]
+        else:
+            # Spróbuj sparsować ręcznie wpisany string "WxH"
+            try:
+                w, h = map(int, res_input.lower().split('x'))
+                target_res_tuple = (w, h)
+                print(f"Używam niestandardowej rozdzielczości: {w}x{h}")
+            except ValueError:
+                print("Nieprawidłowy format rozdzielczości. Używam domyślnej z presetu.")
+                target_res_tuple = None
+
         if not config_path or not os.path.exists(config_path):
             messagebox.showerror("Błąd", "Nie wybrano prawidłowego pliku presetu.")
             return
 
-        # Zapisz obecne ustawienia (regex, ostatni preset, ostatnia rozdzielczość)
         self.save_app_config(new_preset=config_path)
 
         # Wyczyść flagę stop i kolejkę
@@ -535,14 +584,11 @@ class GameReaderApp:
         while not audio_queue.empty():
             try: audio_queue.get_nowait()
             except queue.Empty: break
-        
-        # Pobierz docelową rozdzielczość (lub None)
-        target_res_tuple = self.resolutions.get(selected_res_key)
-
+            
         self.player_thread = PlayerThread(stop_event, audio_queue)
         self.reader_thread = ReaderThread(
             config_path, regex_pattern, self.settings, stop_event, audio_queue,
-            target_resolution=target_res_tuple)
+            target_resolution=target_res_tuple) # Przekazujemy tuple (z listy lub custom)
         
         self.player_thread.start()
         self.reader_thread.start()
@@ -651,7 +697,65 @@ class GameReaderApp:
         except Exception as e:
             print(f"Błąd auto-zapisu presetu: {e}", file=sys.stderr)
             messagebox.showerror("Błąd zapisu", f"Nie udało się zapisać zmiany w presecie: {e}")
+    
+    def _ensure_preset_1080p(self, preset_path: str):
+        """
+        Sprawdza, czy preset jest w bazie 1920x1080. 
+        Jeśli nie, przelicza koordynaty obszaru, aktualizuje plik i zapisuje.
+        """
+        try:
+            with open(preset_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            current_res_str = data.get('resolution', '')
+            monitor = data.get('monitor', {})
+            
+            # Jeśli to już 1080p lub brak danych, nic nie rób
+            if current_res_str == "1920x1080":
+                return
 
+            print(f"Standaryzacja presetu z {current_res_str} na 1920x1080...")
+            
+            # Parsowanie obecnej rozdzielczości
+            if not current_res_str or 'x' not in current_res_str:
+                # Zakładamy, że stare, błędne presety bez rozdzielczości były robione pod 1080p lub ignorujemy
+                orig_w, orig_h = 1920, 1080 
+            else:
+                orig_w, orig_h = map(int, current_res_str.lower().split('x'))
+
+            # Obliczanie skali do 1080p
+            target_w, target_h = 1920, 1080
+            scale_x = target_w / orig_w
+            scale_y = target_h / orig_h
+
+            # Przeliczanie obszaru
+            new_monitor = {
+                'left': int(monitor.get('left', 0) * scale_x),
+                'top': int(monitor.get('top', 0) * scale_y),
+                'width': int(monitor.get('width', 0) * scale_x),
+                'height': int(monitor.get('height', 0) * scale_y)
+            }
+
+            # Aktualizacja danych
+            data['monitor'] = new_monitor
+            data['resolution'] = "1920x1080"
+
+            # Zapis do pliku
+            with open(preset_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=4)
+            
+            print(f"Zaktualizowano preset do standardu 1080p: {new_monitor}")
+
+        except Exception as e:
+            print(f"BŁĄD podczas standaryzacji presetu: {e}", file=sys.stderr)
+
+    def _toggle_regex_entry(self, event=None):
+        """Włącza/wyłącza pole tekstowe w zależności od wyboru w comboboxie."""
+        selection = self.regex_mode_var.get()
+        if selection == "Inne (wpisz własny)":
+            self.custom_regex_entry.config(state="normal")
+        else:
+            self.custom_regex_entry.config(state="disabled")
 def main():
     
     parser = argparse.ArgumentParser(description="Game Reader dla Wayland.")

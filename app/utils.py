@@ -48,9 +48,7 @@ def load_text_file(filepath: str) -> List[str]:
 def _capture_fullscreen_image() -> Optional[Image.Image]:
     """Wykonuje zrzut całego ekranu (KDE) przy użyciu pliku tymczasowego (w RAM)."""
     try:
-        with FreedesktopDBusWrapper() as dbus:
-            ss = dbus.grab()
-        return ss
+        return ImageGrab.grab()
 
     except Exception as e:
         print(f"BŁĄD: Nieoczekiwany błąd podczas przechwytywania (KDE): {e}", file=sys.stderr)
