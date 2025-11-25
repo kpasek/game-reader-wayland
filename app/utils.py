@@ -13,6 +13,22 @@ from thefuzz import fuzz
 OCR_LANGUAGE = 'pol'
 MIN_MATCH_THRESHOLD = 75
 
+
+def _smart_remove_name(text: str) -> str:
+    """
+    Usuwa imię postaci, jeśli wykryje separator (np. 'Imię - Kwestia').
+    Działa lepiej niż sztywny regex dla długich nazw (np. 'Wojownik z klanu - Cześć').
+    """
+    separators = [":", "-", "—", "–", ";"]
+
+    for sep in separators:
+        if sep in text:
+            parts = text.split(sep, 1)
+            # Jeśli lewa strona (imię) jest krótsza niż 40 znaków, a prawa (tekst) niepusta
+            if len(parts) == 2 and len(parts[0]) < 40 and parts[1].strip():
+                return parts[1].strip()
+    return text
+
 def load_config(filename: str) -> Dict[str, Any]:
     """Wczytuje plik konfiguracyjny JSON."""
     try:
@@ -64,21 +80,27 @@ def capture_screen_region(monitor_config: Dict[str, int]) -> Optional[Image.Imag
             f"BŁĄD: Błąd podczas przechwytywania regionu: {e}", file=sys.stderr)
         return None
 
+
 def ocr_and_clean_image(image: Image.Image, regex_pattern: str) -> str:
-    """Wykonuje OCR i usuwa tekst pasujący do regex."""
+    """Wykonuje OCR i usuwa tekst pasujący do regex oraz inteligentnie usuwa imiona."""
     try:
-        text = pytesseract.image_to_string(image, lang=OCR_LANGUAGE).strip()
+        # Dodano config '--psm 6' (zakłada blok tekstu), co często poprawia wyniki w grach
+        text = pytesseract.image_to_string(image, lang=OCR_LANGUAGE, config='--psm 6').strip()
         text = text.replace('\n', ' ')
-        
+
         if not text:
             return ""
 
+        # 1. Najpierw stary Regex (jeśli zdefiniowany)
         if regex_pattern:
             try:
                 text = re.sub(regex_pattern, "", text).strip()
             except re.error as e:
                 print(f"OSTRZEŻENIE: Błędny Regex: {e}", file=sys.stderr)
-        
+
+        # 2. Następnie inteligentne usuwanie separatorów (nowość)
+        text = _smart_remove_name(text)
+
         return text
 
     except Exception as e:
@@ -119,27 +141,62 @@ def find_best_match(ocr_text: str, subtitles_list: List[str], mode: str) -> Opti
     ocr_text = _clean(ocr_text)
     if not ocr_text:
         return None
+    # Większość "napisów" o długości 1 to błędy OCR (szumy, krawędzie).
+    # Wyjątkiem są dialogi typu "A?", "No.", ale zazwyczaj mają interpunkcję.
+    if len(ocr_text) < 2:
+        return None
 
     if mode == "Partial Lines":
         best_score = 0
         best_index = -1
         threshold = 90 if len(ocr_text) < 20 else 75
 
+        ocr_lower = ocr_text.lower()
+        ocr_len = len(ocr_lower)
+
         for i, line in enumerate(subtitles_list):
             if not line:
                 continue
+            line_lower = line.lower()
+            line_len = len(line_lower)
 
-            score = _best_prefix_match(ocr_text, line)
+            len_diff = abs(ocr_len - line_len)
+
+            if ocr_len < 5:
+                if len_diff > 1:
+                    continue
+            else:
+                if len_diff > ocr_len * 0.8:
+                    continue
+            if ocr_len < 8:
+                score = fuzz.ratio(ocr_lower, line_lower)
+            else:
+                # Dla długich zdań - standardowa logika (wybaczająca błędy kolejności/brakujące słowa)
+                score = fuzz.ratio(ocr_lower, line_lower)
+
+                # Jeśli podstawowy wynik jest obiecujący, sprawdź token_sort (ignoruje kolejność słów)
+                if 50 < score < 90:
+                    score2 = fuzz.token_sort_ratio(ocr_lower, line_lower)
+                    score = max(score, score2)
+
             if score > best_score:
                 best_score = score
                 best_index = i
 
-        if best_index >= 0 and best_score >= threshold:
-            print(f"Dopasowano fragment (prefix): Linia {best_index + 1}, wynik: {best_score}%")
-            return best_index, best_score
+                if best_score > 97:
+                    break
+
+        if ocr_len < 5:
+            threshold = 95  # Bardzo wysoki próg dla krótkich słów (np. "Tak" musi być "Tak")
+        elif ocr_len < 15:
+            threshold = 85
         else:
-            print(f"Brak dopasowania fragmentu (najlepszy: {best_score}%)")
-            return None
+            threshold = 75  # Dłuższe zdania mogą mieć więcej błędów OCR
+
+        if best_index >= 0 and best_score >= threshold:
+            return best_index, best_score
+
+        return None
 
     best_score = 0
     best_index = -1

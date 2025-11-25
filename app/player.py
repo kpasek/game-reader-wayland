@@ -13,10 +13,11 @@ class PlayerThread(threading.Thread):
     w celu uzyskania wysokiej jakości i niskich opóźnień.
     """
 
-    def __init__(self, stop_event: threading.Event, audio_queue):
+    def __init__(self, stop_event: threading.Event, audio_queue, base_speed_callback=None):
         super().__init__(daemon=True)
         self.stop_event = stop_event
         self.audio_queue = audio_queue
+        self.base_speed_callback = base_speed_callback
         self.name = "PlayerThread"
         self.player_executable = None
         self.player_type = None  # 'mpv' lub 'ffplay'
@@ -77,15 +78,17 @@ class PlayerThread(threading.Thread):
             try:
                 # 1. Sprawdź rozmiar kolejki (ta sama logika)
                 queue_size = self.audio_queue.qsize()
+                base_speed = self.base_speed_callback() if self.base_speed_callback else 1.3
 
                 if queue_size >= 3:
-                    speed = 1.3
+                    speed_multiplier = 1.3
                 elif queue_size == 2:
-                    speed = 1.2
-                elif queue_size == 1:
-                    speed = 1.1
+                    speed_multiplier = 1.15
                 else:
-                    speed = 1.0
+                    speed_multiplier = 1.0
+
+                speed = base_speed * speed_multiplier
+                speed = max(0.8, min(speed, 2.0))
 
                 print(
                     f"Odtwarzam: {os.path.basename(file_path)} (Kolejka: {queue_size}, Prędkość: {speed}x)")

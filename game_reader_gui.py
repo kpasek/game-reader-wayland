@@ -10,6 +10,7 @@ import queue
 import argparse
 from typing import List, Dict, Any, Optional
 from app.area_selector import AreaSelector
+from app.log import LogWindow
 from app.player import PlayerThread
 from app.reader import ReaderThread
 from app.settings import SettingsDialog
@@ -29,13 +30,14 @@ except ImportError:
 APP_CONFIG_FILE = 'app_config.json'
 
 audio_queue = queue.Queue()
+log_queue = queue.Queue()
 stop_event = threading.Event()
 
 class GameReaderApp:
     def __init__(self, root: tk.Tk, autostart_preset: Optional[str], game_command: Optional[List[str]]):        
         self.root = root
         self.root.title("Game Reader (Wayland)")
-        self.root.geometry("700x380")
+        self.root.geometry("700x450")
 
         self.preset_var = tk.StringVar()
         self.audio_dir_var = tk.StringVar()
@@ -53,6 +55,10 @@ class GameReaderApp:
             "1600p (2560x1600)": (2560, 1600),
             "Niestandardowa": None
         }
+
+        self.audio_speed_var = tk.DoubleVar(value=1.3)
+        self.log_queue = queue.Queue()
+        self.log_window_ref = None
 
         self.autostart_preset = autostart_preset
         self.game_command = game_command
@@ -120,6 +126,26 @@ class GameReaderApp:
         
         self.stop_button = ttk.Button(button_frame, text="Zatrzymaj", command=self.stop_reading, state="disabled")
         self.stop_button.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5)
+
+        ttk.Label(main_frame, text="Prędkość lektora:").pack(anchor=tk.W, pady=(10, 0))
+        speed_frame = ttk.Frame(main_frame)
+        speed_frame.pack(fill=tk.X)
+
+        self.speed_scale = ttk.Scale(
+            speed_frame, from_=0.8, to=2.0,
+            variable=self.audio_speed_var,
+            command=lambda v: self.speed_value_label.config(text=f"{float(v):.2f}x")
+        )
+        self.speed_scale.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        # Bind puszczenia myszki do zapisu
+        self.speed_scale.bind("<ButtonRelease-1>", self.on_speed_change)
+
+        self.speed_value_label = ttk.Label(speed_frame, text="1.3x")
+        self.speed_value_label.pack(side=tk.LEFT, padx=5)
+
+        # ... (podpięcie handlerów Regex) ...
+        self.regex_combo.bind("<<ComboboxSelected>>", self.on_regex_change)
+        self.custom_regex_entry.bind("<FocusOut>", self.on_custom_regex_save)
         
         # --- Załaduj konfigurację ---
         self.settings = self.load_app_config()
@@ -168,8 +194,9 @@ class GameReaderApp:
 
         # --- Menu Narzędzia ---
         tools_menu = tk.Menu(menubar, tearoff=0)
-        tools_menu.add_command(label="Generuj polecenie startowe Steam",
-                              command=self.generate_steam_command)
+        tools_menu.add_command(label="Podgląd logów na żywo", command=self.open_log_window)  # NOWE
+        tools_menu.add_command(label="Generuj polecenie startowe Steam", command=self.generate_steam_command)
+
         menubar.add_cascade(label="Narzędzia", menu=tools_menu)
         
         # --- Menu Pomoc ---
@@ -412,6 +439,20 @@ class GameReaderApp:
             self.audio_dir_var.set(data.get('audio_dir', ''))
             self.subtitles_file_var.set(data.get('text_file_path', ''))
             self.names_file_var.set(data.get('names_file_path', ''))
+            # Ładowanie prędkości
+            saved_speed = data.get("audio_speed", 1.3)
+            self.audio_speed_var.set(saved_speed)
+            self.speed_value_label.config(text=f"{saved_speed}x")
+
+            # Ładowanie Regex
+            saved_mode = data.get("regex_mode_name", list(self.regex_patterns.keys())[0])
+            saved_pattern = data.get("regex_pattern", "")
+
+            self.regex_mode_var.set(saved_mode)
+            if saved_mode == "Inny (wpisz własny)":
+                self.custom_regex_var.set(saved_pattern)
+            self._toggle_regex_entry()
+
         except Exception as e:
             print(f"Błąd odczytu presetu: {e}")
 
@@ -561,11 +602,16 @@ class GameReaderApp:
         while not audio_queue.empty():
             try: audio_queue.get_nowait()
             except queue.Empty: break
-            
-        self.player_thread = PlayerThread(stop_event, audio_queue)
+
+        current_speed_provider = lambda: self.audio_speed_var.get()
+
+        self.player_thread = PlayerThread(stop_event, audio_queue, base_speed_callback=current_speed_provider)
+
         self.reader_thread = ReaderThread(
             config_path, regex_pattern, self.settings, stop_event, audio_queue,
-            target_resolution=target_res_tuple) # Przekazujemy tuple (z listy lub custom)
+            target_resolution=target_res_tuple,
+            log_queue=self.log_queue  # Przekazujemy kolejkę logów
+        )
         
         self.player_thread.start()
         self.reader_thread.start()
@@ -733,6 +779,52 @@ class GameReaderApp:
             self.custom_regex_entry.config(state="normal")
         else:
             self.custom_regex_entry.config(state="disabled")
+
+    def open_log_window(self):
+        if self.log_window_ref is None or not self.log_window_ref.winfo_exists():
+            self.log_window_ref = LogWindow(self.root, self.log_queue)
+        else:
+            self.log_window_ref.lift()
+
+    def _auto_save_to_preset(self, key: str, value: Any):
+        preset_path = self.preset_var.get()
+        if not preset_path or not os.path.exists(preset_path): return
+
+        try:
+            with open(preset_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            data[key] = value
+
+            with open(preset_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=4)
+            print(f"Auto-zapis presetu: {key} -> {value}")
+        except Exception as e:
+            print(f"Błąd auto-zapisu presetu: {e}")
+
+    def on_speed_change(self, event=None):
+        # Zapisz do presetu po puszczeniu suwaka
+        val = round(self.audio_speed_var.get(), 2)
+        self.speed_value_label.config(text=f"{val}x")  # Aktualizacja etykiety
+        self._auto_save_to_preset("audio_speed", val)
+
+    def on_regex_change(self, event=None):
+        self._toggle_regex_entry()
+        # Pobierz pattern
+        regex_mode = self.regex_mode_var.get()
+        if regex_mode != "Inny (wpisz własny)":
+            # Jeśli to nie custom, zapisz od razu wybrany tryb/wzorzec
+            pattern = self.regex_patterns.get(regex_mode, "")
+            self._auto_save_to_preset("regex_pattern", pattern)
+            self._auto_save_to_preset("regex_mode_name", regex_mode)
+
+    def on_custom_regex_save(self, event=None):
+        if self.regex_mode_var.get() == "Inny (wpisz własny)":
+            pattern = self.custom_regex_var.get()
+            self._auto_save_to_preset("regex_pattern", pattern)
+            self._auto_save_to_preset("regex_mode_name", "Inny (wpisz własny)")
+
+
 def main():
     
     parser = argparse.ArgumentParser(description="Game Reader dla Wayland.")

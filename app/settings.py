@@ -55,10 +55,12 @@ class SettingsDialog(tk.Toplevel):
         scale_frame = ttk.Frame(ocr_group)
         scale_frame.pack(fill=tk.X)
         ttk.Label(scale_frame, text="Skala obrazu:").pack(side=tk.LEFT)
+        scale_values = [round(x * 0.1, 1) for x in range(10, 1, -1)]
+
         scale_combo = ttk.Combobox(
             scale_frame,
             textvariable=self.ocr_scale_var,
-            values=[1.0, 0.75, 0.5],
+            values=scale_values,
             state="readonly",
             width=5
         )

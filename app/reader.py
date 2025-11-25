@@ -1,5 +1,4 @@
 from collections import deque
-from datetime import date
 import datetime
 import os
 import sys
@@ -8,7 +7,6 @@ import threading
 import time
 from typing import Any, Deque, Dict, Optional, Tuple
 
-from app.dbus_ss import FreedesktopDBusWrapper
 from app.utils import capture_screen_region, find_best_match, load_config, load_text_file, ocr_and_clean_image
 
 try:
@@ -23,13 +21,15 @@ class ReaderThread(threading.Thread):
 
     def __init__(self, config_path: str, regex_template: str, app_settings: Dict[str, Any],
                  stop_event: threading.Event, audio_queue,
-                 target_resolution: Optional[Tuple[int, int]]):
+                 target_resolution: Optional[Tuple[int, int]],
+                 log_queue=None):
         super().__init__(daemon=True)
         self.name = "ReaderThread"
         print(f"Inicjalizacja wątku czytelnika z presetem: {config_path}")
 
         self.stop_event = stop_event
         self.audio_queue = audio_queue
+        self.log_queue = log_queue
         self.config_path = config_path
         self.regex_template = regex_template # Wzorzec z GUI (może zawierać {NAMES})
         self.combined_regex_pattern = ""   # Finalny regex po wczytaniu imion
@@ -175,6 +175,15 @@ class ReaderThread(threading.Thread):
                 print(f"\n{datetime.datetime.now().strftime('%H:%M:%S')} - OCR odczytał: '{ocr_text}'")
 
                 match_result = find_best_match(ocr_text, subtitles, self.subtitle_mode)
+
+                if self.log_queue:
+                    log_entry = {
+                        "time": datetime.datetime.now().strftime('%H:%M:%S'),
+                        "ocr": ocr_text,
+                        "match": match_result,  # (index, score) lub None
+                        "line_text": subtitles[match_result[0]] if match_result else ""
+                    }
+                    self.log_queue.put(log_entry)
 
                 if match_result is not None:
                     best_match_index, best_match_score = match_result
