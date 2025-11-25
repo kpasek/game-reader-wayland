@@ -136,7 +136,6 @@ class PlayerThread(threading.Thread):
                 if process and process.poll() is None:
                     process.kill() # Na wszelki wypadek
             finally:
-                # ZAWSZE oznacz zadanie jako wykonane
                 self.audio_queue.task_done()
 
         print("Odtwarzacz audio zatrzymany.")

@@ -47,7 +47,6 @@ class SettingsDialog(tk.Toplevel):
             mode_group, text="Częściowe linie (eksperymentalne)", value="Partial Lines", variable=self.subtitle_mode_var
         ).pack(anchor=tk.W)
 
-        # --- NOWA GRUPA: Ustawienia OCR ---
         ocr_group = ttk.LabelFrame(
             frame, text="Wydajność i Preprocessing OCR", padding="10")
         ocr_group.pack(fill=tk.X, pady=5)
@@ -59,7 +58,7 @@ class SettingsDialog(tk.Toplevel):
         scale_combo = ttk.Combobox(
             scale_frame,
             textvariable=self.ocr_scale_var,
-            values=[1.0, 0.75, 0.5],  # 100%, 75%, 50% # type: ignore
+            values=[1.0, 0.75, 0.5],
             state="readonly",
             width=5
         )

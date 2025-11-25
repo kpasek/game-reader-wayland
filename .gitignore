@@ -4,5 +4,5 @@ build
 preset.json
 app_config.json
 dist
-
+.idea
 __pycache__

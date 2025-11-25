@@ -26,12 +26,6 @@ except ImportError:
     print("Zazwyczaj jest dołączona do Pythona. W Debian/Ubuntu: sudo apt install python3-tk", file=sys.stderr)
     sys.exit(1)
 
-try:
-    from PIL import Image, ImageTk
-except ImportError:
-    print("Błąd: Nie znaleziono biblioteki 'Pillow'. Zainstaluj ją: pip install Pillow", file=sys.stderr)
-    sys.exit(1)
-
 APP_CONFIG_FILE = 'app_config.json'
 
 audio_queue = queue.Queue()
@@ -41,16 +35,13 @@ class GameReaderApp:
     def __init__(self, root: tk.Tk, autostart_preset: Optional[str], game_command: Optional[List[str]]):        
         self.root = root
         self.root.title("Game Reader (Wayland)")
-        # Zmniejszono rozmiar okna po usunięciu sekcji ścieżek
         self.root.geometry("700x380")
 
-        # Zmienne
         self.preset_var = tk.StringVar()
         self.audio_dir_var = tk.StringVar()
         self.subtitles_file_var = tk.StringVar()
         self.names_file_var = tk.StringVar()
-        
-        # Zmienne dla Regex
+
         self.regex_mode_var = tk.StringVar()
         self.custom_regex_var = tk.StringVar()
 
@@ -60,48 +51,43 @@ class GameReaderApp:
             "4K (3840x2160)": (3840, 2160),
             "800p (1280x800)": (1280, 800),
             "1600p (2560x1600)": (2560, 1600),
-            "Niestandardowa (z presetu)": None
+            "Niestandardowa": None
         }
-        
-        # Zapisz argumenty startowe
+
         self.autostart_preset = autostart_preset
         self.game_command = game_command
-        self.game_process = None  # Do śledzenia procesu gry
+        self.game_process = None
 
-        self.settings = {}  # Zostanie wypełnione przez load_app_config
+        self.settings = {}
 
         self.reader_thread: Optional[ReaderThread] = None
         self.player_thread: Optional[PlayerThread] = None
-        
-        # Zmienne przechowujące ścieżki (teraz niewidoczne w GUI, ale używane przez menu)
+
         self.audio_dir_var = tk.StringVar()
         self.subtitles_file_var = tk.StringVar()
         self.names_file_var = tk.StringVar()
 
-        # --- Menu ---
         self.create_menu()
 
-        # --- Główny kontener ---
         main_frame = ttk.Frame(root, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
-        
-        # --- Wybór presetu ---
-        ttk.Label(main_frame, text="Wybierz preset:").pack(anchor=tk.W)
+
+        ttk.Label(main_frame, text="Wybierz lektora").pack(anchor=tk.W)
         self.preset_combo = ttk.Combobox(main_frame, textvariable=self.preset_var, state="readonly", width=60)
         self.preset_combo.pack(fill=tk.X, anchor=tk.W, pady=5)
         self.preset_combo.bind("<<ComboboxSelected>>", self.on_preset_selected)
         
-        ttk.Label(main_frame, text="Wzorzec wycinania imion:").pack(anchor=tk.W, pady=(10, 0))
+        ttk.Label(main_frame, text="Filtr dialogów").pack(anchor=tk.W, pady=(10, 0))
         
         regex_frame = ttk.Frame(main_frame)
         regex_frame.pack(fill=tk.X, pady=5)
         
         self.regex_patterns = {
-            "Nie wycinaj imion": r"",
-            "Standardowy (Imie: Kwestia)": r"^(?i)({NAMES})\s*[:：]",
+            "Brak": r"",
+            "Standardowy (Imie: Kwestia)": r"^(?i)({NAMES})\s*[:：\-; ]*",
             "W nawiasach ([Imie] Kwestia)": r"^\[({NAMES})\]",
             "Samo imię na początku": r"^({NAMES})\s+",
-            "Inne (wpisz własny)": "CUSTOM"
+            "Inny (wpisz własny)": "CUSTOM"
         }
         
         self.regex_combo = ttk.Combobox(
@@ -117,7 +103,7 @@ class GameReaderApp:
         self.custom_regex_entry = ttk.Entry(regex_frame, textvariable=self.custom_regex_var)
         self.custom_regex_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
-        ttk.Label(main_frame, text="Docelowa rozdzielczość gry (skalowanie obszaru):").pack(anchor=tk.W, pady=(10, 0))
+        ttk.Label(main_frame, text="Docelowa rozdzielczość gry:").pack(anchor=tk.W, pady=(10, 0))
         
         self.resolution_var = tk.StringVar()
         self.res_combo = ttk.Combobox(main_frame, textvariable=self.resolution_var,
@@ -158,7 +144,7 @@ class GameReaderApp:
         
         # --- Menu Plik ---
         file_menu = tk.Menu(menubar, tearoff=0)
-        file_menu.add_command(label="Ustawienia (OCR, ...)",
+        file_menu.add_command(label="Ustawienia",
                               command=self.open_settings_dialog)
         file_menu.add_separator()
         file_menu.add_command(label="Wyjdź", command=self.on_closing)
@@ -166,25 +152,23 @@ class GameReaderApp:
         
         # --- Menu Preset ---
         preset_menu = tk.Menu(menubar, tearoff=0)
-        preset_menu.add_command(label="Wybierz nowy plik presetu...", 
+        preset_menu.add_command(label="Wybierz nowego lektora",
                                 command=self.select_new_preset)
-        preset_menu.add_command(label="Wybierz obszar (dla aktywnego)...", 
+        preset_menu.add_command(label="Zmień obszar napisów",
                                 command=self.select_area_for_preset)
         preset_menu.add_separator()
-        preset_menu.add_command(label="Zmień katalog audio...", 
+        preset_menu.add_command(label="Zmień katalog audio",
                                 command=self.select_audio_dir)
-        preset_menu.add_command(label="Zmień plik napisów...", 
+        preset_menu.add_command(label="Zmień plik napisów",
                                 command=self.select_subtitles_file)
-        preset_menu.add_command(label="Zmień plik imion...", 
+        preset_menu.add_command(label="Zmień plik imion",
                                 command=self.select_names_file)
         preset_menu.add_separator()
-        preset_menu.add_command(label="Zapisz zmiany ścieżek w presecie", 
-                                command=self.save_paths_to_preset)
         menubar.add_cascade(label="Preset", menu=preset_menu)
 
         # --- Menu Narzędzia ---
         tools_menu = tk.Menu(menubar, tearoff=0)
-        tools_menu.add_command(label="Generuj polecenie startowe Steam...",
+        tools_menu.add_command(label="Generuj polecenie startowe Steam",
                               command=self.generate_steam_command)
         menubar.add_cascade(label="Narzędzia", menu=tools_menu)
         
@@ -248,7 +232,7 @@ class GameReaderApp:
             with open(preset_path, 'r', encoding='utf-8') as f:
                 preset_data = json.load(f)
                 old_monitor = preset_data.get('monitor')
-                old_res_str = preset_data.get('resolution', '1920x1080') # Domyślne 1080p
+                old_res_str = preset_data.get('resolution', '1920x1080')
         except Exception:
             old_monitor = None
             old_res_str = '1920x1080'
@@ -267,9 +251,6 @@ class GameReaderApp:
 
             screen_w, screen_h = screenshot.size
 
-            # --- PRZELICZANIE STAREGO OBSZARU DO AKTUALNEGO EKRANU ---
-            # Jeśli mamy stary obszar, musimy go przeskalować z "resolution" w JSON
-            # do aktualnej rozdzielczości zrzutu ekranu, żeby wyświetlić go poprawnie.
             if old_monitor:
                 try:
                     orig_w, orig_h = map(int, old_res_str.lower().split('x'))
@@ -285,7 +266,6 @@ class GameReaderApp:
                 except Exception as e:
                     print(f"Nie udało się przeskalować starego obszaru: {e}")
 
-            # Przekazujemy old_geometry_scaled do selektora
             selector = AreaSelector(self.root, screenshot, current_geometry=old_geometry_scaled)
             new_geometry_screen = selector.geometry
         
@@ -299,13 +279,10 @@ class GameReaderApp:
 
         if new_geometry_screen:
             try:
-                # Niezależnie od tego jaki masz monitor (4K, 1440p, 800p),
-                # zapisujemy współrzędne przeliczone na bazę 1920x1080.
                 
                 base_w, base_h = 1920, 1080
                 current_w, current_h = screen_w, screen_h # type: ignore (zdefiniowane wyżej)
 
-                # Obliczamy faktor skalowania W DÓŁ (lub w górę) do 1080p
                 scale_to_base_x = base_w / current_w
                 scale_to_base_y = base_h / current_h
 
@@ -630,7 +607,7 @@ class GameReaderApp:
         self.stop_button.config(state="normal" if running else "disabled")
         
         self.preset_combo.config(state=combo_state)
-        self.regex_entry.config(state=state)
+        self.custom_regex_entry.config(state=state)
         self.res_combo.config(state=combo_state)
         
         try:

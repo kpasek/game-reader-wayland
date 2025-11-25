@@ -1,10 +1,7 @@
 import json
 import os
 import re
-import shutil
-import subprocess
 import sys
-import tempfile
 from typing import Any, Dict, List, Optional, Tuple
 
 import pyscreenshot as ImageGrab
@@ -13,11 +10,8 @@ import pytesseract
 from PIL import Image
 from thefuzz import fuzz
 
-from app.dbus_ss import FreedesktopDBusWrapper
-
 OCR_LANGUAGE = 'pol'
 MIN_MATCH_THRESHOLD = 75
-# MAX_LEN_DIFF = 0.1 # Zastąpione nową logiką
 
 def load_config(filename: str) -> Dict[str, Any]:
     """Wczytuje plik konfiguracyjny JSON."""
@@ -54,7 +48,7 @@ def _capture_fullscreen_image() -> Optional[Image.Image]:
         print(f"BŁĄD: Nieoczekiwany błąd podczas przechwytywania (KDE): {e}", file=sys.stderr)
 
 
-def capture_screen_region(dbus, monitor_config: Dict[str, int]) -> Optional[Image.Image]:
+def capture_screen_region(monitor_config: Dict[str, int]) -> Optional[Image.Image]:
     """Wykonuje zrzut całego ekranu i kadruje go do pożądanego regionu."""
     try:
         left = monitor_config['left']
@@ -64,7 +58,6 @@ def capture_screen_region(dbus, monitor_config: Dict[str, int]) -> Optional[Imag
 
         crop_box = (left, top, left + width, top + height)
         return ImageGrab.grab(crop_box, False)
-        # return dbus.grab(bbox=crop_box) # type: ignore
 
     except Exception as e:
         print(
@@ -96,7 +89,6 @@ def _clean(text: str) -> str:
     """Szybkie czyszczenie tekstu z artefaktów OCR (bez dużego kosztu)."""
     if not text:
         return ""
-    # usuń numerki, interpunkcję, podwójne spacje
     text = re.sub(r"^[\d\W_]+", "", text)        # leading liczby i znaki
     text = re.sub(r"[^0-9A-Za-zÀ-žąćęłńóśżźĄĆĘŁŃÓŚŻŹ\s]", " ", text)
     text = re.sub(r"\s+", " ", text)
@@ -137,9 +129,6 @@ def find_best_match(ocr_text: str, subtitles_list: List[str], mode: str) -> Opti
             if not line:
                 continue
 
-            # if len(line) * 0.7 > len(ocr_text):
-            #     continue
-
             score = _best_prefix_match(ocr_text, line)
             if score > best_score:
                 best_score = score
@@ -152,7 +141,6 @@ def find_best_match(ocr_text: str, subtitles_list: List[str], mode: str) -> Opti
             print(f"Brak dopasowania fragmentu (najlepszy: {best_score}%)")
             return None
 
-    # --- Tryb pełny ---
     best_score = 0
     best_index = -1
 
@@ -161,7 +149,6 @@ def find_best_match(ocr_text: str, subtitles_list: List[str], mode: str) -> Opti
         if not sub_line:
             continue
 
-        # szybki filtr długości
         ocr_len = len(ocr_text)
         sub_len = len(sub_line)
         if sub_len == 0:
@@ -169,20 +156,15 @@ def find_best_match(ocr_text: str, subtitles_list: List[str], mode: str) -> Opti
         if ocr_len < sub_len * 0.5 or ocr_len > sub_len * 2.0:
             continue
 
-        # Logika dopasowania:
-        # Dla bardzo krótkich tekstów (np. "Tak", "OK") 'ratio' jest bezpieczniejsze,
-        # bo 'token_set_ratio' da 100% dla "Tak" vs "Nie tak".
-        # Dla dłuższych, 'token_set_ratio' jest lepsze, bo ignoruje kolejność
-        # i drobne błędy OCR (np. "Cześć Adam" vs "Adam cześć").
         if ocr_len < 15:
             score = fuzz.ratio(sub_line, ocr_text)
-            min_score = 90  # Musi być prawie identyczne
+            min_score = 90
         else:
             score = fuzz.token_set_ratio(sub_line, ocr_text)
             if ocr_len < 30:
-                min_score = 82  # Średni próg
+                min_score = 82
             else:
-                min_score = 75  # Standardowy próg
+                min_score = 75
 
         if score >= min_score and score > best_score:
             best_score = score

@@ -151,55 +151,54 @@ class ReaderThread(threading.Thread):
 
             print(
                 f"Czytelnik rozpoczyna pętlę (Tryb: {self.subtitle_mode}, Bufor: {self.recent_indices.maxlen})...")
-            with FreedesktopDBusWrapper() as dbus:
-                while not self.stop_event.is_set():
-                    start_time = time.monotonic()
 
-                    image = capture_screen_region(dbus, monitor_config)
-                    if not image:
-                        time.sleep(capture_interval)
-                        continue
-                    processed_image = self.preprocess_image(image)
-                    ocr_text = ocr_and_clean_image(
-                        processed_image, self.combined_regex_pattern)
-                    if not ocr_text:
-                        self.last_ocr_text = ""
-                        time.sleep(capture_interval)
-                        continue
+            while not self.stop_event.is_set():
+                start_time = time.monotonic()
 
-                    if ocr_text == self.last_ocr_text:
-                        time.sleep(capture_interval)
-                        continue
-                    self.last_ocr_text = ocr_text
-                    
-                    print(f"\n{datetime.datetime.now().strftime('%H:%M:%S')} - OCR odczytał: '{ocr_text}'")
+                image = capture_screen_region(monitor_config)
+                if not image:
+                    time.sleep(capture_interval)
+                    continue
+                processed_image = self.preprocess_image(image)
+                ocr_text = ocr_and_clean_image(
+                    processed_image, self.combined_regex_pattern)
+                if not ocr_text:
+                    self.last_ocr_text = ""
+                    time.sleep(capture_interval)
+                    continue
 
-                    # ZMIANA: Zwraca teraz krotkę (index, score) lub None
-                    match_result = find_best_match(ocr_text, subtitles, self.subtitle_mode)
+                if ocr_text == self.last_ocr_text:
+                    time.sleep(capture_interval)
+                    continue
+                self.last_ocr_text = ocr_text
 
-                    if match_result is not None:
-                        best_match_index, best_match_score = match_result
-                        
-                        if best_match_index not in self.recent_indices:
-                            print(f"Dopasowano (Indeks: {best_match_index}, Wynik: {best_match_score}%). Dodaję do kolejki.")
+                print(f"\n{datetime.datetime.now().strftime('%H:%M:%S')} - OCR odczytał: '{ocr_text}'")
 
-                            timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                            log_entry = f"[{timestamp}] Match (Score: {best_match_score}%) | OCR: '{ocr_text}' | Index: {best_match_index} | Line: '{subtitles[best_match_index]}'"
-                            self.log_buffer.append(log_entry)
+                match_result = find_best_match(ocr_text, subtitles, self.subtitle_mode)
 
-                            self.recent_indices.append(best_match_index)
-                            
-                            line_number = best_match_index + 1
-                            file_name = f"output1 ({line_number}).ogg"
-                            file_path = os.path.join(audio_dir, file_name)
+                if match_result is not None:
+                    best_match_index, best_match_score = match_result
 
-                            self.audio_queue.put(file_path)
+                    if best_match_index not in self.recent_indices:
+                        print(f"Dopasowano (Indeks: {best_match_index}, Wynik: {best_match_score}%). Dodaję do kolejki.")
 
-                    elapsed = time.monotonic() - start_time
-                    wait_time = max(0, capture_interval - elapsed)
+                        timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        log_entry = f"[{timestamp}] Match (Score: {best_match_score}%) | OCR: '{ocr_text}' | Index: {best_match_index} | Line: '{subtitles[best_match_index]}'"
+                        self.log_buffer.append(log_entry)
 
-                    print (f"{datetime.datetime.now().strftime('%H:%M:%S')} - Czas cyklu: {elapsed:.2f}s, oczekiwanie: {wait_time:.2f}s")
-                    time.sleep(wait_time)
+                        self.recent_indices.append(best_match_index)
+
+                        line_number = best_match_index + 1
+                        file_name = f"output1 ({line_number}).ogg"
+                        file_path = os.path.join(audio_dir, file_name)
+
+                        self.audio_queue.put(file_path)
+
+                elapsed = time.monotonic() - start_time
+                wait_time = max(0, capture_interval - elapsed)
+
+                print (f"{datetime.datetime.now().strftime('%H:%M:%S')} - Czas cyklu: {elapsed:.2f}s, oczekiwanie: {wait_time:.2f}s")
+                time.sleep(wait_time)
 
         except Exception as e:
             print(f"KRYTYCZNY BŁĄD w wątku czytelnika: {e}", file=sys.stderr)
