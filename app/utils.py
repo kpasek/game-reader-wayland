@@ -2,6 +2,8 @@ import json
 import os
 import re
 import sys
+import unicodedata
+
 from typing import Any, Dict, List, Optional, Tuple
 
 import pyscreenshot as ImageGrab
@@ -13,6 +15,43 @@ from thefuzz import fuzz
 OCR_LANGUAGE = 'pol'
 MIN_MATCH_THRESHOLD = 75
 
+def normalize_unicode(text):
+
+    text = unicodedata.normalize("NFKC", text)
+    return text
+
+def remove_noise(text):
+    # Zostawiamy: polskie litery, cyfry, .,:;!?'"()-
+    return re.sub(r"[^0-9A-Za-zĄąĆćĘęŁłŃńÓóŚśŹźŻż.,:;!?\"'\(\)\-\s]+", " ", text)
+
+def normalize_spaces(text):
+    return re.sub(r"\s+", " ", text).strip()
+
+POLISH_SHORT_WORDS = {"i", "w", "o", "a", "u", "z", "do", "na"}
+
+def remove_short_noise_words(text, min_len=2):
+    cleaned = []
+    for w in text.split():
+        if len(w) < min_len and w.lower() not in POLISH_SHORT_WORDS:
+            continue
+        cleaned.append(w)
+    return " ".join(cleaned)
+
+def similar_char_map(text):
+    replacements = {
+        "0": "O",
+        "1": "I",
+        "5": "S",
+        "/": "l",
+        "|": "l",
+        "‘": "'",
+        "’": "'",
+        "“": '"',
+        "”": '"'
+    }
+    for bad, good in replacements.items():
+        text = text.replace(bad, good)
+    return text
 
 def _smart_remove_name(text: str) -> str:
     """
@@ -91,15 +130,13 @@ def ocr_and_clean_image(image: Image.Image, regex_pattern: str) -> str:
         if not text:
             return ""
 
-        # 1. Najpierw stary Regex (jeśli zdefiniowany)
         if regex_pattern:
             try:
                 text = re.sub(regex_pattern, "", text).strip()
             except re.error as e:
                 print(f"OSTRZEŻENIE: Błędny Regex: {e}", file=sys.stderr)
 
-        # 2. Następnie inteligentne usuwanie separatorów (nowość)
-        text = _smart_remove_name(text)
+            text = _smart_remove_name(text)
 
         return text
 
@@ -111,9 +148,11 @@ def _clean(text: str) -> str:
     """Szybkie czyszczenie tekstu z artefaktów OCR (bez dużego kosztu)."""
     if not text:
         return ""
-    text = re.sub(r"^[\d\W_]+", "", text)        # leading liczby i znaki
-    text = re.sub(r"[^0-9A-Za-zÀ-žąćęłńóśżźĄĆĘŁŃÓŚŻŹ\s]", " ", text)
-    text = re.sub(r"\s+", " ", text)
+    text = normalize_unicode(text)
+    text = similar_char_map(text)
+    text = remove_noise(text)
+    text = normalize_spaces(text)
+    text = remove_short_noise_words(text)
     return text.strip().lower()
 
 
@@ -149,7 +188,6 @@ def find_best_match(ocr_text: str, subtitles_list: List[str], mode: str) -> Opti
     if mode == "Partial Lines":
         best_score = 0
         best_index = -1
-        threshold = 90 if len(ocr_text) < 20 else 75
 
         ocr_lower = ocr_text.lower()
         ocr_len = len(ocr_lower)
@@ -171,13 +209,7 @@ def find_best_match(ocr_text: str, subtitles_list: List[str], mode: str) -> Opti
             if ocr_len < 8:
                 score = fuzz.ratio(ocr_lower, line_lower)
             else:
-                # Dla długich zdań - standardowa logika (wybaczająca błędy kolejności/brakujące słowa)
-                score = fuzz.ratio(ocr_lower, line_lower)
-
-                # Jeśli podstawowy wynik jest obiecujący, sprawdź token_sort (ignoruje kolejność słów)
-                if 50 < score < 90:
-                    score2 = fuzz.token_sort_ratio(ocr_lower, line_lower)
-                    score = max(score, score2)
+                score = _best_prefix_match(ocr_text, line)
 
             if score > best_score:
                 best_score = score
@@ -187,11 +219,11 @@ def find_best_match(ocr_text: str, subtitles_list: List[str], mode: str) -> Opti
                     break
 
         if ocr_len < 5:
-            threshold = 95  # Bardzo wysoki próg dla krótkich słów (np. "Tak" musi być "Tak")
+            threshold = 95
         elif ocr_len < 15:
-            threshold = 85
+            threshold = 80
         else:
-            threshold = 75  # Dłuższe zdania mogą mieć więcej błędów OCR
+            threshold = 70
 
         if best_index >= 0 and best_score >= threshold:
             return best_index, best_score

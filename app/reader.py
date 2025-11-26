@@ -180,6 +180,7 @@ class ReaderThread(threading.Thread):
                     log_entry = {
                         "time": datetime.datetime.now().strftime('%H:%M:%S'),
                         "ocr": ocr_text,
+                        "ocr": ocr_text,
                         "match": match_result,  # (index, score) lub None
                         "line_text": subtitles[match_result[0]] if match_result else ""
                     }

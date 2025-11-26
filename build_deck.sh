@@ -3,7 +3,7 @@ set -e
 
 APP_NAME="reader_deck"
 ENTRY_FILE="game_reader_gui.py"
-BUILD_DIR="build"
+BUILD_DIR="build_deck"
 
 source .venv/bin/activate
 
@@ -21,25 +21,25 @@ rm -rf "$HOME/.cache/Nuitka"
 # # 3. Wymuszamy użycie Clang
 # export CC=clang
 # export CXX=clang++
-export CFLAGS="-march=x86-64-v3"
-export CXXFLAGS="-march=x86-64-v3"
+export CFLAGS="-march=x86-64"
+export CXXFLAGS="-march=x86-64"
 # -------------------------
 # Kompilacja
 # -------------------------
 python -m nuitka \
   --standalone \
-  --onefile \
   --follow-imports \
   --enable-plugin=tk-inter \
   --enable-plugin=pylint-warnings \
-  --remove-output \
   --output-dir="$BUILD_DIR" \
+  --static-libpython=yes \
   --show-progress \
   --show-memory \
   --assume-yes-for-downloads \
   --lto=no \
   --jobs=$(nproc) \
   --include-package=thefuzz \
+  --include-package=PIL \
   "$ENTRY_FILE" \
   -o "$APP_NAME"
 

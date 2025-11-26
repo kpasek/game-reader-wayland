@@ -1,5 +1,6 @@
 game_reader_wayland*
 build
+build_deck
 .venv
 preset.json
 app_config.json
