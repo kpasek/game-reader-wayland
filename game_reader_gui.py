@@ -56,7 +56,7 @@ class GameReaderApp:
             "Niestandardowa": None
         }
 
-        self.audio_speed_var = tk.DoubleVar(value=1.3)
+        self.audio_speed_var = tk.DoubleVar(value=1.15)
         self.log_queue = queue.Queue()
         self.log_window_ref = None
 
