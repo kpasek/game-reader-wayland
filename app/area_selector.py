@@ -17,7 +17,8 @@ except ImportError:
 class AreaSelector(tk.Toplevel):
     """Okno ze zrzutem ekranu do zaznaczania obszaru."""
 
-    def __init__(self, parent, screenshot_image: Image.Image, current_geometry: dict = None):
+    # ZMIANA: Argument current_geometry zamieniony na existing_regions (lista)
+    def __init__(self, parent, screenshot_image: Image.Image, existing_regions: list = None):
         super().__init__(parent)
         self.parent = parent
         self.geometry = None  # (x, y, w, h)
@@ -38,20 +39,21 @@ class AreaSelector(tk.Toplevel):
 
         self.canvas.create_image(0, 0, image=self.bg_tk, anchor=tk.NW)
 
-        if current_geometry:
-            cx = current_geometry.get('left', 0)
-            cy = current_geometry.get('top', 0)
-            cw = current_geometry.get('width', 0)
-            ch = current_geometry.get('height', 0)
-            
-            # Rysujemy na niebiesko, przerywaną linią, żeby odróżnić od nowego zaznaczenia
-            self.canvas.create_rectangle(
-                cx, cy, cx + cw, cy + ch,
-                outline='blue', width=2, dash=(2, 4), tags="current_area"
-            )
-            self.canvas.create_text(
-                cx + 5, cy - 10, text="Aktualny obszar", fill="blue", anchor=tk.NW
-            )
+        if existing_regions:
+            for idx, region in enumerate(existing_regions):
+                cx = region.get('left', 0)
+                cy = region.get('top', 0)
+                cw = region.get('width', 0)
+                ch = region.get('height', 0)
+
+                # Rysujemy na niebiesko, przerywaną linią
+                self.canvas.create_rectangle(
+                    cx, cy, cx + cw, cy + ch,
+                    outline='blue', width=2, dash=(2, 4), tags="previous_areas"
+                )
+                self.canvas.create_text(
+                    cx + 5, cy - 10, text=f"Obszar {idx + 1}", fill="blue", anchor=tk.NW, tags="previous_areas"
+                )
 
         self.canvas.bind("<ButtonPress-1>", self.on_mouse_down)
         self.canvas.bind("<B1-Motion>", self.on_mouse_drag)
@@ -64,10 +66,8 @@ class AreaSelector(tk.Toplevel):
         self.wait_window()
 
     def on_mouse_down(self, event):
-        # Usuń stare zaznaczenie (czerwone) oraz wizualizację z presetu (niebieskie)
         if self.rect:
             self.canvas.delete(self.rect)
-        self.canvas.delete("current_area") # Usuwa stary obszar po kliknięciu
 
         self.start_x = event.x
         self.start_y = event.y

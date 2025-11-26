@@ -42,8 +42,18 @@ class LogWindow(tk.Toplevel):
         timestamp = data['time']
         ocr = data['ocr']
         match = data['match']  # (idx, score) lub None
+        stats = data.get('stats', {})
 
         msg = f"[{timestamp}] OCR: {ocr}\n"
+
+        # Wyświetlanie statystyk i monitora
+        if stats:
+            mon = stats.get('monitor', '?')
+            t_cap = stats.get('cap_ms', 0)
+            t_ocr = stats.get('ocr_ms', 0)
+            t_match = stats.get('match_ms', 0)
+            msg += f"   [Obszar: {mon} | Zrzut: {t_cap:.0f}ms | OCR: {t_ocr:.0f}ms | Match: {t_match:.0f}ms]\n"
+
         if match:
             msg += f"   >>> DOPASOWANIE ({match[1]}%): linia {match[0] + 1}: {data['line_text']}\n"
         else:

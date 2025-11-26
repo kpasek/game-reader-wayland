@@ -5,20 +5,18 @@ import sys
 import re
 import threading
 import time
-from typing import Any, Deque, Dict, Optional, Tuple
+from typing import Any, Deque, Dict, Optional, Tuple, List
 
 from app.utils import capture_screen_region, find_best_match, load_config, load_text_file, ocr_and_clean_image
 
 try:
-    from PIL import Image, ImageOps, ImageEnhance, ImageTk
+    from PIL import Image, ImageOps, ImageEnhance
 except ImportError:
-    print("Błąd: Nie znaleziono biblioteki 'Pillow'. Zainstaluj ją: pip install Pillow", file=sys.stderr)
+    print("Błąd: Nie znaleziono biblioteki 'Pillow'.", file=sys.stderr)
     sys.exit(1)
 
+
 class ReaderThread(threading.Thread):
-    """Wątek, który wykonuje OCR i dodaje napisy do kolejki."""
-
-
     def __init__(self, config_path: str, regex_template: str, app_settings: Dict[str, Any],
                  stop_event: threading.Event, audio_queue,
                  target_resolution: Optional[Tuple[int, int]],
@@ -31,15 +29,15 @@ class ReaderThread(threading.Thread):
         self.audio_queue = audio_queue
         self.log_queue = log_queue
         self.config_path = config_path
-        self.regex_template = regex_template # Wzorzec z GUI (może zawierać {NAMES})
-        self.combined_regex_pattern = ""   # Finalny regex po wczytaniu imion
+        self.regex_template = regex_template
+        self.combined_regex_pattern = ""
         self.app_settings = app_settings
         self.subtitle_mode = app_settings.get('subtitle_mode', 'Full Lines')
 
         self.recent_indices: Deque[int] = deque(maxlen=5)
-        # NOWY BUFOR LOGÓW
         self.log_buffer: Deque[str] = deque(maxlen=1000)
-        self.last_ocr_text = ""
+
+        self.last_ocr_texts = deque(maxlen=5)
 
         self.ocr_scale = self.app_settings.get('ocr_scale_factor', 1.0)
         self.ocr_grayscale = self.app_settings.get('ocr_grayscale', False)
@@ -47,170 +45,189 @@ class ReaderThread(threading.Thread):
         self.target_resolution = target_resolution
 
     def _build_combined_regex(self, config: Dict[str, Any], template: str) -> str:
-        """Łączy wzorzec regex z GUI z listą imion z pliku."""
         names_file_path = config.get("names_file_path")
         names_list = []
-
         if names_file_path and os.path.exists(names_file_path):
-            print(f"Wczytuję plik imion: {names_file_path}")
             names_list = load_text_file(names_file_path)
 
         if names_list and "{NAMES}" in template:
             escaped_names = [re.escape(name.strip()) for name in names_list if name.strip()]
             if not escaped_names:
-                # Zastąp {NAMES} wzorcem, który nigdy nie pasuje
                 return template.replace("{NAMES}", r"\0\Z")
-
             names_pattern = "|".join(escaped_names)
-            final_regex = template.replace("{NAMES}", f"({names_pattern})")
-            print(f"Zbudowano połączony Regex (fragment): {final_regex[:100]}...")
-            return final_regex
+            return template.replace("{NAMES}", f"({names_pattern})")
         elif "{NAMES}" in template:
-            # Użytkownik użył {NAMES}, ale nie ma pliku - wzorzec nie powinien pasować
             return template.replace("{NAMES}", r"\0\Z")
         else:
-            # Użyj wzorca z GUI bezpośrednio
             return template
 
-    def _recalculate_monitor_area(self, config: Dict[str, Any], target_res: Optional[Tuple[int, int]]) -> Dict[str, int]:
-        """Przelicza obszar 'monitor' na podstawie docelowej rozdzielczości."""
-        original_monitor_config = config['monitor']
+    def _recalculate_monitor_area(self, config: Dict[str, Any], target_res: Optional[Tuple[int, int]]) -> List[
+        Dict[str, int]]:
+        original_monitor_data = config.get('monitor', [])
+
+        monitor_list = []
+        if isinstance(original_monitor_data, list):
+            monitor_list = original_monitor_data
+        elif isinstance(original_monitor_data, dict):
+            monitor_list = [original_monitor_data]
+
+        monitor_list = [m for m in monitor_list if m]
+
         original_res_str = config.get("resolution")
 
         if not target_res or not original_res_str:
-            print("Brak rozdzielczości docelowej lub bazowej, używam obszaru z presetu.")
-            return original_monitor_config
+            return monitor_list
 
         try:
             orig_w, orig_h = map(int, original_res_str.lower().split('x'))
             target_w, target_h = target_res
 
             if (orig_w, orig_h) == (target_w, target_h):
-                return original_monitor_config
+                return monitor_list
 
-            print(f"Przeliczanie obszaru z {orig_w}x{orig_h} do {target_w}x{target_h}...")
-            
+            print(f"Przeliczanie obszarów z {orig_w}x{orig_h} do {target_w}x{target_h}...")
             x_ratio = target_w / orig_w
             y_ratio = target_h / orig_h
 
-            new_config = {
-                'left': int(original_monitor_config['left'] * x_ratio),
-                'top': int(original_monitor_config['top'] * y_ratio),
-                'width': int(original_monitor_config['width'] * x_ratio),
-                'height': int(original_monitor_config['height'] * y_ratio)
-            }
-            print(f"Nowy przeliczony obszar: {new_config}")
-            return new_config
+            new_list = []
+            for area in monitor_list:
+                new_area = {
+                    'left': int(area['left'] * x_ratio),
+                    'top': int(area['top'] * y_ratio),
+                    'width': int(area['width'] * x_ratio),
+                    'height': int(area['height'] * y_ratio)
+                }
+                new_list.append(new_area)
+
+            return new_list
         except Exception as e:
-            print(f"BŁĄD: Nie można przeliczyć rozdzielczości: {e}. Używam domyślnej.", file=sys.stderr)
-            return original_monitor_config
+            print(f"BŁĄD przeliczania rozdzielczości: {e}", file=sys.stderr)
+            return monitor_list
 
     def preprocess_image(self, image: Image.Image) -> Image.Image:
-        """Stosuje skalowanie, skalę szarości i kontrast do obrazu przed OCR."""
         try:
-            # 1. Skalowanie (jeśli trzeba)
             if self.ocr_scale < 1.0:
                 new_width = int(image.width * self.ocr_scale)
                 new_height = int(image.height * self.ocr_scale)
-                image = image.resize(
-                    (new_width, new_height), Image.LANCZOS)  # type: ignore
-
-            # 2. Skala szarości
+                image = image.resize((new_width, new_height), Image.LANCZOS)  # type: ignore
             if self.ocr_grayscale:
                 image = ImageOps.grayscale(image)
-
-            # 3. Kontrast
             if self.ocr_contrast:
                 enhancer = ImageEnhance.Contrast(image)
                 image = enhancer.enhance(2.0)
-
             return image
-        except Exception as e:
-            print(
-                f"BŁĄD: Błąd podczas preprocessingu obrazu: {e}", file=sys.stderr)
-            return image  # Zwróć oryginał w razie błędu
+        except Exception:
+            return image
 
     def run(self):
         try:
-            print("Wątek czytelnika uruchomiony.")
-
             config = load_config(self.config_path)
-            
-            # 1. Zbuduj finalny Regex
             self.combined_regex_pattern = self._build_combined_regex(config, self.regex_template)
 
-            # 2. Przelicz obszar monitora
-            monitor_config = self._recalculate_monitor_area(config, self.target_resolution)
-            
+            monitor_configs = self._recalculate_monitor_area(config, self.target_resolution)
+
+            if not monitor_configs:
+                print("BŁĄD: Brak zdefiniowanych obszarów do monitorowania.", file=sys.stderr)
+                return
+
             subtitles = load_text_file(config['text_file_path'])
             if not subtitles:
-                print("BŁĄD: Plik napisów jest pusty lub nie istnieje. Zatrzymuję wątek.", file=sys.stderr)
+                print("BŁĄD: Pusty plik napisów.", file=sys.stderr)
                 return
             capture_interval = config.get('CAPTURE_INTERVAL', 0.3)
             audio_dir = config['audio_dir']
 
-            print(
-                f"Czytelnik rozpoczyna pętlę (Tryb: {self.subtitle_mode}, Bufor: {self.recent_indices.maxlen})...")
+            min_left = min(c['left'] for c in monitor_configs)
+            min_top = min(c['top'] for c in monitor_configs)
+            max_right = max(c['left'] + c['width'] for c in monitor_configs)
+            max_bottom = max(c['top'] + c['height'] for c in monitor_configs)
+
+            unified_area = {
+                'left': min_left,
+                'top': min_top,
+                'width': max_right - min_left,
+                'height': max_bottom - min_top
+            }
+
+            print(f"Czytelnik startuje. Obszary: {len(monitor_configs)}. Wspólny obszar zrzutu: {unified_area}")
 
             while not self.stop_event.is_set():
                 start_time = time.monotonic()
 
-                image = capture_screen_region(monitor_config)
-                if not image:
-                    time.sleep(capture_interval)
-                    continue
-                processed_image = self.preprocess_image(image)
-                ocr_text = ocr_and_clean_image(
-                    processed_image, self.combined_regex_pattern)
-                if not ocr_text:
-                    self.last_ocr_text = ""
-                    time.sleep(capture_interval)
+                t0_cap = time.perf_counter()
+                unified_image = capture_screen_region(unified_area)
+                t_cap = (time.perf_counter() - t0_cap) * 1000  # ms
+
+                if not unified_image:
+                    time.sleep(0.1)
                     continue
 
-                if ocr_text == self.last_ocr_text:
-                    time.sleep(capture_interval)
-                    continue
-                self.last_ocr_text = ocr_text
+                for idx, area_config in enumerate(monitor_configs):
 
-                print(f"\n{datetime.datetime.now().strftime('%H:%M:%S')} - OCR odczytał: '{ocr_text}'")
+                    rel_x = area_config['left'] - min_left
+                    rel_y = area_config['top'] - min_top
+                    rel_w = area_config['width']
+                    rel_h = area_config['height']
 
-                match_result = find_best_match(ocr_text, subtitles, self.subtitle_mode)
+                    try:
+                        # crop((left, top, right, bottom))
+                        image = unified_image.crop((rel_x, rel_y, rel_x + rel_w, rel_y + rel_h))
+                    except Exception as e:
+                        print(f"Błąd wycinania obszaru {idx}: {e}", file=sys.stderr)
+                        continue
 
-                if self.log_queue:
-                    log_entry = {
-                        "time": datetime.datetime.now().strftime('%H:%M:%S'),
-                        "ocr": ocr_text,
-                        "ocr": ocr_text,
-                        "match": match_result,  # (index, score) lub None
-                        "line_text": subtitles[match_result[0]] if match_result else ""
-                    }
-                    self.log_queue.put(log_entry)
+                    processed_image = self.preprocess_image(image)
 
-                if match_result is not None:
-                    best_match_index, best_match_score = match_result
+                    t0_ocr = time.perf_counter()
+                    text = ocr_and_clean_image(processed_image, self.combined_regex_pattern)
+                    t_ocr = (time.perf_counter() - t0_ocr) * 1000  # ms
 
-                    if best_match_index not in self.recent_indices:
-                        print(f"Dopasowano (Indeks: {best_match_index}, Wynik: {best_match_score}%). Dodaję do kolejki.")
+                    if not text or len(text) < 2:
+                        continue
 
-                        timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                        log_entry = f"[{timestamp}] Match (Score: {best_match_score}%) | OCR: '{ocr_text}' | Index: {best_match_index} | Line: '{subtitles[best_match_index]}'"
-                        self.log_buffer.append(log_entry)
+                    if text in self.last_ocr_texts:
+                        continue
 
-                        self.recent_indices.append(best_match_index)
+                    self.last_ocr_texts.append(text)
 
-                        line_number = best_match_index + 1
-                        file_name = f"output1 ({line_number}).ogg"
-                        file_path = os.path.join(audio_dir, file_name)
+                    # 4. Pomiar czasu dopasowania
+                    t0_match = time.perf_counter()
+                    match_result = find_best_match(text, subtitles, self.subtitle_mode)
+                    t_match = (time.perf_counter() - t0_match) * 1000  # ms
 
-                        self.audio_queue.put(file_path)
+                    print(f"\n{datetime.datetime.now().strftime('%H:%M:%S')} - OCR [{idx + 1}]: '{text}'")
+
+                    if self.log_queue:
+                        self.log_queue.put({
+                            "time": datetime.datetime.now().strftime('%H:%M:%S'),
+                            "ocr": text,
+                            "match": match_result,
+                            "line_text": subtitles[match_result[0]] if match_result else "",
+                            "stats": {
+                                "monitor": idx + 1,
+                                "cap_ms": t_cap,  # Czas wspólnego zrzutu
+                                "ocr_ms": t_ocr,
+                                "match_ms": t_match
+                            }
+                        })
+
+                    if match_result is not None:
+                        best_match_index, best_match_score = match_result
+
+                        if best_match_index not in self.recent_indices:
+                            print(f" >>> DOPASOWANIE ({best_match_score}%): {subtitles[best_match_index]}")
+
+                            self.log_buffer.append(
+                                f"Match: {best_match_score}% | OCR: {text} | Line: {subtitles[best_match_index]}")
+                            self.recent_indices.append(best_match_index)
+
+                            file_name = f"output1 ({best_match_index + 1}).ogg"
+                            file_path = os.path.join(audio_dir, file_name)
+                            self.audio_queue.put(file_path)
 
                 elapsed = time.monotonic() - start_time
                 wait_time = max(0, capture_interval - elapsed)
-
-                print (f"{datetime.datetime.now().strftime('%H:%M:%S')} - Czas cyklu: {elapsed:.2f}s, oczekiwanie: {wait_time:.2f}s")
                 time.sleep(wait_time)
 
         except Exception as e:
-            print(f"KRYTYCZNY BŁĄD w wątku czytelnika: {e}", file=sys.stderr)
-        finally:
-            print("Wątek czytelnika zatrzymany.")
+            print(f"KRYTYCZNY BŁĄD READER: {e}", file=sys.stderr)

@@ -37,7 +37,7 @@ class GameReaderApp:
     def __init__(self, root: tk.Tk, autostart_preset: Optional[str], game_command: Optional[List[str]]):        
         self.root = root
         self.root.title("Game Reader (Wayland)")
-        self.root.geometry("700x450")
+        self.root.geometry("700x520")
 
         self.preset_var = tk.StringVar()
         self.audio_dir_var = tk.StringVar()
@@ -57,6 +57,9 @@ class GameReaderApp:
         }
 
         self.audio_speed_var = tk.DoubleVar(value=1.15)
+        self.audio_volume_var = tk.DoubleVar(value=1.0)
+        self.resolution_var = tk.StringVar()
+
         self.log_queue = queue.Queue()
         self.log_window_ref = None
 
@@ -72,22 +75,6 @@ class GameReaderApp:
         self.audio_dir_var = tk.StringVar()
         self.subtitles_file_var = tk.StringVar()
         self.names_file_var = tk.StringVar()
-
-        self.create_menu()
-
-        main_frame = ttk.Frame(root, padding="10")
-        main_frame.pack(fill=tk.BOTH, expand=True)
-
-        ttk.Label(main_frame, text="Wybierz lektora").pack(anchor=tk.W)
-        self.preset_combo = ttk.Combobox(main_frame, textvariable=self.preset_var, state="readonly", width=60)
-        self.preset_combo.pack(fill=tk.X, anchor=tk.W, pady=5)
-        self.preset_combo.bind("<<ComboboxSelected>>", self.on_preset_selected)
-        
-        ttk.Label(main_frame, text="Filtr dialogów").pack(anchor=tk.W, pady=(10, 0))
-        
-        regex_frame = ttk.Frame(main_frame)
-        regex_frame.pack(fill=tk.X, pady=5)
-        
         self.regex_patterns = {
             "Brak": r"",
             "Standardowy (Imie: Kwestia)": r"^(?i)({NAMES})\s*[:：\-; ]*",
@@ -95,57 +82,9 @@ class GameReaderApp:
             "Samo imię na początku": r"^({NAMES})\s+",
             "Inny (wpisz własny)": "CUSTOM"
         }
-        
-        self.regex_combo = ttk.Combobox(
-            regex_frame, 
-            textvariable=self.regex_mode_var,
-            values=list(self.regex_patterns.keys()),
-            state="readonly", 
-            width=35
-        )
-        self.regex_combo.pack(side=tk.LEFT, padx=(0, 5))
-        self.regex_combo.bind("<<ComboboxSelected>>", self._toggle_regex_entry)
 
-        self.custom_regex_entry = ttk.Entry(regex_frame, textvariable=self.custom_regex_var)
-        self.custom_regex_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        
-        ttk.Label(main_frame, text="Docelowa rozdzielczość gry:").pack(anchor=tk.W, pady=(10, 0))
-        
-        self.resolution_var = tk.StringVar()
-        self.res_combo = ttk.Combobox(main_frame, textvariable=self.resolution_var,
-                                      width=60,
-                                      values=list(self.resolutions.keys()))
-        self.res_combo.pack(fill=tk.X, anchor=tk.W, pady=5)
-
-        # --- Przyciski ---
-        button_frame = ttk.Frame(main_frame)
-        button_frame.pack(fill=tk.X, pady=10, side=tk.BOTTOM)
-        
-        self.start_button = ttk.Button(button_frame, text="Uruchom", command=self.start_reading)
-        self.start_button.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5)
-        
-        self.stop_button = ttk.Button(button_frame, text="Zatrzymaj", command=self.stop_reading, state="disabled")
-        self.stop_button.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5)
-
-        ttk.Label(main_frame, text="Prędkość lektora:").pack(anchor=tk.W, pady=(10, 0))
-        speed_frame = ttk.Frame(main_frame)
-        speed_frame.pack(fill=tk.X)
-
-        self.speed_scale = ttk.Scale(
-            speed_frame, from_=0.8, to=2.0,
-            variable=self.audio_speed_var,
-            command=lambda v: self.speed_value_label.config(text=f"{float(v):.2f}x")
-        )
-        self.speed_scale.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        # Bind puszczenia myszki do zapisu
-        self.speed_scale.bind("<ButtonRelease-1>", self.on_speed_change)
-
-        self.speed_value_label = ttk.Label(speed_frame, text="1.3x")
-        self.speed_value_label.pack(side=tk.LEFT, padx=5)
-
-        # ... (podpięcie handlerów Regex) ...
-        self.regex_combo.bind("<<ComboboxSelected>>", self.on_regex_change)
-        self.custom_regex_entry.bind("<FocusOut>", self.on_custom_regex_save)
+        self.create_menu()
+        self.build_ui()
         
         # --- Załaduj konfigurację ---
         self.settings = self.load_app_config()
@@ -175,26 +114,29 @@ class GameReaderApp:
         file_menu.add_separator()
         file_menu.add_command(label="Wyjdź", command=self.on_closing)
         menubar.add_cascade(label="Plik", menu=file_menu)
-        
-        # --- Menu Preset ---
+
+        # --- Preset ---
         preset_menu = tk.Menu(menubar, tearoff=0)
-        preset_menu.add_command(label="Wybierz nowego lektora",
-                                command=self.select_new_preset)
-        preset_menu.add_command(label="Zmień obszar napisów",
-                                command=self.select_area_for_preset)
+        preset_menu.add_command(label="Wybierz nowego lektora", command=self.select_new_preset)
+
+        # Podmenu Obszarów
+        areas_menu = tk.Menu(preset_menu, tearoff=0)
+        for i in range(3):
+            sub_area = tk.Menu(areas_menu, tearoff=0)
+            sub_area.add_command(label=f"Ustaw Obszar {i + 1}", command=lambda idx=i: self.manage_area(idx, 'set'))
+            sub_area.add_command(label=f"Wyczyść Obszar {i + 1}", command=lambda idx=i: self.manage_area(idx, 'clear'))
+            areas_menu.add_cascade(label=f"Obszar {i + 1}", menu=sub_area)
+
+        preset_menu.add_cascade(label="Zarządzaj obszarami", menu=areas_menu)
         preset_menu.add_separator()
-        preset_menu.add_command(label="Zmień katalog audio",
-                                command=self.select_audio_dir)
-        preset_menu.add_command(label="Zmień plik napisów",
-                                command=self.select_subtitles_file)
-        preset_menu.add_command(label="Zmień plik imion",
-                                command=self.select_names_file)
-        preset_menu.add_separator()
+        preset_menu.add_command(label="Zmień katalog audio", command=self.select_audio_dir)
+        preset_menu.add_command(label="Zmień plik napisów", command=self.select_subtitles_file)
+        preset_menu.add_command(label="Zmień plik imion", command=self.select_names_file)
         menubar.add_cascade(label="Preset", menu=preset_menu)
 
         # --- Menu Narzędzia ---
         tools_menu = tk.Menu(menubar, tearoff=0)
-        tools_menu.add_command(label="Podgląd logów na żywo", command=self.open_log_window)  # NOWE
+        tools_menu.add_command(label="Pokaż logi", command=self.open_log_window)  # NOWE
         tools_menu.add_command(label="Generuj polecenie startowe Steam", command=self.generate_steam_command)
 
         menubar.add_cascade(label="Narzędzia", menu=tools_menu)
@@ -210,135 +152,222 @@ class GameReaderApp:
 
         self.root.config(menu=menubar)
 
+    def build_ui(self):
+        main_frame = ttk.Frame(self.root, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Sekcja Presetu
+        ttk.Label(main_frame, text="Wybierz lektora (Preset)").pack(anchor=tk.W)
+        self.preset_combo = ttk.Combobox(main_frame, textvariable=self.preset_var, state="readonly", width=60)
+        self.preset_combo.pack(fill=tk.X, pady=5)
+        self.preset_combo.bind("<<ComboboxSelected>>", self.on_preset_selected)
+
+        # Sekcja Regex
+        ttk.Label(main_frame, text="Filtr dialogów").pack(anchor=tk.W, pady=(10, 0))
+        regex_frame = ttk.Frame(main_frame)
+        regex_frame.pack(fill=tk.X, pady=5)
+        self.regex_combo = ttk.Combobox(regex_frame, textvariable=self.regex_mode_var,
+                                        values=list(self.regex_patterns.keys()), state="readonly", width=35)
+        self.regex_combo.pack(side=tk.LEFT, padx=(0, 5))
+        self.regex_combo.bind("<<ComboboxSelected>>", lambda e: self._toggle_regex_entry())
+        self.custom_regex_entry = ttk.Entry(regex_frame, textvariable=self.custom_regex_var)
+        self.custom_regex_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # Sekcja Rozdzielczości
+        ttk.Label(main_frame, text="Docelowa rozdzielczość gry:").pack(anchor=tk.W, pady=(10, 0))
+        self.res_combo = ttk.Combobox(main_frame, textvariable=self.resolution_var,
+                                      values=list(self.resolutions.keys()), width=60)
+        self.res_combo.pack(fill=tk.X, pady=5)
+
+        # Sekcja Sterowania Audio (Prędkość i Głośność)
+        audio_frame = ttk.LabelFrame(main_frame, text="Ustawienia Audio", padding=10)
+        audio_frame.pack(fill=tk.X, pady=10)
+
+        # Prędkość
+        ttk.Label(audio_frame, text="Prędkość:").grid(row=0, column=0, padx=5, sticky=tk.W)
+        self.speed_scale = ttk.Scale(audio_frame, from_=0.8, to=2.0, variable=self.audio_speed_var,
+                                     command=lambda v: self.speed_lbl.config(text=f"{float(v):.2f}x"))
+        self.speed_scale.grid(row=0, column=1, sticky="ew", padx=5)
+        self.speed_scale.bind("<ButtonRelease-1>",
+                              lambda e: self._auto_save_to_preset("audio_speed", round(self.audio_speed_var.get(), 2)))
+        self.speed_lbl = ttk.Label(audio_frame, text="1.15x", width=6)
+        self.speed_lbl.grid(row=0, column=2)
+
+        # Głośność (NOWE)
+        ttk.Label(audio_frame, text="Głośność:").grid(row=1, column=0, padx=5, sticky=tk.W)
+        self.vol_scale = ttk.Scale(audio_frame, from_=0.5, to=1.5, variable=self.audio_volume_var,
+                                   command=lambda v: self.vol_lbl.config(text=f"{float(v):.2f}"))
+        self.vol_scale.grid(row=1, column=1, sticky="ew", padx=5)
+        self.vol_scale.bind("<ButtonRelease-1>",
+                            lambda e: self._auto_save_to_preset("audio_volume", round(self.audio_volume_var.get(), 2)))
+        self.vol_lbl = ttk.Label(audio_frame, text="1.00", width=6)
+        self.vol_lbl.grid(row=1, column=2)
+
+        audio_frame.columnconfigure(1, weight=1)
+
+        # Przyciski Start/Stop
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(fill=tk.X, pady=10, side=tk.BOTTOM)
+        self.start_button = ttk.Button(btn_frame, text="Uruchom", command=self.start_reading)
+        self.start_button.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5)
+        self.stop_button = ttk.Button(btn_frame, text="Zatrzymaj", command=self.stop_reading, state="disabled")
+        self.stop_button.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5)
+
+        self.regex_combo.bind("<<ComboboxSelected>>", self.on_regex_change)
+        self.custom_regex_entry.bind("<FocusOut>", self.on_custom_regex_save)
+
     def generate_steam_command(self):
-        """Generuje polecenie startowe dla Steam i kopiuje do schowka."""
-        preset_path = self.preset_var.get()
-        if not preset_path:
-            messagebox.showerror("Błąd", "Najpierw wybierz preset z listy.")
-            return
-        
-        if not os.path.exists(preset_path):
-                messagebox.showerror("Błąd", f"Wybrany plik presetu nie istnieje: {preset_path}")
-                return
-
-        try:            
-            abs_preset_path = os.path.abspath(preset_path)
-
-            command = f'reader --preset "{abs_preset_path}"'
-            
-            # Spróbuj skopiować do schowka
-            self.root.clipboard_clear()
-            self.root.clipboard_append(command)
-            self.root.update()
-            
-            messagebox.showinfo(
-                "Polecenie Steam wygenerowane",
-                "Polecenie startowe zostało skopiowane do schowka.\n\n"
-                "Wklej je w opcjach uruchamiania Steam *przed* poleceniem gry, np.:\n\n"
-                f'{command} %command%'
-            )
-        except tk.TclError:
-            messagebox.showwarning(
-                "Błąd schowka",
-                "Nie można skopiować do schowka. Oto polecenie do skopiowania ręcznego:\n\n"
-                f"{command}"
-            )
-        except Exception as e:
-                messagebox.showerror("Błąd", f"Wystąpił nieoczekiwany błąd: {e}")
-
-    def select_area_for_preset(self):
-        """Uruchamia selektor obszaru, przelicza na 1080p i nadpisuje plik presetu."""
         preset_path = self.preset_var.get()
         if not preset_path or not os.path.exists(preset_path):
-            messagebox.showerror("Błąd", "Wybierz prawidłowy plik presetu z listy.")
+            messagebox.showerror("Błąd", "Wybierz istniejący preset.")
             return
 
-        # Wczytaj obecny preset, aby pobrać starą geometrię
-        old_geometry_scaled = None
         try:
-            with open(preset_path, 'r', encoding='utf-8') as f:
-                preset_data = json.load(f)
-                old_monitor = preset_data.get('monitor')
-                old_res_str = preset_data.get('resolution', '1920x1080')
-        except Exception:
-            old_monitor = None
-            old_res_str = '1920x1080'
+            abs_preset_path = os.path.abspath(preset_path)
+            # Używamy sys.argv[0] jako ścieżki do skryptu/exe
+            script_path = os.path.abspath(sys.argv[0])
 
-        # Ukryj główne okno
+            # Budowa polecenia: python main.py --preset "..." %command%
+            # Lub jeśli skompilowane: ./main --preset "..." %command%
+
+            if script_path.endswith('.py'):
+                cmd_base = f'python3 "{script_path}"'
+            else:
+                cmd_base = f'"{script_path}"'
+
+            command = f'{cmd_base} --preset "{abs_preset_path}" %command%'
+
+            # Wyświetl okno z polem do kopiowania (niezawodne na Linuxie)
+            win = tk.Toplevel(self.root)
+            win.title("Polecenie Steam")
+            win.geometry("600x150")
+
+            ttk.Label(win, text="Skopiuj poniższą linię do opcji uruchamiania gry na Steam:").pack(pady=10)
+
+            entry = ttk.Entry(win, width=80)
+            entry.pack(padx=10, pady=5)
+            entry.insert(0, command)
+            entry.select_range(0, tk.END)  # Zaznacz wszystko
+
+            # Próba autokopiowania
+            try:
+                self.root.clipboard_clear()
+                self.root.clipboard_append(command)
+                self.root.update()  # Ważne dla Wayland!
+                ttk.Label(win, text="(Próbowano skopiować automatycznie do schowka)", font=("Arial", 8)).pack()
+            except:
+                pass
+
+            ttk.Button(win, text="Zamknij", command=win.destroy).pack(pady=10)
+
+        except Exception as e:
+            messagebox.showerror("Błąd", f"Wystąpił błąd: {e}")
+
+    def select_area_for_preset(self):
+        preset_path = self.preset_var.get()
+        if not preset_path or not os.path.exists(preset_path):
+            messagebox.showerror("Błąd", "Wybierz preset.")
+            return
+
         self.root.withdraw()
         time.sleep(0.5)
 
-        screenshot = None
-        try:
-            screenshot = _capture_fullscreen_image()
-            if not screenshot:
-                messagebox.showerror("Błąd", "Nie można było zrobić zrzutu ekranu.")
-                self.root.deiconify()
-                return
-
-            screen_w, screen_h = screenshot.size
-
-            if old_monitor:
-                try:
-                    orig_w, orig_h = map(int, old_res_str.lower().split('x'))
-                    scale_x = screen_w / orig_w
-                    scale_y = screen_h / orig_h
-                    
-                    old_geometry_scaled = {
-                        'left': int(old_monitor['left'] * scale_x),
-                        'top': int(old_monitor['top'] * scale_y),
-                        'width': int(old_monitor['width'] * scale_x),
-                        'height': int(old_monitor['height'] * scale_y)
-                    }
-                except Exception as e:
-                    print(f"Nie udało się przeskalować starego obszaru: {e}")
-
-            selector = AreaSelector(self.root, screenshot, current_geometry=old_geometry_scaled)
-            new_geometry_screen = selector.geometry
-        
-        except Exception as e:
-            print(f"Błąd podczas wyboru obszaru: {e}", file=sys.stderr)
-            new_geometry_screen = None
-        finally:
+        # Pobieranie zrzutu ekranu raz
+        screenshot = _capture_fullscreen_image()
+        if not screenshot:
             self.root.deiconify()
-            if screenshot:
-                screenshot.close()
+            return
 
-        if new_geometry_screen:
-            try:
-                
-                base_w, base_h = 1920, 1080
-                current_w, current_h = screen_w, screen_h # type: ignore (zdefiniowane wyżej)
+        screen_w, screen_h = screenshot.size
+        # Baza 1080p (standard zapisu w tym programie)
+        base_w, base_h = 1920, 1080
 
-                scale_to_base_x = base_w / current_w
-                scale_to_base_y = base_h / current_h
+        # Skalowanie do zapisu (Twój Ekran -> 1080p)
+        save_scale_x = base_w / screen_w
+        save_scale_y = base_h / screen_h
 
-                final_geometry = {
-                    'left': int(new_geometry_screen['left'] * scale_to_base_x),
-                    'top': int(new_geometry_screen['top'] * scale_to_base_y),
-                    'width': int(new_geometry_screen['width'] * scale_to_base_x),
-                    'height': int(new_geometry_screen['height'] * scale_to_base_y)
+        # Skalowanie do odczytu/wyświetlania (1080p -> Twój Ekran)
+        load_scale_x = screen_w / base_w
+        load_scale_y = screen_h / base_h
+
+        new_monitors_for_save = []  # Lista przeskalowana (do zapisu w JSON)
+        current_session_raw = []  # Lista surowa (to co właśnie zaznaczyłeś)
+        old_regions_raw = []  # Lista surowa (to co było w pliku)
+
+        try:
+            with open(preset_path, 'r', encoding='utf-8') as f:
+                saved_data = json.load(f)
+
+            saved_mons = saved_data.get('monitor', [])
+            # Obsługa przypadku, gdy monitor jest słownikiem, a nie listą
+            if isinstance(saved_mons, dict):
+                saved_mons = [saved_mons]
+
+            for m in saved_mons:
+                if not m: continue
+                # Przeliczamy z 1080p na obecny ekran, żeby wyświetlić poprawnie
+                old_regions_raw.append({
+                    'left': int(m.get('left', 0) * load_scale_x),
+                    'top': int(m.get('top', 0) * load_scale_y),
+                    'width': int(m.get('width', 0) * load_scale_x),
+                    'height': int(m.get('height', 0) * load_scale_y)
+                })
+        except Exception as e:
+            print(f"Nie udało się wczytać podglądu starych obszarów: {e}")
+
+        # --- KROK 2: Pętla dodawania nowych obszarów ---
+        for i in range(3):
+            # Wyświetlamy stare (z pliku) ORAZ te dodane w tej sesji
+            regions_to_show = old_regions_raw + current_session_raw
+
+            title = f"Wybór obszaru {i + 1}/3"
+            print(title)
+
+            # Przekazujemy sumę obszarów do wyświetlenia
+            selector = AreaSelector(self.root, screenshot, existing_regions=regions_to_show)
+            geom = selector.geometry
+
+            if geom:
+                # Dodajemy surową geometrię do listy "właśnie dodane"
+                current_session_raw.append(geom)
+
+                # Skalowanie do bazy 1080p dla zapisu
+                scaled_geom = {
+                    'left': int(geom['left'] * save_scale_x),
+                    'top': int(geom['top'] * save_scale_y),
+                    'width': int(geom['width'] * save_scale_x),
+                    'height': int(geom['height'] * save_scale_y)
                 }
+                new_monitors_for_save.append(scaled_geom)
 
+                # Pytanie o kolejny obszar
+                if i < 2:
+                    if not messagebox.askyesno("Kolejny obszar?",
+                                               f"Zdefiniowano obszar {i + 1}. Czy chcesz dodać kolejny (np. u góry ekranu)?"):
+                        break
+            else:
+                # Anulowanie wyboru przerywa proces
+                break
+
+        self.root.deiconify()
+        if screenshot: screenshot.close()
+
+        # --- KROK 3: Zapis ---
+        if new_monitors_for_save:
+            try:
                 with open(preset_path, 'r', encoding='utf-8') as f:
-                    preset_data = json.load(f)
-                
-                preset_data['monitor'] = final_geometry
-                preset_data['resolution'] = "1920x1080" # Wymuszamy standard 1080p
-                
-                with open(preset_path, 'w', encoding='utf-8') as f:
-                    json.dump(preset_data, f, indent=4)
-                    
-                messagebox.showinfo("Sukces", 
-                    f"Obszar zaktualizowany.\n\n"
-                    f"Zrzut ekranu: {current_w}x{current_h}\n"
-                    f"Zapisano jako (Baza 1080p): {final_geometry}")
+                    data = json.load(f)
 
+                # Nadpisujemy stare obszary nowymi (skalowanymi do 1080p)
+                data['monitor'] = new_monitors_for_save
+                data['resolution'] = "1920x1080"
+
+                with open(preset_path, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, indent=4)
+
+                messagebox.showinfo("Sukces", f"Zapisano {len(new_monitors_for_save)} obszar(y).")
             except Exception as e:
-                print(f"BŁĄD: Nie można zapisać presetu: {e}", file=sys.stderr)
-                messagebox.showerror("Błąd zapisu", f"Nie można było zapisać pliku presetu: {e}")
-        else:
-            print("Wybór obszaru anulowany.")
+                messagebox.showerror("Błąd", f"Nie udało się zapisać presetu: {e}")
 
     def open_settings_dialog(self):
         """Otwiera okno ustawień i zapisuje zmiany."""
@@ -394,20 +423,12 @@ class GameReaderApp:
             print(f"Błąd zapisu app_config.json: {e}", file=sys.stderr)
 
     def update_gui_from_config(self):
-        """Aktualizuje GUI na podstawie wczytanego self.settings."""
         self.preset_combo['values'] = self.settings.get('recent_presets', [])
-        if self.settings.get('recent_presets'):
-            self.preset_var.set(self.settings['recent_presets'][0])
-            
-        # Regex GUI
-        last_mode = self.settings.get('last_regex_mode', list(self.regex_patterns.keys())[0])
-        self.regex_mode_var.set(last_mode)
+        if self.settings.get('recent_presets'): self.preset_var.set(self.settings['recent_presets'][0])
+        self.regex_mode_var.set(self.settings.get('last_regex_mode', list(self.regex_patterns.keys())[0]))
         self.custom_regex_var.set(self.settings.get('last_custom_regex', ""))
-        self._toggle_regex_entry() # Odśwież stan pola tekstowego
-        
-        # Rozdzielczość
-        self.resolution_var.set(self.settings.get('last_resolution_key', 'Niestandardowa (z presetu)'))
-        
+        self.resolution_var.set(self.settings.get('last_resolution_key', "Niestandardowa"))
+        self._toggle_regex_entry()
         self.on_preset_selected()
 
     def select_new_preset(self):
@@ -425,36 +446,35 @@ class GameReaderApp:
     # --- Funkcje do zarządzania ścieżkami (teraz wywoływane z menu) ---
 
     def on_preset_selected(self, event=None):
-        preset_path = self.preset_var.get()
-        if not preset_path or not os.path.exists(preset_path):
-            return
-        
-        # 1. Automatyczna naprawa rozdzielczości w pliku presetu
-        self._ensure_preset_1080p(preset_path)
+        path = self.preset_var.get()
+        if not path or not os.path.exists(path): return
 
-        # 2. Wczytanie ścieżek (bez zmian)
+        self._ensure_preset_1080p(path)  # Tu też poprawka w logice
+
         try:
-            with open(preset_path, 'r', encoding='utf-8') as f:
+            with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             self.audio_dir_var.set(data.get('audio_dir', ''))
             self.subtitles_file_var.set(data.get('text_file_path', ''))
             self.names_file_var.set(data.get('names_file_path', ''))
-            # Ładowanie prędkości
-            saved_speed = data.get("audio_speed", 1.3)
-            self.audio_speed_var.set(saved_speed)
-            self.speed_value_label.config(text=f"{saved_speed}x")
 
-            # Ładowanie Regex
-            saved_mode = data.get("regex_mode_name", list(self.regex_patterns.keys())[0])
-            saved_pattern = data.get("regex_pattern", "")
+            # Wczytywanie prędkości i głośności
+            speed = data.get("audio_speed", 1.15)
+            self.audio_speed_var.set(speed)
+            self.speed_lbl.config(text=f"{speed}x")
 
-            self.regex_mode_var.set(saved_mode)
-            if saved_mode == "Inny (wpisz własny)":
-                self.custom_regex_var.set(saved_pattern)
+            volume = data.get("audio_volume", 1.0)
+            self.audio_volume_var.set(volume)
+            self.vol_lbl.config(text=f"{volume:.2f}")
+
+            # Regex
+            rmode = data.get("regex_mode_name", list(self.regex_patterns.keys())[0])
+            self.regex_mode_var.set(rmode)
+            if rmode == "Inny (wpisz własny)": self.custom_regex_var.set(data.get("regex_pattern", ""))
             self._toggle_regex_entry()
 
-        except Exception as e:
-            print(f"Błąd odczytu presetu: {e}")
+        except Exception:
+            pass
 
     def select_audio_dir(self):
         current_dir = self.audio_dir_var.get()
@@ -720,57 +740,46 @@ class GameReaderApp:
         except Exception as e:
             print(f"Błąd auto-zapisu presetu: {e}", file=sys.stderr)
             messagebox.showerror("Błąd zapisu", f"Nie udało się zapisać zmiany w presecie: {e}")
-    
-    def _ensure_preset_1080p(self, preset_path: str):
-        """
-        Sprawdza, czy preset jest w bazie 1920x1080. 
-        Jeśli nie, przelicza koordynaty obszaru, aktualizuje plik i zapisuje.
-        """
+
+    def _ensure_preset_1080p(self, preset_path):
         try:
             with open(preset_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            
-            current_res_str = data.get('resolution', '')
-            monitor = data.get('monitor', {})
-            
-            # Jeśli to już 1080p lub brak danych, nic nie rób
-            if current_res_str == "1920x1080":
-                return
 
-            print(f"Standaryzacja presetu z {current_res_str} na 1920x1080...")
-            
-            # Parsowanie obecnej rozdzielczości
-            if not current_res_str or 'x' not in current_res_str:
-                # Zakładamy, że stare, błędne presety bez rozdzielczości były robione pod 1080p lub ignorujemy
-                orig_w, orig_h = 1920, 1080 
+            if data.get('resolution') == "1920x1080": return
+
+            print("Standaryzacja presetu do 1080p...")
+            orig_res = data.get('resolution', '1920x1080')
+            if 'x' in orig_res:
+                ow, oh = map(int, orig_res.split('x'))
             else:
-                orig_w, orig_h = map(int, current_res_str.lower().split('x'))
+                ow, oh = 1920, 1080
 
-            # Obliczanie skali do 1080p
-            target_w, target_h = 1920, 1080
-            scale_x = target_w / orig_w
-            scale_y = target_h / orig_h
+            sx = 1920 / ow
+            sy = 1080 / oh
 
-            # Przeliczanie obszaru
-            new_monitor = {
-                'left': int(monitor.get('left', 0) * scale_x),
-                'top': int(monitor.get('top', 0) * scale_y),
-                'width': int(monitor.get('width', 0) * scale_x),
-                'height': int(monitor.get('height', 0) * scale_y)
-            }
+            # Obsługa Monitor (Dict lub List)
+            mon = data.get('monitor')
+            new_mon = []
 
-            # Aktualizacja danych
-            data['monitor'] = new_monitor
+            monitor_list = mon if isinstance(mon, list) else [mon]
+
+            for m in monitor_list:
+                if not m: continue
+                new_mon.append({
+                    'left': int(m.get('left', 0) * sx),
+                    'top': int(m.get('top', 0) * sy),
+                    'width': int(m.get('width', 0) * sx),
+                    'height': int(m.get('height', 0) * sy)
+                })
+
+            data['monitor'] = new_mon if len(new_mon) > 1 else new_mon[0]
             data['resolution'] = "1920x1080"
 
-            # Zapis do pliku
             with open(preset_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=4)
-            
-            print(f"Zaktualizowano preset do standardu 1080p: {new_monitor}")
-
         except Exception as e:
-            print(f"BŁĄD podczas standaryzacji presetu: {e}", file=sys.stderr)
+            print(f"Błąd standaryzacji: {e}")
 
     def _toggle_regex_entry(self, event=None):
         """Włącza/wyłącza pole tekstowe w zależności od wyboru w comboboxie."""
@@ -823,6 +832,98 @@ class GameReaderApp:
             pattern = self.custom_regex_var.get()
             self._auto_save_to_preset("regex_pattern", pattern)
             self._auto_save_to_preset("regex_mode_name", "Inny (wpisz własny)")
+
+    def manage_area(self, index: int, action: str):
+        preset_path = self.preset_var.get()
+        if not preset_path or not os.path.exists(preset_path):
+            messagebox.showerror("Błąd", "Wybierz preset.")
+            return
+
+        try:
+            with open(preset_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            # Pobierz aktualne monitory (upewnij się, że to lista)
+            monitors = data.get('monitor', [])
+            if isinstance(monitors, dict):
+                monitors = [monitors]
+
+            # Uzupełnij listę do 3 elementów, jeśli jest krótsza
+            while len(monitors) < 3:
+                monitors.append(None)
+
+            if action == 'clear':
+                if monitors[index] is None:
+                    messagebox.showinfo("Info", f"Obszar {index + 1} jest już pusty.")
+                    return
+                monitors[index] = None
+                data['monitor'] = [m for m in monitors if m is not None]  # Usuń None przed zapisem
+                if not data['monitor']:  # Jeśli pusta lista, daj chociaż jeden pusty dict lub null
+                    data['monitor'] = []
+
+                with open(preset_path, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, indent=4)
+                messagebox.showinfo("Sukces", f"Wyczyszczono obszar {index + 1}.")
+                return
+
+            if action == 'set':
+                self.root.withdraw()
+                time.sleep(0.5)
+                screenshot = _capture_fullscreen_image()
+                if not screenshot:
+                    self.root.deiconify()
+                    return
+
+                # Skalowanie
+                screen_w, screen_h = screenshot.size
+                base_w, base_h = 1920, 1080
+                save_scale_x = base_w / screen_w
+                save_scale_y = base_h / screen_h
+                load_scale_x = screen_w / base_w
+                load_scale_y = screen_h / base_h
+
+                # Przygotuj listę INNYCH obszarów do wyświetlenia
+                existing_regions_raw = []
+                for i, m in enumerate(monitors):
+                    if i == index: continue  # Nie wyświetlamy tego, który właśnie zmieniamy (będzie rysowany nowy)
+                    if m:
+                        existing_regions_raw.append({
+                            'left': int(m.get('left', 0) * load_scale_x),
+                            'top': int(m.get('top', 0) * load_scale_y),
+                            'width': int(m.get('width', 0) * load_scale_x),
+                            'height': int(m.get('height', 0) * load_scale_y)
+                        })
+
+                title = f"Ustawianie obszaru {index + 1}"
+                print(title)
+
+                selector = AreaSelector(self.root, screenshot, existing_regions=existing_regions_raw)
+                geom = selector.geometry
+
+                self.root.deiconify()
+                screenshot.close()
+
+                if geom:
+                    scaled_geom = {
+                        'left': int(geom['left'] * save_scale_x),
+                        'top': int(geom['top'] * save_scale_y),
+                        'width': int(geom['width'] * save_scale_x),
+                        'height': int(geom['height'] * save_scale_y)
+                    }
+                    monitors[index] = scaled_geom
+
+                    # Zapisz (filtrując None)
+                    data['monitor'] = [m for m in monitors if m is not None]
+                    data['resolution'] = "1920x1080"
+
+                    with open(preset_path, 'w', encoding='utf-8') as f:
+                        json.dump(data, f, indent=4)
+
+                    messagebox.showinfo("Sukces", f"Zapisano obszar {index + 1}.")
+
+        except Exception as e:
+            self.root.deiconify()
+            messagebox.showerror("Błąd", f"Błąd zarządzania obszarami: {e}")
 
 
 def main():

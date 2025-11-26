@@ -5,29 +5,26 @@ APP_NAME="reader_deck"
 ENTRY_FILE="game_reader_gui.py"
 BUILD_DIR="build_deck"
 
-source .venv/bin/activate
+source .venv_deck/bin/activate
 
-echo "🚀 Buduję aplikację $APP_NAME przy użyciu Nuitka"
+echo "🚀 Buduję aplikację $APP_NAME (OneFile) - wersja Generic/Zen2"
 
-# 1. Czyszczenie cache jest absolutnie kluczowe przy zmianie kompilatora
+# Czyszczenie
 rm -rf "$BUILD_DIR" dist __pycache__ *.build *.dist *.onefile-build *.onefile-dist || true
 rm -rf "$HOME/.cache/Nuitka"
 
-# 2. Usuwamy WSZYSTKIE flagi związane z architekturą.
-# Clang sam dobierze bezpieczne ustawienia.
-# unset CFLAGS
-# unset CXXFLAGS
+# FLAGA 1: Architektura.
+# Wymuszamy x86-64-v3 (obsługiwane przez Steam Deck).
+# -mtune=generic zapobiega optymalizacjom pod Twój Zen 4.
+export CFLAGS="-march=x86-64-v3 -mtune=generic"
+export CXXFLAGS="-march=x86-64-v3 -mtune=generic"
 
-# # 3. Wymuszamy użycie Clang
-# export CC=clang
-# export CXX=clang++
-export CFLAGS="-march=x86-64"
-export CXXFLAGS="-march=x86-64"
-# -------------------------
-# Kompilacja
-# -------------------------
+# FLAGA 2: Linker
+# -rdynamic naprawia błąd "undefined symbol: PyList_New"
+export LDFLAGS="-rdynamic"
+
 python -m nuitka \
-  --standalone \
+  --onefile \
   --follow-imports \
   --enable-plugin=tk-inter \
   --enable-plugin=pylint-warnings \
@@ -40,7 +37,8 @@ python -m nuitka \
   --jobs=$(nproc) \
   --include-package=thefuzz \
   --include-package=PIL \
+  --include-package=pyscreenshot \
   "$ENTRY_FILE" \
   -o "$APP_NAME"
 
-echo "✅ Kompilacja zakończona!"
+echo "✅ Gotowe! Plik znajduje się w katalogu $BUILD_DIR"

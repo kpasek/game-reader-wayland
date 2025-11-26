@@ -15,19 +15,22 @@ from thefuzz import fuzz
 OCR_LANGUAGE = 'pol'
 MIN_MATCH_THRESHOLD = 75
 
-def normalize_unicode(text):
 
+def normalize_unicode(text):
     text = unicodedata.normalize("NFKC", text)
     return text
 
+
 def remove_noise(text):
-    # Zostawiamy: polskie litery, cyfry, .,:;!?'"()-
     return re.sub(r"[^0-9A-Za-zĄąĆćĘęŁłŃńÓóŚśŹźŻż.,:;!?\"'\(\)\-\s]+", " ", text)
+
 
 def normalize_spaces(text):
     return re.sub(r"\s+", " ", text).strip()
 
+
 POLISH_SHORT_WORDS = {"i", "w", "o", "a", "u", "z", "do", "na"}
+
 
 def remove_short_noise_words(text, min_len=2):
     cleaned = []
@@ -36,6 +39,7 @@ def remove_short_noise_words(text, min_len=2):
             continue
         cleaned.append(w)
     return " ".join(cleaned)
+
 
 def similar_char_map(text):
     replacements = {
@@ -53,23 +57,18 @@ def similar_char_map(text):
         text = text.replace(bad, good)
     return text
 
-def _smart_remove_name(text: str) -> str:
-    """
-    Usuwa imię postaci, jeśli wykryje separator (np. 'Imię - Kwestia').
-    Działa lepiej niż sztywny regex dla długich nazw (np. 'Wojownik z klanu - Cześć').
-    """
-    separators = [":", "-", "—", "–", ";"]
 
+def _smart_remove_name(text: str) -> str:
+    separators = [":", "-", "—", "–", ";"]
     for sep in separators:
         if sep in text:
             parts = text.split(sep, 1)
-            # Jeśli lewa strona (imię) jest krótsza niż 40 znaków, a prawa (tekst) niepusta
             if len(parts) == 2 and len(parts[0]) < 40 and parts[1].strip():
                 return parts[1].strip()
     return text
 
+
 def load_config(filename: str) -> Dict[str, Any]:
-    """Wczytuje plik konfiguracyjny JSON."""
     try:
         with open(filename, 'r', encoding='utf-8') as f:
             return json.load(f)
@@ -80,8 +79,8 @@ def load_config(filename: str) -> Dict[str, Any]:
         print(f"BŁĄD: Błąd parsowania pliku JSON: {filename}", file=sys.stderr)
         raise
 
+
 def load_text_file(filepath: str) -> List[str]:
-    """Wczytuje plik tekstowy (napisy) do listy."""
     if not os.path.exists(filepath):
         print(f"BŁĄD: Nie znaleziono pliku: {filepath}", file=sys.stderr)
         return []
@@ -95,94 +94,63 @@ def load_text_file(filepath: str) -> List[str]:
 
 
 def _capture_fullscreen_image() -> Optional[Image.Image]:
-    """Wykonuje zrzut całego ekranu (KDE) przy użyciu pliku tymczasowego (w RAM)."""
     try:
         return ImageGrab.grab()
-
     except Exception as e:
         print(f"BŁĄD: Nieoczekiwany błąd podczas przechwytywania (KDE): {e}", file=sys.stderr)
 
 
 def capture_screen_region(monitor_config: Dict[str, int]) -> Optional[Image.Image]:
-    """Wykonuje zrzut całego ekranu i kadruje go do pożądanego regionu."""
     try:
-        left = monitor_config['left']
-        top = monitor_config['top']
-        width = monitor_config['width']
-        height = monitor_config['height']
-
+        left = monitor_config.get('left', 0)
+        top = monitor_config.get('top', 0)
+        width = monitor_config.get('width', 100)
+        height = monitor_config.get('height', 100)
         crop_box = (left, top, left + width, top + height)
         return ImageGrab.grab(crop_box, False)
-
     except Exception as e:
-        print(
-            f"BŁĄD: Błąd podczas przechwytywania regionu: {e}", file=sys.stderr)
+        print(f"BŁĄD capture: {e}", file=sys.stderr)
         return None
 
 
 def ocr_and_clean_image(image: Image.Image, regex_pattern: str) -> str:
-    """Wykonuje OCR i usuwa tekst pasujący do regex oraz inteligentnie usuwa imiona."""
     try:
-        # Dodano config '--psm 6' (zakłada blok tekstu), co często poprawia wyniki w grach
         text = pytesseract.image_to_string(image, lang=OCR_LANGUAGE, config='--psm 6').strip()
         text = text.replace('\n', ' ')
-
-        if not text:
-            return ""
-
+        if not text: return ""
         if regex_pattern:
             try:
                 text = re.sub(regex_pattern, "", text).strip()
-            except re.error as e:
-                print(f"OSTRZEŻENIE: Błędny Regex: {e}", file=sys.stderr)
-
+            except re.error:
+                pass
             text = _smart_remove_name(text)
-
         return text
-
-    except Exception as e:
-        print(f"BŁĄD: Błąd podczas OCR: {e}", file=sys.stderr)
+    except Exception:
         return ""
+
 
 def _clean(text: str) -> str:
-    """Szybkie czyszczenie tekstu z artefaktów OCR (bez dużego kosztu)."""
-    if not text:
-        return ""
+    if not text: return ""
     text = normalize_unicode(text)
     text = similar_char_map(text)
     text = remove_noise(text)
     text = normalize_spaces(text)
-    text = remove_short_noise_words(text)
+
+    if len(text) > 5:
+        text = remove_short_noise_words(text)
+    if len(text) < 3 and not text.isalpha():
+        return ""
+
     return text.strip().lower()
 
 
-def _best_prefix_match(ocr_text: str, line: str, max_shift: int = 8) -> int:
-    """Zwraca najlepszy wynik dopasowania OCR do początku linii (szybko)."""
-    ocr_len = len(ocr_text)
-    if not line or ocr_len == 0:
-        return 0
-
-    best_score = 0
-
-    for shift in range(0, min(max_shift, max(1, len(line) - ocr_len)) + 1):
-        fragment = line[shift:shift + ocr_len + 3]  # +3 żeby uwzględnić różnice końcowe
-        score = fuzz.ratio(ocr_text, fragment)
-        if score > best_score:
-            best_score = score
-    return best_score
-
-
 def find_best_match(ocr_text: str, subtitles_list: List[str], mode: str) -> Optional[Tuple[int, int]]:
-    """Szybka wersja dopasowania OCR do dialogu. Zwraca (index, score) lub None."""
+    """Dopasowuje OCR do listy dialogów."""
     if not ocr_text:
         return None
 
     ocr_text = _clean(ocr_text)
-    if not ocr_text:
-        return None
-    # Większość "napisów" o długości 1 to błędy OCR (szumy, krawędzie).
-    # Wyjątkiem są dialogi typu "A?", "No.", ale zazwyczaj mają interpunkcję.
-    if len(ocr_text) < 2:
+    if not ocr_text or len(ocr_text) < 2:
         return None
 
     if mode == "Partial Lines":
@@ -193,55 +161,53 @@ def find_best_match(ocr_text: str, subtitles_list: List[str], mode: str) -> Opti
         ocr_len = len(ocr_lower)
 
         for i, line in enumerate(subtitles_list):
-            if not line:
-                continue
+            if not line: continue
             line_lower = line.lower()
             line_len = len(line_lower)
 
-            len_diff = abs(ocr_len - line_len)
+            prefix_score = 0
+            if line_len >= ocr_len:
+                fragment = line_lower[:ocr_len + 15]  # +15 marginesu
+                prefix_score = fuzz.ratio(ocr_lower, fragment)
+            else:
+                prefix_score = fuzz.ratio(ocr_lower, line_lower)
 
-            if ocr_len < 5:
-                if len_diff > 1:
-                    continue
-            else:
-                if len_diff > ocr_len * 0.8:
-                    continue
-            if ocr_len < 8:
-                score = fuzz.ratio(ocr_lower, line_lower)
-            else:
-                score = _best_prefix_match(ocr_text, line)
+            substring_score = 0
+            if ocr_len > 10 and line_len > ocr_len:
+                substring_score = fuzz.partial_ratio(ocr_lower, line_lower)
+
+            score = max(prefix_score, substring_score)
 
             if score > best_score:
                 best_score = score
                 best_index = i
-
-                if best_score > 97:
+                if best_score > 98:
                     break
 
-        if ocr_len < 5:
+        # Progi akceptacji
+        threshold = 75
+        if ocr_len < 6:
             threshold = 95
         elif ocr_len < 15:
-            threshold = 80
-        else:
-            threshold = 70
+            threshold = 85
 
         if best_index >= 0 and best_score >= threshold:
             return best_index, best_score
 
         return None
 
+    # Tryb Full Lines
     best_score = 0
     best_index = -1
 
     for i, sub_line in enumerate(subtitles_list):
         sub_line = _clean(sub_line)
-        if not sub_line:
-            continue
+        if not sub_line: continue
 
         ocr_len = len(ocr_text)
         sub_len = len(sub_line)
-        if sub_len == 0:
-            continue
+        if sub_len == 0: continue
+
         if ocr_len < sub_len * 0.5 or ocr_len > sub_len * 2.0:
             continue
 
@@ -250,18 +216,13 @@ def find_best_match(ocr_text: str, subtitles_list: List[str], mode: str) -> Opti
             min_score = 90
         else:
             score = fuzz.token_set_ratio(sub_line, ocr_text)
-            if ocr_len < 30:
-                min_score = 82
-            else:
-                min_score = 75
+            min_score = 75
 
         if score >= min_score and score > best_score:
             best_score = score
             best_index = i
 
     if best_index >= 0:
-        print(f"Dopasowano (token_set_ratio: {best_score}%): Linia {best_index + 1}")
         return best_index, best_score
-    else:
-        print(f"Brak dopasowania (Najlepszy wynik: {best_score}%)")
-        return None
+
+    return None

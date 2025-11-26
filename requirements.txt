@@ -3,3 +3,4 @@ pytesseract
 thefuzz
 pydub
 audioop-lts
+pyscreenshot
