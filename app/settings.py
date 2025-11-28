@@ -1,101 +1,70 @@
 import sys
 from typing import Any, Dict
 
-
 try:
     import tkinter as tk
     from tkinter import ttk
 except ImportError:
-    print("Błąd: Nie znaleziono biblioteki 'tkinter'.", file=sys.stderr)
-    print("Zazwyczaj jest dołączona do Pythona. W Debian/Ubuntu: sudo apt install python3-tk", file=sys.stderr)
     sys.exit(1)
 
-    
+
 class SettingsDialog(tk.Toplevel):
-    """Okno dialogowe do edycji ustawień aplikacji."""
+    """
+    Okno dialogowe do globalnych ustawień OCR i preprocessingu.
+    Modyfikuje przekazany słownik 'settings' w miejscu (mutable).
+    """
 
     def __init__(self, parent, settings: Dict[str, Any]):
         super().__init__(parent)
         self.transient(parent)
-        self.title("Ustawienia")
-
+        self.title("Ustawienia zaawansowane")
         self.settings = settings
-        self.result = None
 
-        # Zmienne Tkinter
-        self.subtitle_mode_var = tk.StringVar(
-            value=self.settings.get('subtitle_mode', 'Full Lines'))
-        self.ocr_scale_var = tk.DoubleVar(
-            value=self.settings.get('ocr_scale_factor', 1.0))
-        self.ocr_grayscale_var = tk.BooleanVar(
-            value=self.settings.get('ocr_grayscale', False))
-        self.ocr_contrast_var = tk.BooleanVar(
-            value=self.settings.get('ocr_contrast', False))
+        self.var_mode = tk.StringVar(value=settings.get('subtitle_mode', 'Full Lines'))
+        self.var_scale = tk.DoubleVar(value=settings.get('ocr_scale_factor', 1.0))
+        self.var_gray = tk.BooleanVar(value=settings.get('ocr_grayscale', False))
+        self.var_contrast = tk.BooleanVar(value=settings.get('ocr_contrast', False))
 
-        frame = ttk.Frame(self, padding="10")
+        self._build_ui()
+        self.geometry("400x350")
+        self.grab_set()
+
+    def _build_ui(self):
+        frame = ttk.Frame(self, padding=10)
         frame.pack(fill=tk.BOTH, expand=True)
 
-        # --- Grupa Trybu Napisów ---
-        mode_group = ttk.LabelFrame(
-            frame, text="Tryb dopasowania napisów", padding="10")
-        mode_group.pack(fill=tk.X, pady=5)
-        # ... (Radiobuttony bez zmian) ...
-        ttk.Radiobutton(
-            mode_group, text="Pełne linie", value="Full Lines", variable=self.subtitle_mode_var
-        ).pack(anchor=tk.W)
-        ttk.Radiobutton(
-            mode_group, text="Częściowe linie (eksperymentalne)", value="Partial Lines", variable=self.subtitle_mode_var
-        ).pack(anchor=tk.W)
+        # Tryb napisów
+        lf_mode = ttk.LabelFrame(frame, text="Algorytm dopasowania", padding=5)
+        lf_mode.pack(fill=tk.X, pady=5)
+        ttk.Radiobutton(lf_mode, text="Pełne linie (Dokładne)", value="Full Lines", variable=self.var_mode).pack(
+            anchor=tk.W)
+        ttk.Radiobutton(lf_mode, text="Fragmenty (Eksperymentalne)", value="Partial Lines",
+                        variable=self.var_mode).pack(anchor=tk.W)
 
-        ocr_group = ttk.LabelFrame(
-            frame, text="Wydajność i Preprocessing OCR", padding="10")
-        ocr_group.pack(fill=tk.X, pady=5)
+        # OCR
+        lf_ocr = ttk.LabelFrame(frame, text="Tweakowanie OCR", padding=5)
+        lf_ocr.pack(fill=tk.X, pady=5)
 
-        # Skalowanie
-        scale_frame = ttk.Frame(ocr_group)
-        scale_frame.pack(fill=tk.X)
-        ttk.Label(scale_frame, text="Skala obrazu:").pack(side=tk.LEFT)
-        scale_values = [round(x * 0.1, 1) for x in range(10, 1, -1)]
+        f_sc = ttk.Frame(lf_ocr)
+        f_sc.pack(fill=tk.X)
+        ttk.Label(f_sc, text="Skala obrazu:").pack(side=tk.LEFT)
+        vals = [round(x * 0.1, 1) for x in range(10, 1, -1)]
+        ttk.Combobox(f_sc, textvariable=self.var_scale, values=vals, width=5, state="readonly").pack(side=tk.LEFT,
+                                                                                                     padx=5)
+        ttk.Label(f_sc, text="(mniejsza = szybciej, ale mniej dokładnie)").pack(side=tk.LEFT)
 
-        scale_combo = ttk.Combobox(
-            scale_frame,
-            textvariable=self.ocr_scale_var,
-            values=scale_values,
-            state="readonly",
-            width=5
-        )
-        scale_combo.pack(side=tk.LEFT, padx=5)
-        ttk.Label(scale_frame, text="(mniejsza = szybszy OCR, niższa jakość)").pack(
-            side=tk.LEFT)
+        ttk.Checkbutton(lf_ocr, text="Konwersja do skali szarości", variable=self.var_gray).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(lf_ocr, text="Podbicie kontrastu", variable=self.var_contrast).pack(anchor=tk.W, pady=2)
 
-        # Checkboxy
-        ttk.Checkbutton(
-            ocr_group, text="Konwertuj do skali szarości", variable=self.ocr_grayscale_var
-        ).pack(anchor=tk.W, pady=(5, 0))
+        # Przyciski
+        btn_f = ttk.Frame(frame)
+        btn_f.pack(side=tk.BOTTOM, fill=tk.X, pady=10)
+        ttk.Button(btn_f, text="Zapisz", command=self.save).pack(side=tk.RIGHT)
+        ttk.Button(btn_f, text="Anuluj", command=self.destroy).pack(side=tk.RIGHT, padx=5)
 
-        ttk.Checkbutton(
-            ocr_group, text="Zwiększ kontrast (może pomóc z dziwnymi czcionkami)", variable=self.ocr_contrast_var
-        ).pack(anchor=tk.W)
-
-        # --- Przyciski Zapisz/Anuluj ---
-        button_frame = ttk.Frame(frame)
-        button_frame.pack(fill=tk.X, side=tk.BOTTOM, pady=(10, 0))
-        # ... (Przyciski bez zmian) ...
-        ttk.Button(button_frame, text="Anuluj",
-                   command=self.destroy).pack(side=tk.RIGHT, padx=5)
-        ttk.Button(button_frame, text="Zapisz",
-                   command=self.save_and_close).pack(side=tk.RIGHT)
-
-        self.geometry("450x380")  # Zwiększono wysokość
-        self.grab_set()
-        self.wait_window()
-
-    def save_and_close(self):
-        """Aktualizuje słownik ustawień i zamyka okno."""
-        self.settings['subtitle_mode'] = self.subtitle_mode_var.get()
-        self.settings['ocr_scale_factor'] = self.ocr_scale_var.get()
-        self.settings['ocr_grayscale'] = self.ocr_grayscale_var.get()
-        self.settings['ocr_contrast'] = self.ocr_contrast_var.get()
-
-        self.result = self.settings
+    def save(self):
+        self.settings['subtitle_mode'] = self.var_mode.get()
+        self.settings['ocr_scale_factor'] = self.var_scale.get()
+        self.settings['ocr_grayscale'] = self.var_gray.get()
+        self.settings['ocr_contrast'] = self.var_contrast.get()
         self.destroy()

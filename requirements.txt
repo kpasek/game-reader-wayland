@@ -4,3 +4,7 @@ thefuzz
 audioop-lts
 pyscreenshot
 mss
+# build
+nuitka
+ordered-set
+zstandard
