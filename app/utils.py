@@ -3,10 +3,22 @@ import os
 import re
 import sys
 import unicodedata
+import platform
 
 from typing import Any, Dict, List, Optional, Tuple
 
+# Biblioteki do zrzutów ekranu
 import pyscreenshot as ImageGrab
+
+# Próba importu mss dla szybszego przechwytywania (Windows/X11)
+try:
+    import mss
+
+    HAS_MSS = True
+except ImportError:
+    HAS_MSS = False
+    print("OSTRZEŻENIE: Brak biblioteki 'mss'. Zainstaluj 'pip install mss' dla lepszej wydajności.", file=sys.stderr)
+
 import pytesseract
 
 from PIL import Image
@@ -14,6 +26,42 @@ from thefuzz import fuzz
 
 OCR_LANGUAGE = 'pol'
 MIN_MATCH_THRESHOLD = 75
+
+
+# --- Logika wyboru backendu do zrzutów ekranu ---
+def _determine_screenshot_backend():
+    """
+    Decyduje, której biblioteki użyć.
+    MSS jest preferowane dla Windows i Linux (X11).
+    Dla Wayland wymuszamy pyscreenshot (kompatybilność).
+    """
+    if not HAS_MSS:
+        return 'pyscreenshot'
+
+    system = platform.system().lower()
+
+    # Windows: MSS jest bardzo szybkie
+    if system == 'windows':
+        return 'mss'
+
+    # Linux
+    if system == 'linux':
+        # Sprawdzamy typ sesji (X11 czy Wayland)
+        session_type = os.environ.get('XDG_SESSION_TYPE', '').lower()
+        if 'wayland' in session_type:
+            # MSS na Wayland wymaga specyficznej konfiguracji/uprawnień,
+            # bezpieczniej zostać przy pyscreenshot (zazwyczaj używa gnome-screenshot/portal)
+            return 'pyscreenshot'
+        else:
+            # X11
+            return 'mss'
+
+    # Inne systemy (macOS itp.) - fallback
+    return 'pyscreenshot'
+
+
+SCREENSHOT_BACKEND = _determine_screenshot_backend()
+print(f"INFO: Wybrany backend zrzutów ekranu: {SCREENSHOT_BACKEND}")
 
 
 def normalize_unicode(text):
@@ -94,22 +142,55 @@ def load_text_file(filepath: str) -> List[str]:
 
 
 def _capture_fullscreen_image() -> Optional[Image.Image]:
+    """Służy do pobrania podglądu całego ekranu (np. przy wyborze obszaru)."""
     try:
-        return ImageGrab.grab()
+        if SCREENSHOT_BACKEND == 'mss':
+            with mss.mss() as sct:
+                # monitor 1 to zazwyczaj główny ekran lub "all in one" w mss
+                monitor = sct.monitors[1]
+                sct_img = sct.grab(monitor)
+                return Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
+        else:
+            return ImageGrab.grab()
     except Exception as e:
-        print(f"BŁĄD: Nieoczekiwany błąd podczas przechwytywania (KDE): {e}", file=sys.stderr)
+        print(f"BŁĄD capture fullscreen ({SCREENSHOT_BACKEND}): {e}", file=sys.stderr)
+        # Fallback
+        try:
+            return ImageGrab.grab()
+        except:
+            return None
 
 
 def capture_screen_region(monitor_config: Dict[str, int]) -> Optional[Image.Image]:
+    """
+    Pobiera wycinek ekranu używając wybranego backendu.
+    monitor_config oczekuje kluczy: 'top', 'left', 'width', 'height'.
+    """
     try:
-        left = monitor_config.get('left', 0)
-        top = monitor_config.get('top', 0)
-        width = monitor_config.get('width', 100)
-        height = monitor_config.get('height', 100)
-        crop_box = (left, top, left + width, top + height)
-        return ImageGrab.grab(crop_box, False)
+        # Konwersja na int (dla bezpieczeństwa)
+        top = int(monitor_config.get('top', 0))
+        left = int(monitor_config.get('left', 0))
+        width = int(monitor_config.get('width', 100))
+        height = int(monitor_config.get('height', 100))
+
+        if SCREENSHOT_BACKEND == 'mss':
+            with mss.mss() as sct:
+                # MSS wymaga słownika {top, left, width, height}
+                region = {"top": top, "left": left, "width": width, "height": height}
+                sct_img = sct.grab(region)
+
+                # Konwersja MSS (BGRA) -> PIL (RGB)
+                # mss.tools.to_png to za dużo narzutu, używamy frombytes
+                return Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
+
+        else:
+            # Stara metoda (pyscreenshot / ImageGrab)
+            # Wymaga krotki (x1, y1, x2, y2)
+            crop_box = (left, top, left + width, top + height)
+            return ImageGrab.grab(crop_box, False)
+
     except Exception as e:
-        print(f"BŁĄD capture: {e}", file=sys.stderr)
+        print(f"BŁĄD capture ({SCREENSHOT_BACKEND}): {e}", file=sys.stderr)
         return None
 
 

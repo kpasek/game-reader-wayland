@@ -35,6 +35,7 @@ python -m nuitka \
   --lto=yes \
   --jobs=$(nproc) \
   --include-package=thefuzz \
+  --include-package=mss \
   "$ENTRY_FILE" \
   -o "$APP_NAME"
 

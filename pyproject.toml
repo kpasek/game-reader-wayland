@@ -20,10 +20,10 @@ classifiers = [
 dependencies = [
     "Pillow",
     "pytesseract",
-    "pygame",
     "thefuzz",
-    "pydub",
+    "mss",
     "audioop-lts",
+    "pyscreenshot",
 ]
 
 [project.scripts]

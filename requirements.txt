@@ -1,6 +1,6 @@
 Pillow
 pytesseract
 thefuzz
-pydub
 audioop-lts
 pyscreenshot
+mss
