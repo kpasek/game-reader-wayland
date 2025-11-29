@@ -112,7 +112,7 @@ class GameReaderApp:
         self.root = root
         self.root.title("Game Reader")
         # Zmniejszony rozmiar okna
-        self.root.geometry("700x400")
+        self.root.geometry("700x500")
 
         self.config_mgr = ConfigManager()
         self.game_cmd = game_cmd

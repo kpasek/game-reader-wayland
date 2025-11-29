@@ -31,6 +31,7 @@ python -m nuitka ^
   --include-package=thefuzz ^
   --include-package=mss ^
   --include-package=PIL ^
+  --include-package=Levenshtein ^
   --output-dir=%BUILD_DIR% ^
   -o %APP_NAME%.exe ^
   "%ENTRY_FILE%"
