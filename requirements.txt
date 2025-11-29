@@ -8,3 +8,5 @@ mss
 nuitka
 ordered-set
 zstandard
+# inputs
+pynput

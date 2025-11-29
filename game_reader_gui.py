@@ -17,7 +17,6 @@ except ImportError:
     sys.exit(1)
 
 # --- FIX WINDOWS 11 DPI SCALING ---
-# To sprawia, że okna nie są rozmazane, a myszka trafia w punkt
 if platform.system() == "Windows":
     try:
         import ctypes
@@ -26,6 +25,16 @@ if platform.system() == "Windows":
     except Exception:
         pass
 # ----------------------------------
+
+# --- PYNPUT HOTKEYS ---
+try:
+    from pynput import keyboard
+
+    HAS_PYNPUT = True
+except ImportError:
+    HAS_PYNPUT = False
+    print("Brak biblioteki pynput. Skróty klawiszowe nie będą działać.")
+# ----------------------
 
 from app.config_manager import ConfigManager
 from app.reader import ReaderThread
@@ -40,7 +49,7 @@ stop_event = threading.Event()
 audio_queue = queue.Queue()
 log_queue = queue.Queue()
 
-# Wszystkie presety będą zapisywane w odniesieniu do tej rozdzielczości
+# --- KONFIGURACJA STANDARDU (4K) ---
 STANDARD_WIDTH = 3840
 STANDARD_HEIGHT = 2160
 
@@ -48,8 +57,8 @@ STANDARD_HEIGHT = 2160
 class GameReaderApp:
     def __init__(self, root: tk.Tk, autostart_preset: Optional[str], game_cmd: list):
         self.root = root
-        self.root.title("Game Reader (Lektor Gier)")
-        self.root.geometry("700x550")
+        self.root.title("Lektor Gier")
+        self.root.geometry("700x450")
 
         self.config_mgr = ConfigManager()
         self.game_cmd = game_cmd
@@ -59,6 +68,7 @@ class GameReaderApp:
         self.reader_thread = None
         self.player_thread = None
         self.log_window = None
+        self.is_running = False
 
         # Zmienne UI
         self.var_preset = tk.StringVar()
@@ -91,6 +101,47 @@ class GameReaderApp:
         self._load_initial_state(autostart_preset)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
+        # Uruchomienie nasłuchu klawiszy
+        if HAS_PYNPUT:
+            self._start_hotkey_listener()
+
+    def _start_hotkey_listener(self):
+        """Uruchamia wątek nasłuchujący kombinacji klawiszy."""
+
+        # Mapa skrótów: Kombinacja -> Funkcja
+        # Używamy <ctrl> zamiast key.ctrl dla czytelności w GlobalHotKeys
+        hotkeys = {
+            '<ctrl>+<f5>': self._on_hotkey_start_stop,
+            '<ctrl>+<f6>': self._on_hotkey_area3
+        }
+
+        try:
+            # GlobalHotKeys automatycznie obsługuje stan modifierów (Ctrl, Alt itp.)
+            self.listener = keyboard.GlobalHotKeys(hotkeys)
+            self.listener.start()
+        except Exception as e:
+            print(f"Błąd inicjalizacji skrótów: {e}")
+
+    def _on_hotkey_start_stop(self):
+        """Callback dla Ctrl+F5 wywoływany przez pynput (wątek tła)"""
+        # Przekazujemy wykonanie do głównego wątku GUI (Tkinter nie jest thread-safe)
+        self.root.after(0, self._toggle_start_stop_hotkey)
+
+    def _on_hotkey_area3(self):
+        """Callback dla Ctrl+F6 wywoływany przez pynput (wątek tła)"""
+        self.root.after(0, self._trigger_area3_hotkey)
+
+    def _toggle_start_stop_hotkey(self):
+        if self.is_running:
+            self.stop_reading()
+        else:
+            self.start_reading()
+
+    def _trigger_area3_hotkey(self):
+        if self.is_running and self.reader_thread:
+            # Aktywacja na 2 sekundy (3. monitor to index 2)
+            self.reader_thread.trigger_area_3(duration=2.0)
+
     def _init_gui(self):
         # --- MENU ---
         menubar = tk.Menu(self.root)
@@ -106,9 +157,10 @@ class GameReaderApp:
         area_menu = tk.Menu(preset_menu, tearoff=0)
         for i in range(3):
             sub = tk.Menu(area_menu, tearoff=0)
-            sub.add_command(label=f"Definiuj Obszar {i + 1}", command=lambda x=i: self.set_area(x))
+            suffix = " (CZASOWY - Ctrl+F6)" if i == 2 else ""
+            sub.add_command(label=f"Definiuj Obszar {i + 1}{suffix}", command=lambda x=i: self.set_area(x))
             sub.add_command(label=f"Wyczyść Obszar {i + 1}", command=lambda x=i: self.clear_area(x))
-            area_menu.add_cascade(label=f"Obszar {i + 1}", menu=sub)
+            area_menu.add_cascade(label=f"Obszar {i + 1}{suffix}", menu=sub)
         preset_menu.add_cascade(label="Obszary ekranu", menu=area_menu)
 
         preset_menu.add_separator()
@@ -126,6 +178,11 @@ class GameReaderApp:
         # --- GŁÓWNY PANEL ---
         panel = ttk.Frame(self.root, padding=10)
         panel.pack(fill=tk.BOTH, expand=True)
+
+        # Info o skrótach
+        if HAS_PYNPUT:
+            ttk.Label(panel, text="Skróty: [Ctrl+F5] Start/Stop  |  [Ctrl+F6] Czytaj adnotację (Obszar 3)",
+                      foreground="blue").pack(anchor=tk.W, pady=(0, 10))
 
         ttk.Label(panel, text="Aktywny profil lektora:").pack(anchor=tk.W)
         self.cb_preset = ttk.Combobox(panel, textvariable=self.var_preset, state="readonly", width=60)
@@ -184,9 +241,9 @@ class GameReaderApp:
         # Buttons
         frm_btn = ttk.Frame(panel)
         frm_btn.pack(side=tk.BOTTOM, fill=tk.X, pady=10)
-        self.btn_start = ttk.Button(frm_btn, text="START", command=self.start_reading)
+        self.btn_start = ttk.Button(frm_btn, text="START (Ctrl+F5)", command=self.start_reading)
         self.btn_start.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        self.btn_stop = ttk.Button(frm_btn, text="STOP", command=self.stop_reading, state="disabled")
+        self.btn_stop = ttk.Button(frm_btn, text="STOP (Ctrl+F5)", command=self.stop_reading, state="disabled")
         self.btn_stop.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
     def _load_initial_state(self, autostart_path):
@@ -223,6 +280,9 @@ class GameReaderApp:
             if data["regex_mode_name"] == "Własny (Regex)":
                 self.var_custom_regex.set(data.get("regex_pattern", ""))
             self.on_regex_changed()
+
+        if "resolution" in data:
+            self.var_resolution.set(data["resolution"])
 
     def on_regex_changed(self, event=None):
         mode = self.var_regex_mode.get()
@@ -284,23 +344,19 @@ class GameReaderApp:
             self.root.deiconify()
             return
 
-        # 1. Pobieramy rozdzielczość rzeczywistą (ekranu)
         screen_w, screen_h = img.size
 
-        # 2. Pobieramy dane z presetu
         data = self.config_mgr.load_preset(preset_path)
         current_mons = data.get('monitor', [])
         if isinstance(current_mons, dict): current_mons = [current_mons]
         while len(current_mons) < 3: current_mons.append(None)
 
-        # Pobieramy rozdzielczość zapisaną w presecie (lub domyślną 1080p jeśli brak)
         preset_res_str = data.get('resolution', "1920x1080")
         try:
             p_w, p_h = map(int, preset_res_str.split('x'))
         except:
             p_w, p_h = 1920, 1080
 
-        # 3. PRZELICZANIE DO WYŚWIETLENIA (Preset -> Ekran)
         scale_to_screen_x = screen_w / p_w
         scale_to_screen_y = screen_h / p_h
 
@@ -311,32 +367,24 @@ class GameReaderApp:
             else:
                 display_mons.append(None)
 
-        # 4. Wybór obszaru (User zaznacza na ekranie rzeczywistym)
         sel = AreaSelector(self.root, img, existing_regions=display_mons)
         self.root.deiconify()
 
         if sel.geometry:
-            # Współczynniki skalowania z EKRANU do STANDARDU
             scale_to_std_x = STANDARD_WIDTH / screen_w
             scale_to_std_y = STANDARD_HEIGHT / screen_h
 
-            # Aktualizujemy listę w pamięci (współrzędne ekranowe)
             display_mons[idx] = sel.geometry
 
-            # Konwertujemy wszystkie aktywne monitory do Standardu (4K) i zapisujemy
             final_mons = []
             for m in display_mons:
                 if m:
                     final_mons.append(self._scale_rect(m, scale_to_std_x, scale_to_std_y))
 
-            # Zapisujemy
             data['monitor'] = final_mons
             data['resolution'] = f"{STANDARD_WIDTH}x{STANDARD_HEIGHT}"
 
             self.config_mgr.save_preset(preset_path, data)
-
-            # Informacja dla usera (opcjonalnie można pominąć)
-            print(f"Zapisano obszary przeskalowane do standardu: {STANDARD_WIDTH}x{STANDARD_HEIGHT}")
 
     def clear_area(self, idx):
         preset_path = self.var_preset.get()
@@ -399,6 +447,7 @@ class GameReaderApp:
         self.player_thread.start()
         self.reader_thread.start()
 
+        self.is_running = True
         self._toggle_ui(True)
 
         if self.game_cmd and not self.game_process:
@@ -408,6 +457,7 @@ class GameReaderApp:
                 messagebox.showerror("Błąd Gry", f"Nie udało się uruchomić gry: {e}")
 
     def stop_reading(self):
+        self.is_running = False
         stop_event.set()
         if self.reader_thread: self.reader_thread.join(1.0)
         self._toggle_ui(False)
@@ -419,10 +469,13 @@ class GameReaderApp:
         self.cb_preset.config(state="disabled" if running else "readonly")
 
     def on_close(self):
+        self.is_running = False
         if self.reader_thread and self.reader_thread.is_alive():
             self.stop_reading()
         if self.game_process:
             self.game_process.terminate()
+        if hasattr(self, 'listener'):
+            self.listener.stop()
         self.root.destroy()
 
 

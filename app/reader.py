@@ -6,7 +6,6 @@ from collections import deque
 from datetime import datetime
 from typing import Optional, Tuple, Dict, Any, List
 
-# Importy z naszych nowych modułów
 from app.capture import capture_region
 from app.ocr import preprocess_image, recognize_text
 from app.matcher import find_best_match, precompute_subtitles
@@ -28,15 +27,16 @@ class ReaderThread(threading.Thread):
         self.log_queue = log_queue
         self.target_resolution = target_resolution
 
-        # Bufory historii
-        self.recent_match_indices = deque(maxlen=10)  # Zwiększono bufor, by nie powtarzać zbyt często
+        self.recent_match_indices = deque(maxlen=10)
         self.last_ocr_texts = deque(maxlen=5)
         self.log_buffer = deque(maxlen=1000)
 
-        # Stan dla optymalizacji matchera
         self.last_matched_idx = -1
 
-        # Ustawienia wydajności
+        # --- ZMIANA: Czasowe wygaszanie obszaru 3 ---
+        self.area3_expiry_time = 0.0
+        # --------------------------------------------
+
         self.ocr_scale = app_settings.get('ocr_scale_factor', 1.0)
         self.ocr_grayscale = app_settings.get('ocr_grayscale', False)
         self.ocr_contrast = app_settings.get('ocr_contrast', False)
@@ -44,11 +44,23 @@ class ReaderThread(threading.Thread):
 
         self.combined_regex = ""
 
+    def trigger_area_3(self, duration: float = 2.0):
+        """Aktywuje obszar nr 3 na określony czas."""
+        self.area3_expiry_time = time.time() + duration
+        print(f" >>> AKTYWOWANO OBSZAR 3 na {duration}s")
+        if self.log_queue:
+            self.log_queue.put({
+                "time": datetime.now().strftime('%H:%M:%S'),
+                "ocr": "SYSTEM",
+                "match": None,
+                "line_text": f"Aktywowano Obszar 3 na {duration}s",
+                "stats": {}
+            })
+
     def _prepare_regex(self, names_path: str) -> str:
         names = ConfigManager.load_text_lines(names_path)
         if not names or "{NAMES}" not in self.regex_template:
             return self.regex_template.replace("{NAMES}", r"\0\Z")
-
         escaped_names = [re.escape(n) for n in names]
         pattern = "|".join(escaped_names)
         return self.regex_template.replace("{NAMES}", f"({pattern})")
@@ -56,18 +68,13 @@ class ReaderThread(threading.Thread):
     def _scale_monitor_areas(self, monitors: List[Dict], original_res_str: str) -> List[Dict]:
         if not self.target_resolution or not original_res_str:
             return monitors
-
         try:
             orig_w, orig_h = map(int, original_res_str.lower().split('x'))
             target_w, target_h = self.target_resolution
+            if (orig_w, orig_h) == (target_w, target_h): return monitors
 
-            if (orig_w, orig_h) == (target_w, target_h):
-                return monitors
-
-            # print(f"Skalowanie obszarów: {orig_w}x{orig_h} -> {target_w}x{target_h}")
             sx = target_w / orig_w
             sy = target_h / orig_h
-
             scaled = []
             for m in monitors:
                 scaled.append({
@@ -82,36 +89,25 @@ class ReaderThread(threading.Thread):
             return monitors
 
     def run(self):
-        # 1. Ładowanie konfiguracji presetu
         preset = ConfigManager.load_preset(self.config_path)
-        if not preset:
-            print("Błąd: Nie można wczytać presetu.")
-            return
+        if not preset: return
 
         raw_subtitles = ConfigManager.load_text_lines(preset.get('text_file_path'))
-        if not raw_subtitles:
-            print("Błąd: Brak pliku z napisami.")
-            return
+        if not raw_subtitles: return
 
-        # --- OPTYMALIZACJA: Pre-obliczanie napisów ---
         print(f"Przetwarzanie {len(raw_subtitles)} linii napisów... (może zająć chwilę)")
         t_pre = time.time()
         optimized_subs = precompute_subtitles(raw_subtitles)
-        print(f"Przetworzono napisy w {time.time() - t_pre:.2f}s. Aktywnych linii: {len(optimized_subs)}")
-        # ---------------------------------------------
+        print(f"Przetworzono napisy w {time.time() - t_pre:.2f}s.")
 
         self.combined_regex = self._prepare_regex(preset.get('names_file_path'))
 
-        # 2. Przygotowanie obszarów
         raw_monitors = preset.get('monitor', [])
         if isinstance(raw_monitors, dict): raw_monitors = [raw_monitors]
 
         monitors = self._scale_monitor_areas([m for m in raw_monitors if m], preset.get('resolution'))
-        if not monitors:
-            print("Błąd: Brak zdefiniowanych obszarów.")
-            return
+        if not monitors: return
 
-        # 3. Obliczanie Unified Bounding Box
         min_l = min(m['left'] for m in monitors)
         min_t = min(m['top'] for m in monitors)
         max_r = max(m['left'] + m['width'] for m in monitors)
@@ -130,7 +126,6 @@ class ReaderThread(threading.Thread):
         while not self.stop_event.is_set():
             loop_start = time.monotonic()
 
-            # A. Pobranie zrzutu
             t0 = time.perf_counter()
             full_img = capture_region(unified_area)
             t_cap = (time.perf_counter() - t0) * 1000
@@ -139,8 +134,13 @@ class ReaderThread(threading.Thread):
                 time.sleep(0.1)
                 continue
 
-            # B. Iteracja po podobszarach
             for idx, area in enumerate(monitors):
+                # --- ZMIANA: Obsługa czasowego Obszaru 3 (Index 2) ---
+                if idx == 2:
+                    if time.time() > self.area3_expiry_time:
+                        continue  # Pomiń ten obszar, czas minął
+                # -----------------------------------------------------
+
                 rel_x = area['left'] - min_l
                 rel_y = area['top'] - min_t
                 rel_w = area['width']
@@ -148,7 +148,6 @@ class ReaderThread(threading.Thread):
 
                 crop = full_img.crop((rel_x, rel_y, rel_x + rel_w, rel_y + rel_h))
 
-                # C. OCR
                 t1 = time.perf_counter()
                 processed = preprocess_image(crop, self.ocr_scale, self.ocr_grayscale, self.ocr_contrast)
                 text = recognize_text(processed, self.combined_regex)
@@ -159,15 +158,10 @@ class ReaderThread(threading.Thread):
 
                 self.last_ocr_texts.append(text)
 
-                # D. Dopasowanie (Zoptymalizowane)
                 t2 = time.perf_counter()
-
-                # Przekazujemy self.last_matched_idx, żeby szukać w pobliżu
                 match = find_best_match(text, optimized_subs, self.subtitle_mode, last_index=self.last_matched_idx)
-
                 t_match = (time.perf_counter() - t2) * 1000
 
-                # Logowanie
                 if self.log_queue:
                     matched_text = raw_subtitles[match[0]] if match else ""
                     self.log_queue.put({
@@ -178,13 +172,8 @@ class ReaderThread(threading.Thread):
                         "stats": {"monitor": idx + 1, "cap_ms": t_cap, "ocr_ms": t_ocr, "match_ms": t_match}
                     })
 
-                # E. Akcja po dopasowaniu
                 if match:
                     idx_match, score = match
-
-                    # Aktualizacja stanu dla optymalizacji w następnej klatce
-                    # (Tylko jeśli to "nowa" linia w sensie fabuły, ale tutaj aktualizujemy zawsze,
-                    # bo matcher sam sobie poradzi z oknem wokół tego indeksu)
                     self.last_matched_idx = idx_match
 
                     if idx_match not in self.recent_match_indices:
