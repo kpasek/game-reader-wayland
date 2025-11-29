@@ -11,7 +11,7 @@ def smart_remove_name(text: str) -> str:
         return ""
 
     # Standardowe formaty: "Imię: Dialog" lub "Imię - Dialog"
-    match = re.match(r'^[\w\sąćęłńóśźżĄĆĘŁŃÓŚŹŻ]+[:：\-]\s*(.+)', text)
+    match = re.match(r'^[\w\sąćęłńóśźżĄĆĘŁŃÓŚŹŻ]+[:：;_\-]\s*(.+)', text)
     if match:
         return match.group(1)
 
