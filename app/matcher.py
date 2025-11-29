@@ -2,14 +2,18 @@ from typing import List, Optional, Tuple
 from thefuzz import fuzz
 from app.text_processing import clean_text, smart_remove_name
 
+# Typ pomocniczy: (oryginalny_tekst, wyczyszczony_tekst, oryginalny_index)
 SubtitleEntry = Tuple[str, str, int]
 
 
 def precompute_subtitles(raw_lines: List[str]) -> List[SubtitleEntry]:
+    """
+    Przygotowuje listę napisów do szybkiego wyszukiwania.
+    """
     processed = []
     for i, line in enumerate(raw_lines):
-        # Tutaj też używamy clean_text z inteligentnym filtrem
         cleaned = clean_text(line)
+        # Ignorujemy puste linie w bazie
         if len(cleaned) > 0:
             processed.append((line, cleaned, i))
     return processed
@@ -22,14 +26,30 @@ def find_best_match(ocr_text: str,
     if not ocr_text:
         return None
 
-    # 1. Usuń imię
+    # 1. Wstępne czyszczenie: usuwamy imię postaci (jeśli jest)
     ocr_no_name = smart_remove_name(ocr_text)
 
-    # 2. Wyczyść tekst (inteligentne usuwanie szumu h, M, 4)
+    # 2. Normalizacja tekstu
     ocr_clean = clean_text(ocr_no_name)
 
     if not ocr_clean:
         return None
+
+    # ====================================================================
+    # ZMIANA LOGIKI: Automatyczny wybór trybu na podstawie długości
+    # ====================================================================
+    # Domyślnie używamy trybu z ustawień, ALE:
+    # Jeśli tekst jest krótki (< 20 znaków), ZAWSZE wymuszamy 'Full Lines'.
+    # Krótkie teksty (np. "Tak", "Uważaj") nie są dzielone, więc muszą pasować idealnie.
+    # To eliminuje dopasowywanie szumu (np. "4", "|") do krótkich słów.
+
+    effective_mode = mode
+    ocr_len = len(ocr_clean)
+
+    if ocr_len < 20:
+        effective_mode = "Full Lines"
+
+    # ====================================================================
 
     # --- OKNO WYSZUKIWANIA ---
     WINDOW_BACK = 50
@@ -48,18 +68,17 @@ def find_best_match(ocr_text: str,
     else:
         candidates_outside = precomputed_subs
 
-    # 1. Szukanie lokalne
-    match = _scan_list(ocr_clean, candidates_in_window, mode)
+    # 1. Szukanie lokalne (priorytetowe)
+    match = _scan_list(ocr_clean, candidates_in_window, effective_mode)
     if match and match[1] >= 95:
         return match
 
     # 2. Szukanie globalne
-    global_match = _scan_list(ocr_clean, candidates_outside, mode)
+    global_match = _scan_list(ocr_clean, candidates_outside, effective_mode)
 
-    # Wybór lepszego
+    # Wybór lepszego wyniku
     if local_match := match:
-        # Jeśli globalny jest ZNACZNIE lepszy, bierzemy go.
-        # W przeciwnym razie ufamy lokalnemu (mniejsze ryzyko skoku w losowe miejsce).
+        # Jeśli globalny jest wyraźnie lepszy, bierzemy go
         if global_match and global_match[1] > local_match[1] + 5:
             return global_match
         return local_match
@@ -70,7 +89,7 @@ def find_best_match(ocr_text: str,
 def _scan_list(ocr_text: str, candidates: List[SubtitleEntry], mode: str) -> Optional[Tuple[int, int]]:
     best_score = 0
     best_original_idx = -1
-    best_len_diff = float('inf')  # Do rozstrzygania remisów
+    best_len_diff = float('inf')
 
     ocr_len = len(ocr_text)
 
@@ -78,58 +97,59 @@ def _scan_list(ocr_text: str, candidates: List[SubtitleEntry], mode: str) -> Opt
         sub_len = len(sub_clean)
         score = 0
 
-        # Obliczamy różnicę długości
         len_diff = abs(ocr_len - sub_len)
 
         # === TRYB PEŁNY (Full Lines) ===
+        # Używany dla ustawienia 'Full Lines' ORAZ dla wszystkich tekstów < 20 znaków
         if mode == "Full Lines":
-            # 1. Limit długości: max 30% różnicy
+            # 1. Limit długości: Teksty muszą być zbliżone.
+            # Pozwalamy na max 30% różnicy (błędy OCR, spacje).
             if len_diff > max(ocr_len, sub_len) * 0.30:
                 continue
 
+            # 2. Strict Ratio: Całość do całości.
+            # "f f f" vs "Ale" -> Ratio ~0.
             score = fuzz.ratio(sub_clean, ocr_text)
 
         # === TRYB CZĘŚCIOWY (Partial Lines) ===
+        # Używany tylko dla tekstów >= 20 znaków (jeśli włączony w opcjach)
         elif mode == "Partial Lines":
-            # 1. Napis musi być dłuższy (lub równy) od OCR
-            if sub_len < ocr_len - 2:  # -2 margines błędu
+            # 1. Napis w bazie musi być dłuższy (lub równy) OCR
+            # (bo OCR to tylko wycinek)
+            if sub_len < ocr_len - 3:
                 continue
 
             score = fuzz.partial_ratio(sub_clean, ocr_text)
 
-            # Penalizacja dopasowania krótkiego OCR do długiego napisu w środku
-            # Np. OCR="Tak" vs Sub="O, tak, oczywiście". Partial da 100%.
-            # Jeśli nie pasuje idealnie długością, odejmujemy punkty, chyba że to początek zdania.
-            if score > 80 and len_diff > 10:
-                # Sprawdzamy czy to początek (najczęstszy przypadek ucinania)
+            # Penalizacja dopasowań środkowych, jeśli nie pasują kontekstowo
+            if score > 80 and len_diff > 15:
+                # Jeśli to nie jest początek zdania, obniżamy lekko wynik,
+                # żeby preferować pełniejsze dopasowania.
                 if not sub_clean.startswith(ocr_text[:min(ocr_len, 10)]):
-                    # Jeśli to środek zdania, zmniejszamy pewność
                     score -= 10
 
-        # --- LOGIKA WYBORU NAJLEPSZEGO ---
+        # --- Wybór najlepszego ---
         if score > best_score:
             best_score = score
             best_original_idx = original_idx
             best_len_diff = len_diff
 
             if best_score == 100 and len_diff == 0:
-                break  # Ideał
+                break
 
-        # Rozstrzyganie remisów (lub bardzo bliskich wyników)
-        # Preferujemy wynik, który ma mniejszą różnicę długości (bardziej precyzyjny)
+                # Rozstrzyganie remisów: preferujemy dopasowanie o bliższej długości
         elif score == best_score:
             if len_diff < best_len_diff:
                 best_original_idx = original_idx
                 best_len_diff = len_diff
 
     # --- PROGI AKCEPTACJI ---
-    # Obniżone do 85, bo tekst jest teraz czystszy
     min_score = 85
 
-    # Dla bardzo krótkich tekstów (< 6 znaków) nadal wymagamy wysokiej precyzji,
-    # żeby nie mylić "Tak" z "Tam".
+    # Dla bardzo krótkich tekstów (< 6 znaków) wymagamy niemal idealnego dopasowania
+    # (nawet w trybie Full Lines, żeby odróżnić "Tak" od "Tam")
     if ocr_len < 6:
-        min_score = 93
+        min_score = 95
 
     if best_score >= min_score:
         return best_original_idx, int(best_score)
