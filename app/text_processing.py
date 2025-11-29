@@ -36,3 +36,18 @@ def clean_text(text: str) -> str:
     text = re.sub(r'\s+', ' ', text).strip()
 
     return text.lower()
+
+
+def filter_short_words(text: str, min_len: int = 4) -> str:
+    """
+    Usuwa słowa krótsze niż min_len z wyczyszczonego tekstu.
+    Używane do eliminacji szumu OCR, np. 'IA MI' zostaje usunięte.
+    """
+    if not text:
+        return ""
+
+    words = text.split()
+    # Zostawiamy tylko te słowa, których długość jest równa lub większa min_len
+    filtered_words = [word for word in words if len(word) >= min_len]
+
+    return " ".join(filtered_words)
