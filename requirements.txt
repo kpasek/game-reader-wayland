@@ -1,6 +1,7 @@
 Pillow
 pytesseract
 thefuzz
+rapidfuzz
 python-Levenshtein
 pyscreenshot
 mss
