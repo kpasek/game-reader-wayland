@@ -81,3 +81,10 @@ Ta metoda tworzy **jeden, duży plik wykonywalny**, który zawiera Pythona, wszy
     ```bash
     /ścieżka/do/skopiowanego/pliku/game_reader --preset "/ścieżka/do/twojego/presetu.json" -- %command%
     ```
+  
+
+### Instalacja Windows 11
+```shell
+winget install ffmpeg
+winget install --id "tesseract-ocr.tesseract" --interactive --force
+```

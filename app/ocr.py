@@ -52,9 +52,6 @@ def preprocess_image(image: Image.Image, scale: float = 1.0,
 
 
 def recognize_text(image: Image.Image, regex_pattern: str = "") -> str:
-    """
-    Wykonuje OCR na obrazie i wstępnie filtruje wynik regexem.
-    """
     try:
         # psm 6: Zakładamy jednolity blok tekstu
         text = pytesseract.image_to_string(image, lang=OCR_LANGUAGE, config='--psm 6').strip()
@@ -63,16 +60,14 @@ def recognize_text(image: Image.Image, regex_pattern: str = "") -> str:
         if not text:
             return ""
 
-        # Usunięcie pasujących fragmentów (np. imion zdefiniowanych w regexie)
         if regex_pattern:
             try:
                 text = re.sub(regex_pattern, "", text).strip()
             except re.error:
                 pass
 
-        # Dodatkowe inteligentne usuwanie imion (po dwukropkach itp.)
         text = smart_remove_name(text)
-
         return text
-    except Exception:
+    except Exception as e:
+        print(f"BŁĄD OCR: {e}", file=sys.stderr)
         return ""
