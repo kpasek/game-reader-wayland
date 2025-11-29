@@ -27,6 +27,14 @@ class PlayerThread(threading.Thread):
         self._detect_player()
 
     def _detect_player(self):
+        # 1. Sprawdź folder lokalny aplikacji (dla wersji portable na Windows)
+        local_ffplay = os.path.join(os.getcwd(), "bin", "ffplay.exe")
+        if os.path.exists(local_ffplay):
+            self.player_exe = local_ffplay
+            self.player_type = "ffplay"
+            return
+
+        # 2. Sprawdź systemowy PATH
         if shutil.which("mpv"):
             self.player_exe = shutil.which("mpv")
             self.player_type = "mpv"
@@ -34,6 +42,7 @@ class PlayerThread(threading.Thread):
             self.player_exe = shutil.which("ffplay")
             self.player_type = "ffplay"
         else:
+            # Na Windowsie, jeśli brak mpv, warto wyświetlić popup zamiast cichego błędu w konsoli
             print("BŁĄD: Nie znaleziono odtwarzacza (mpv/ffplay).", file=sys.stderr)
 
     def run(self):

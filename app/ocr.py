@@ -1,12 +1,25 @@
 import sys
 import re
-
+import os
+import shutil
 try:
     import pytesseract
     from PIL import Image, ImageOps, ImageEnhance
 except ImportError:
     print("Brak biblioteki Pillow lub pytesseract.", file=sys.stderr)
     sys.exit(1)
+
+if os.name == 'nt':
+    if not shutil.which("tesseract"):
+        possible_paths = [
+            r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+            r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+            os.path.join(os.getenv('LOCALAPPDATA', ''), r"Tesseract-OCR\tesseract.exe")
+        ]
+        for p in possible_paths:
+            if os.path.exists(p):
+                pytesseract.pytesseract.tesseract_cmd = p
+                break
 
 from app.text_processing import smart_remove_name
 

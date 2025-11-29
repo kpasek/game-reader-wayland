@@ -1,7 +1,6 @@
 Pillow
 pytesseract
 thefuzz
-audioop-lts
 pyscreenshot
 mss
 # build

@@ -6,7 +6,8 @@ import threading
 import subprocess
 import time
 import argparse
-from typing import Optional
+import platform
+from typing import Optional, Dict, List
 
 try:
     import tkinter as tk
@@ -14,6 +15,17 @@ try:
 except ImportError:
     print("Błąd: Brak biblioteki tkinter.", file=sys.stderr)
     sys.exit(1)
+
+# --- FIX WINDOWS 11 DPI SCALING ---
+# To sprawia, że okna nie są rozmazane, a myszka trafia w punkt
+if platform.system() == "Windows":
+    try:
+        import ctypes
+
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:
+        pass
+# ----------------------------------
 
 from app.config_manager import ConfigManager
 from app.reader import ReaderThread
@@ -27,6 +39,10 @@ from app.capture import capture_fullscreen
 stop_event = threading.Event()
 audio_queue = queue.Queue()
 log_queue = queue.Queue()
+
+# Wszystkie presety będą zapisywane w odniesieniu do tej rozdzielczości
+STANDARD_WIDTH = 3840
+STANDARD_HEIGHT = 2160
 
 
 class GameReaderApp:
@@ -174,11 +190,9 @@ class GameReaderApp:
         self.btn_stop.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
     def _load_initial_state(self, autostart_path):
-        # Ładowanie ostatnich presetów do comboboxa
         recents = self.config_mgr.get('recent_presets', [])
         self.cb_preset['values'] = recents
 
-        # Wybór presetu
         initial_preset = autostart_path if autostart_path else (recents[0] if recents else "")
         if initial_preset and os.path.exists(initial_preset):
             self.var_preset.set(initial_preset)
@@ -186,7 +200,6 @@ class GameReaderApp:
             if autostart_path:
                 self.root.after(500, self.start_reading)
 
-        # Reszta ustawień globalnych
         self.var_regex_mode.set(self.config_mgr.get('last_regex_mode', "Standard (Imię: Dialog)"))
         self.var_custom_regex.set(self.config_mgr.get('last_custom_regex', ""))
         self.var_resolution.set(self.config_mgr.get('last_resolution_key', "1920x1080"))
@@ -205,7 +218,6 @@ class GameReaderApp:
         self.var_volume.set(data.get("audio_volume", 1.0))
         self.lbl_vol.config(text=f"{self.var_volume.get():.2f}")
 
-        # Odtwórz ustawienia Regexa z presetu, jeśli są
         if "regex_mode_name" in data:
             self.var_regex_mode.set(data["regex_mode_name"])
             if data["regex_mode_name"] == "Własny (Regex)":
@@ -215,11 +227,8 @@ class GameReaderApp:
     def on_regex_changed(self, event=None):
         mode = self.var_regex_mode.get()
         self.ent_regex.config(state="normal" if mode == "Własny (Regex)" else "disabled")
-
-        # Zapisz zmianę trybu globalnie
         self.config_mgr.update_setting('last_regex_mode', mode)
 
-        # Jeśli to nie custom, zapisz od razu do presetu pattern
         if mode != "Własny (Regex)":
             pattern = self.regex_map.get(mode, "")
             self._save_preset_val("regex_pattern", pattern)
@@ -243,7 +252,6 @@ class GameReaderApp:
             self.on_preset_changed()
 
     def change_path(self, key):
-        """Generyczna zmiana ścieżki w presecie (audio/txt)."""
         preset_path = self.var_preset.get()
         if not preset_path: return
 
@@ -256,6 +264,15 @@ class GameReaderApp:
             self._save_preset_val(key, new_path)
             messagebox.showinfo("Sukces", "Zaktualizowano ścieżkę w profilu.")
 
+    def _scale_rect(self, rect: Dict[str, int], scale_x: float, scale_y: float) -> Dict[str, int]:
+        """Pomocnicza funkcja do skalowania jednego prostokąta."""
+        return {
+            'left': int(rect['left'] * scale_x),
+            'top': int(rect['top'] * scale_y),
+            'width': int(rect['width'] * scale_x),
+            'height': int(rect['height'] * scale_y)
+        }
+
     def set_area(self, idx):
         preset_path = self.var_preset.get()
         if not preset_path: return messagebox.showerror("Błąd", "Wybierz profil.")
@@ -267,34 +284,59 @@ class GameReaderApp:
             self.root.deiconify()
             return
 
-        # Logika wyświetlania starych obszarów (z ConfigManager)
+        # 1. Pobieramy rozdzielczość rzeczywistą (ekranu)
+        screen_w, screen_h = img.size
+
+        # 2. Pobieramy dane z presetu
         data = self.config_mgr.load_preset(preset_path)
         current_mons = data.get('monitor', [])
         if isinstance(current_mons, dict): current_mons = [current_mons]
         while len(current_mons) < 3: current_mons.append(None)
 
-        # Przeskaluj obszary do wyświetlenia na zrzucie (jeśli screenshot jest inny niż 1080p)
-        # (Tutaj uproszczona logika - zakładamy, że wyświetlamy to, co widać)
+        # Pobieramy rozdzielczość zapisaną w presecie (lub domyślną 1080p jeśli brak)
+        preset_res_str = data.get('resolution', "1920x1080")
+        try:
+            p_w, p_h = map(int, preset_res_str.split('x'))
+        except:
+            p_w, p_h = 1920, 1080
 
-        sel = AreaSelector(self.root, img, existing_regions=[m for i, m in enumerate(current_mons) if m and i != idx])
+        # 3. PRZELICZANIE DO WYŚWIETLENIA (Preset -> Ekran)
+        scale_to_screen_x = screen_w / p_w
+        scale_to_screen_y = screen_h / p_h
+
+        display_mons = []
+        for m in current_mons:
+            if m:
+                display_mons.append(self._scale_rect(m, scale_to_screen_x, scale_to_screen_y))
+            else:
+                display_mons.append(None)
+
+        # 4. Wybór obszaru (User zaznacza na ekranie rzeczywistym)
+        sel = AreaSelector(self.root, img, existing_regions=display_mons)
         self.root.deiconify()
 
         if sel.geometry:
-            # Skalowanie do 1080p przed zapisem
-            sw, sh = img.size
-            sx = 1920 / sw
-            sy = 1080 / sh
+            # Współczynniki skalowania z EKRANU do STANDARDU
+            scale_to_std_x = STANDARD_WIDTH / screen_w
+            scale_to_std_y = STANDARD_HEIGHT / screen_h
 
-            final_geo = {
-                'left': int(sel.geometry['left'] * sx),
-                'top': int(sel.geometry['top'] * sy),
-                'width': int(sel.geometry['width'] * sx),
-                'height': int(sel.geometry['height'] * sy)
-            }
-            current_mons[idx] = final_geo
-            data['monitor'] = [m for m in current_mons if m]
-            data['resolution'] = "1920x1080"  # Wymuszamy standard
+            # Aktualizujemy listę w pamięci (współrzędne ekranowe)
+            display_mons[idx] = sel.geometry
+
+            # Konwertujemy wszystkie aktywne monitory do Standardu (4K) i zapisujemy
+            final_mons = []
+            for m in display_mons:
+                if m:
+                    final_mons.append(self._scale_rect(m, scale_to_std_x, scale_to_std_y))
+
+            # Zapisujemy
+            data['monitor'] = final_mons
+            data['resolution'] = f"{STANDARD_WIDTH}x{STANDARD_HEIGHT}"
+
             self.config_mgr.save_preset(preset_path, data)
+
+            # Informacja dla usera (opcjonalnie można pominąć)
+            print(f"Zapisano obszary przeskalowane do standardu: {STANDARD_WIDTH}x{STANDARD_HEIGHT}")
 
     def clear_area(self, idx):
         preset_path = self.var_preset.get()
@@ -311,7 +353,7 @@ class GameReaderApp:
 
     def open_settings(self):
         SettingsDialog(self.root, self.config_mgr.settings)
-        self.config_mgr.save_app_config()  # Zapisz po zamknięciu dialogu
+        self.config_mgr.save_app_config()
 
     def show_logs(self):
         if not self.log_window or not self.log_window.winfo_exists():
@@ -328,11 +370,9 @@ class GameReaderApp:
 
         self.config_mgr.add_recent_preset(path)
 
-        # Regex
         mode = self.var_regex_mode.get()
         pattern = self.var_custom_regex.get() if mode == "Własny (Regex)" else self.regex_map.get(mode, "")
 
-        # Rozdzielczość
         res_str = self.var_resolution.get()
         target_res = None
         if "x" in res_str:
@@ -343,11 +383,9 @@ class GameReaderApp:
 
         stop_event.clear()
 
-        # Czyszczenie kolejki audio
         with audio_queue.mutex:
             audio_queue.queue.clear()
 
-        # Start wątków
         self.player_thread = PlayerThread(
             stop_event, audio_queue,
             base_speed_callback=lambda: self.var_speed.get(),
@@ -363,7 +401,6 @@ class GameReaderApp:
 
         self._toggle_ui(True)
 
-        # Autostart Gry
         if self.game_cmd and not self.game_process:
             try:
                 self.game_process = subprocess.Popen(self.game_cmd)
@@ -395,7 +432,6 @@ def main():
     parser.add_argument('game_command', nargs=argparse.REMAINDER, help="Komenda gry")
     args = parser.parse_args()
 
-    # Czyszczenie argumentów dla steam
     cmd = args.game_command
     if cmd and cmd[0] == '--': cmd.pop(0)
 
