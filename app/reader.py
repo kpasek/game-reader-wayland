@@ -16,7 +16,8 @@ class ReaderThread(threading.Thread):
     def __init__(self, config_path: str, regex_template: str, app_settings: Dict[str, Any],
                  stop_event: threading.Event, audio_queue,
                  target_resolution: Optional[Tuple[int, int]],
-                 log_queue=None):
+                 log_queue=None,
+                 auto_remove_names: bool = True):  # Dodany parametr
         super().__init__(daemon=True)
         self.name = "ReaderThread"
         self.config_path = config_path
@@ -27,15 +28,15 @@ class ReaderThread(threading.Thread):
         self.log_queue = log_queue
         self.target_resolution = target_resolution
 
+        # Flaga przekazana z GUI
+        self.auto_remove_names = auto_remove_names
+
         self.recent_match_indices = deque(maxlen=10)
         self.last_ocr_texts = deque(maxlen=5)
         self.log_buffer = deque(maxlen=1000)
 
         self.last_matched_idx = -1
-
-        # --- ZMIANA: Czasowe wygaszanie obszaru 3 ---
         self.area3_expiry_time = 0.0
-        # --------------------------------------------
 
         self.ocr_scale = app_settings.get('ocr_scale_factor', 1.0)
         self.ocr_grayscale = app_settings.get('ocr_grayscale', False)
@@ -45,7 +46,6 @@ class ReaderThread(threading.Thread):
         self.combined_regex = ""
 
     def trigger_area_3(self, duration: float = 2.0):
-        """Aktywuje obszar nr 3 na określony czas."""
         self.area3_expiry_time = time.time() + duration
         print(f" >>> AKTYWOWANO OBSZAR 3 na {duration}s")
         if self.log_queue:
@@ -135,11 +135,10 @@ class ReaderThread(threading.Thread):
                 continue
 
             for idx, area in enumerate(monitors):
-                # --- ZMIANA: Obsługa czasowego Obszaru 3 (Index 2) ---
+                # Obsługa czasowego Obszaru 3 (Index 2)
                 if idx == 2:
                     if time.time() > self.area3_expiry_time:
-                        continue  # Pomiń ten obszar, czas minął
-                # -----------------------------------------------------
+                        continue
 
                 rel_x = area['left'] - min_l
                 rel_y = area['top'] - min_t
@@ -150,7 +149,9 @@ class ReaderThread(threading.Thread):
 
                 t1 = time.perf_counter()
                 processed = preprocess_image(crop, self.ocr_scale, self.ocr_grayscale, self.ocr_contrast)
-                text = recognize_text(processed, self.combined_regex)
+
+                text = recognize_text(processed, self.combined_regex, self.auto_remove_names)
+
                 t_ocr = (time.perf_counter() - t1) * 1000
 
                 if not text or len(text) < 2: continue

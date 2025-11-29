@@ -8,5 +8,6 @@ mss
 nuitka
 ordered-set
 zstandard
+imageio
 # inputs
 pynput

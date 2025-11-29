@@ -11,7 +11,7 @@ from typing import Optional, Dict, List
 
 try:
     import tkinter as tk
-    from tkinter import ttk, filedialog, messagebox
+    from tkinter import ttk, filedialog, messagebox, scrolledtext, font
 except ImportError:
     print("Błąd: Brak biblioteki tkinter.", file=sys.stderr)
     sys.exit(1)
@@ -33,7 +33,6 @@ try:
     HAS_PYNPUT = True
 except ImportError:
     HAS_PYNPUT = False
-    print("Brak biblioteki pynput. Skróty klawiszowe nie będą działać.")
 # ----------------------
 
 from app.config_manager import ConfigManager
@@ -54,11 +53,66 @@ STANDARD_WIDTH = 3840
 STANDARD_HEIGHT = 2160
 
 
+class HelpWindow(tk.Toplevel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Pomoc i Instrukcja")
+        self.geometry("600x520")
+
+        # Używamy fontu systemowego dla lepszej czytelności
+        default_font = font.nametofont("TkDefaultFont")
+        base_font_family = default_font.actual()["family"]
+
+        txt = scrolledtext.ScrolledText(self, wrap=tk.WORD, padx=15, pady=15, font=(base_font_family, 10))
+        txt.pack(fill=tk.BOTH, expand=True)
+
+        # Konfiguracja stylów (tagów)
+        # spacing1 - odstęp nad, spacing3 - odstęp pod akapitem
+        txt.tag_config('h1', font=(base_font_family, 12, 'bold'), spacing1=15, spacing3=5, foreground="#222222")
+        txt.tag_config('bold', font=(base_font_family, 10, 'bold'))
+        txt.tag_config('normal', spacing3=2)  # Lekki odstęp pod każdą linią tekstu
+
+        # Budowanie treści - jawne \n na końcu linii jest kluczowe
+        content = [
+            ("JAK TO DZIAŁA?\n", 'h1'),
+            ("Aplikacja wykonuje zrzuty ekranu w zdefiniowanych obszarach, rozpoznaje tekst (OCR) i porównuje go z plikiem napisów z gry. Gdy znajdzie dopasowanie, odtwarza odpowiedni plik audio.\n",
+             'normal'),
+
+            ("SKRÓTY KLAWISZOWE (Globalne)\n", 'h1'),
+            ("Ctrl + F5", 'bold'), (" - Start / Stop czytania\n", 'normal'),
+            ("Ctrl + F6", 'bold'), (" - Aktywacja Obszaru 3 (Adnotacje) na 2 sekundy.\n", 'normal'),
+            ("Używane do czytania listów/książek w grze, gdy nie chcemy, aby OCR działał tam ciągle.\n", 'normal'),
+
+            ("KONFIGURACJA OBSZARÓW\n", 'h1'),
+            ("W menu 'Obszary ekranu' możesz zdefiniować do 3 stref:\n", 'normal'),
+            ("• Obszar 1 i 2: ", 'bold'), ("Skanowane ciągle (np. góra i dół ekranu dla dialogów).\n", 'normal'),
+            ("• Obszar 3: ", 'bold'), ("Skanowany TYLKO po wciśnięciu skrótu (Ctrl+F6).\n", 'normal'),
+
+            ("FILTROWANIE TEKSTU\n", 'h1'),
+            ("• Automatyczne usuwanie imion: ", 'bold'),
+            ("Jeśli gra wyświetla format 'Geralt: Cześć', opcja ta wytnie imię, zostawiając tylko 'Cześć'.\n",
+             'normal'),
+            ("• Regex: ", 'bold'),
+            ("Pozwala na zaawansowane wycinanie fragmentów tekstu przed dopasowaniem.\n", 'normal'),
+
+            ("PORADY\n", 'h1'),
+            ("- Jeśli gra ma niestandardową czcionkę, upewnij się, że obszar obejmuje tylko tekst.\n", 'normal'),
+            ("- Upewnij się, że w tle nie ma innych okien zasłaniających grę (gra musi być widoczna na ekranie).\n",
+             'normal')
+        ]
+
+        for text, tag in content:
+            txt.insert(tk.END, text, tag)
+
+        txt.config(state=tk.DISABLED)
+
+
 class GameReaderApp:
     def __init__(self, root: tk.Tk, autostart_preset: Optional[str], game_cmd: list):
         self.root = root
-        self.root.title("Lektor Gier")
-        self.root.geometry("700x450")
+        self.root.title("Game Reader")
+        # Zmniejszony rozmiar okna
+        self.root.geometry("700x400")
 
         self.config_mgr = ConfigManager()
         self.game_cmd = game_cmd
@@ -68,6 +122,7 @@ class GameReaderApp:
         self.reader_thread = None
         self.player_thread = None
         self.log_window = None
+        self.help_window = None
         self.is_running = False
 
         # Zmienne UI
@@ -78,6 +133,7 @@ class GameReaderApp:
 
         self.var_regex_mode = tk.StringVar()
         self.var_custom_regex = tk.StringVar()
+        self.var_auto_names = tk.BooleanVar(value=True)  # Nowy checkbox
         self.var_resolution = tk.StringVar()
 
         self.var_speed = tk.DoubleVar(value=1.15)
@@ -101,34 +157,24 @@ class GameReaderApp:
         self._load_initial_state(autostart_preset)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
-        # Uruchomienie nasłuchu klawiszy
         if HAS_PYNPUT:
             self._start_hotkey_listener()
 
     def _start_hotkey_listener(self):
-        """Uruchamia wątek nasłuchujący kombinacji klawiszy."""
-
-        # Mapa skrótów: Kombinacja -> Funkcja
-        # Używamy <ctrl> zamiast key.ctrl dla czytelności w GlobalHotKeys
         hotkeys = {
             '<ctrl>+<f5>': self._on_hotkey_start_stop,
             '<ctrl>+<f6>': self._on_hotkey_area3
         }
-
         try:
-            # GlobalHotKeys automatycznie obsługuje stan modifierów (Ctrl, Alt itp.)
             self.listener = keyboard.GlobalHotKeys(hotkeys)
             self.listener.start()
         except Exception as e:
             print(f"Błąd inicjalizacji skrótów: {e}")
 
     def _on_hotkey_start_stop(self):
-        """Callback dla Ctrl+F5 wywoływany przez pynput (wątek tła)"""
-        # Przekazujemy wykonanie do głównego wątku GUI (Tkinter nie jest thread-safe)
         self.root.after(0, self._toggle_start_stop_hotkey)
 
     def _on_hotkey_area3(self):
-        """Callback dla Ctrl+F6 wywoływany przez pynput (wątek tła)"""
         self.root.after(0, self._trigger_area3_hotkey)
 
     def _toggle_start_stop_hotkey(self):
@@ -139,18 +185,19 @@ class GameReaderApp:
 
     def _trigger_area3_hotkey(self):
         if self.is_running and self.reader_thread:
-            # Aktywacja na 2 sekundy (3. monitor to index 2)
             self.reader_thread.trigger_area_3(duration=2.0)
 
     def _init_gui(self):
         # --- MENU ---
         menubar = tk.Menu(self.root)
+
         file_menu = tk.Menu(menubar, tearoff=0)
         file_menu.add_command(label="Ustawienia zaawansowane", command=self.open_settings)
         file_menu.add_separator()
         file_menu.add_command(label="Wyjdź", command=self.on_close)
         menubar.add_cascade(label="Plik", menu=file_menu)
 
+        # Zmiana nazwy Profil -> Lektor
         preset_menu = tk.Menu(menubar, tearoff=0)
         preset_menu.add_command(label="Wczytaj inny profil...", command=self.browse_preset)
 
@@ -167,11 +214,15 @@ class GameReaderApp:
         preset_menu.add_command(label="Zmień folder audio", command=lambda: self.change_path('audio_dir'))
         preset_menu.add_command(label="Zmień plik napisów", command=lambda: self.change_path('text_file_path'))
         preset_menu.add_command(label="Zmień plik imion", command=lambda: self.change_path('names_file_path'))
-        menubar.add_cascade(label="Profil", menu=preset_menu)
+        menubar.add_cascade(label="Lektor", menu=preset_menu)
 
         tools_menu = tk.Menu(menubar, tearoff=0)
         tools_menu.add_command(label="Podgląd logów", command=self.show_logs)
         menubar.add_cascade(label="Narzędzia", menu=tools_menu)
+
+        help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu.add_command(label="Instrukcja / Skróty", command=self.show_help)
+        menubar.add_cascade(label="Pomoc", menu=help_menu)
 
         self.root.config(menu=menubar)
 
@@ -179,24 +230,21 @@ class GameReaderApp:
         panel = ttk.Frame(self.root, padding=10)
         panel.pack(fill=tk.BOTH, expand=True)
 
-        # Info o skrótach
-        if HAS_PYNPUT:
-            ttk.Label(panel, text="Skróty: [Ctrl+F5] Start/Stop  |  [Ctrl+F6] Czytaj adnotację (Obszar 3)",
-                      foreground="blue").pack(anchor=tk.W, pady=(0, 10))
-
         ttk.Label(panel, text="Aktywny profil lektora:").pack(anchor=tk.W)
         self.cb_preset = ttk.Combobox(panel, textvariable=self.var_preset, state="readonly", width=60)
         self.cb_preset.pack(fill=tk.X, pady=5)
         self.cb_preset.bind("<<ComboboxSelected>>", self.on_preset_changed)
 
-        # Regex
-        grp_regex = ttk.LabelFrame(panel, text="Filtracja tekstu (Regex)", padding=5)
+        # Regex i Filtry
+        grp_regex = ttk.LabelFrame(panel, text="Filtracja tekstu", padding=5)
         grp_regex.pack(fill=tk.X, pady=10)
 
         f_reg = ttk.Frame(grp_regex)
         f_reg.pack(fill=tk.X)
+
+        ttk.Label(f_reg, text="Regex:").pack(side=tk.LEFT)
         self.cb_regex = ttk.Combobox(f_reg, textvariable=self.var_regex_mode,
-                                     values=list(self.regex_map.keys()), state="readonly", width=30)
+                                     values=list(self.regex_map.keys()), state="readonly", width=25)
         self.cb_regex.pack(side=tk.LEFT, padx=5)
         self.cb_regex.bind("<<ComboboxSelected>>", self.on_regex_changed)
 
@@ -205,8 +253,17 @@ class GameReaderApp:
         self.ent_regex.bind("<FocusOut>",
                             lambda e: self.config_mgr.update_setting('last_custom_regex', self.var_custom_regex.get()))
 
+        # Nowy Checkbox
+        f_opts = ttk.Frame(grp_regex)
+        f_opts.pack(fill=tk.X, pady=(5, 0))
+        chk_names = ttk.Checkbutton(f_opts, text="Automatyczne usuwanie imion (np. 'Geralt: Witaj')",
+                                    variable=self.var_auto_names,
+                                    command=lambda: self._save_preset_val("auto_remove_names",
+                                                                          self.var_auto_names.get()))
+        chk_names.pack(side=tk.LEFT)
+
         # Rozdzielczość
-        ttk.Label(panel, text="Rozdzielczość gry (dla skalowania obszarów):").pack(anchor=tk.W)
+        ttk.Label(panel, text="Rozdzielczość gry (dla skalowania obszarów):").pack(anchor=tk.W, pady=(10, 0))
         self.cb_res = ttk.Combobox(panel, textvariable=self.var_resolution, values=self.resolutions)
         self.cb_res.pack(fill=tk.X, pady=5)
         self.cb_res.bind("<FocusOut>",
@@ -262,8 +319,6 @@ class GameReaderApp:
         self.var_resolution.set(self.config_mgr.get('last_resolution_key', "1920x1080"))
         self.on_regex_changed()
 
-    # --- LOGIKA GUI ---
-
     def on_preset_changed(self, event=None):
         path = self.var_preset.get()
         if not path or not os.path.exists(path): return
@@ -274,6 +329,9 @@ class GameReaderApp:
 
         self.var_volume.set(data.get("audio_volume", 1.0))
         self.lbl_vol.config(text=f"{self.var_volume.get():.2f}")
+
+        # Wczytanie stanu checkboxa (domyślnie True)
+        self.var_auto_names.set(data.get("auto_remove_names", True))
 
         if "regex_mode_name" in data:
             self.var_regex_mode.set(data["regex_mode_name"])
@@ -325,7 +383,6 @@ class GameReaderApp:
             messagebox.showinfo("Sukces", "Zaktualizowano ścieżkę w profilu.")
 
     def _scale_rect(self, rect: Dict[str, int], scale_x: float, scale_y: float) -> Dict[str, int]:
-        """Pomocnicza funkcja do skalowania jednego prostokąta."""
         return {
             'left': int(rect['left'] * scale_x),
             'top': int(rect['top'] * scale_y),
@@ -409,6 +466,12 @@ class GameReaderApp:
         else:
             self.log_window.lift()
 
+    def show_help(self):
+        if not self.help_window or not self.help_window.winfo_exists():
+            self.help_window = HelpWindow(self.root)
+        else:
+            self.help_window.lift()
+
     # --- START / STOP ---
 
     def start_reading(self):
@@ -420,6 +483,9 @@ class GameReaderApp:
 
         mode = self.var_regex_mode.get()
         pattern = self.var_custom_regex.get() if mode == "Własny (Regex)" else self.regex_map.get(mode, "")
+
+        # Pobieramy stan checkboxa
+        auto_remove_names = self.var_auto_names.get()
 
         res_str = self.var_resolution.get()
         target_res = None
@@ -441,7 +507,8 @@ class GameReaderApp:
         )
         self.reader_thread = ReaderThread(
             path, pattern, self.config_mgr.settings, stop_event, audio_queue,
-            target_resolution=target_res, log_queue=log_queue
+            target_resolution=target_res, log_queue=log_queue,
+            auto_remove_names=auto_remove_names  # Przekazanie flagi
         )
 
         self.player_thread.start()

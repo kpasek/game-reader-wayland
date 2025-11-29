@@ -1,107 +1,91 @@
-import os
-import queue
-import sys
 import threading
-import time
+import queue
 import subprocess
-import shutil
+import time
+import os
+import sys
+import platform
 
 
 class PlayerThread(threading.Thread):
-    """
-    Wątek odtwarzający audio. Obsługuje mpv i ffplay.
-    Dynamicznie zmienia prędkość odtwarzania w zależności od kolejki (catch-up).
-    """
-
-    def __init__(self, stop_event: threading.Event, audio_queue: queue.Queue,
-                 base_speed_callback=None, volume_callback=None):
+    def __init__(self, stop_event, audio_queue, base_speed_callback=None, volume_callback=None):
         super().__init__(daemon=True)
-        self.name = "PlayerThread"
         self.stop_event = stop_event
         self.audio_queue = audio_queue
         self.base_speed_callback = base_speed_callback
         self.volume_callback = volume_callback
+        self.current_process = None
 
-        self.player_exe = None
-        self.player_type = None
-        self._detect_player()
-
-    def _detect_player(self):
-        # 1. Sprawdź folder lokalny aplikacji (dla wersji portable na Windows)
-        local_ffplay = os.path.join(os.getcwd(), "bin", "ffplay.exe")
-        if os.path.exists(local_ffplay):
-            self.player_exe = local_ffplay
-            self.player_type = "ffplay"
-            return
-
-        # 2. Sprawdź systemowy PATH
-        if shutil.which("mpv"):
-            self.player_exe = shutil.which("mpv")
-            self.player_type = "mpv"
-        elif shutil.which("ffplay"):
-            self.player_exe = shutil.which("ffplay")
-            self.player_type = "ffplay"
-        else:
-            # Na Windowsie, jeśli brak mpv, warto wyświetlić popup zamiast cichego błędu w konsoli
-            print("BŁĄD: Nie znaleziono odtwarzacza (mpv/ffplay).", file=sys.stderr)
+    def _get_startup_info(self):
+        """
+        Zwraca strukturę STARTUPINFO dla Windows, aby ukryć okno terminala
+        procesu potomnego (ffplay).
+        """
+        if platform.system() == "Windows":
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = 0  # SW_HIDE
+            return startupinfo
+        return None
 
     def run(self):
-        if not self.player_exe: return
-        print(f"PlayerThread startuje ({self.player_type}).")
-
         while not self.stop_event.is_set():
             try:
-                # Czekamy krótko na plik, by móc sprawdzić stop_event
-                file_path = self.audio_queue.get(timeout=0.5)
+                # Czekamy na plik audio w kolejce (z timeoutem, by sprawdzać stop_event)
+                audio_file = self.audio_queue.get(timeout=0.5)
             except queue.Empty:
                 continue
 
-            if not os.path.exists(file_path):
-                self.audio_queue.task_done()
+            if not os.path.exists(audio_file):
+                print(f"Błąd: Plik audio nie istnieje: {audio_file}")
                 continue
 
-            # Obliczanie parametrów
-            base_speed = self.base_speed_callback() if self.base_speed_callback else 1.0
+            # Pobieramy aktualne ustawienia
+            speed = self.base_speed_callback() if self.base_speed_callback else 1.0
             volume = self.volume_callback() if self.volume_callback else 1.0
 
-            # Algorytm nadrabiania zaległości
-            q_size = self.audio_queue.qsize()
-            catch_up_mult = 1.0
-            if q_size >= 3:
-                catch_up_mult = 1.3
-            elif q_size >= 1:
-                catch_up_mult = 1.15
+            # Budowanie komendy dla ffplay
+            # -nodisp: brak okna wideo
+            # -autoexit: zamknij po odtworzeniu
+            # -af: filtry audio (prędkość, głośność)
 
-            final_speed = max(0.5, min(base_speed * catch_up_mult, 3.0))
+            # Formatowanie filtra atempo (dla prędkości spoza zakresu 0.5-2.0 trzeba łączyć filtry,
+            # ale tutaj zakładamy zakres 0.8-2.0 z GUI)
+            filter_complex = f"atempo={speed},volume={volume}"
 
-            self._play_file(file_path, final_speed, volume)
-            self.audio_queue.task_done()
+            cmd = [
+                'ffplay',
+                '-nodisp',
+                '-autoexit',
+                '-af', filter_complex,
+                audio_file
+            ]
 
-    def _play_file(self, path: str, speed: float, volume: float):
-        """Uruchamia proces odtwarzacza."""
-        cmd = [self.player_exe]
+            try:
+                # Uruchomienie procesu z ukrytym oknem
+                self.current_process = subprocess.Popen(
+                    cmd,
+                    startupinfo=self._get_startup_info(),
+                    stdout=subprocess.DEVNULL,  # Wyślij logi w nicość
+                    stderr=subprocess.DEVNULL  # Wyślij błędy w nicość
+                )
 
-        if self.player_type == "mpv":
-            vol_percent = int(volume * 100)
-            cmd.extend([
-                f"--speed={speed}", f"--volume={vol_percent}",
-                "--no-video", "--audio-display=no", "--really-quiet", path
-            ])
-        else:  # ffplay
-            # ffplay filter syntax: volume=1.5,atempo=1.2
-            filters = f"volume={volume},atempo={speed}"
-            cmd.extend([
-                "-nodisp", "-autoexit", "-loglevel", "quiet",
-                "-af", filters, path
-            ])
+                # Czekamy na zakończenie odtwarzania lub sygnał stop
+                while self.current_process.poll() is None:
+                    if self.stop_event.is_set():
+                        self.current_process.terminate()
+                        break
+                    time.sleep(0.1)
 
-        try:
-            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            # Czekamy na koniec lub sygnał stop
-            while proc.poll() is None:
-                if self.stop_event.is_set():
-                    proc.terminate()
-                    break
-                time.sleep(0.05)
-        except Exception as e:
-            print(f"Błąd odtwarzania: {e}")
+            except Exception as e:
+                print(f"Błąd odtwarzacza: {e}", file=sys.stderr)
+            finally:
+                self.current_process = None
+
+    def stop(self):
+        self.stop_event.set()
+        if self.current_process:
+            try:
+                self.current_process.terminate()
+            except:
+                pass
