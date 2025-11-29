@@ -17,7 +17,7 @@ class ReaderThread(threading.Thread):
                  stop_event: threading.Event, audio_queue,
                  target_resolution: Optional[Tuple[int, int]],
                  log_queue=None,
-                 auto_remove_names: bool = True):  # Dodany parametr
+                 auto_remove_names: bool = True):
         super().__init__(daemon=True)
         self.name = "ReaderThread"
         self.config_path = config_path
@@ -27,11 +27,10 @@ class ReaderThread(threading.Thread):
         self.audio_queue = audio_queue
         self.log_queue = log_queue
         self.target_resolution = target_resolution
-
-        # Flaga przekazana z GUI
         self.auto_remove_names = auto_remove_names
 
-        self.recent_match_indices = deque(maxlen=10)
+        self.recent_matches_text = deque(maxlen=5)
+
         self.last_ocr_texts = deque(maxlen=5)
         self.log_buffer = deque(maxlen=1000)
 
@@ -47,7 +46,6 @@ class ReaderThread(threading.Thread):
 
     def trigger_area_3(self, duration: float = 2.0):
         self.area3_expiry_time = time.time() + duration
-        print(f" >>> AKTYWOWANO OBSZAR 3 na {duration}s")
         if self.log_queue:
             self.log_queue.put({
                 "time": datetime.now().strftime('%H:%M:%S'),
@@ -95,10 +93,8 @@ class ReaderThread(threading.Thread):
         raw_subtitles = ConfigManager.load_text_lines(preset.get('text_file_path'))
         if not raw_subtitles: return
 
-        print(f"Przetwarzanie {len(raw_subtitles)} linii napisów... (może zająć chwilę)")
-        t_pre = time.time()
+        print(f"Przetwarzanie {len(raw_subtitles)} linii napisów...")
         optimized_subs = precompute_subtitles(raw_subtitles)
-        print(f"Przetworzono napisy w {time.time() - t_pre:.2f}s.")
 
         self.combined_regex = self._prepare_regex(preset.get('names_file_path'))
 
@@ -121,7 +117,7 @@ class ReaderThread(threading.Thread):
         audio_dir = preset.get('audio_dir', '')
         interval = preset.get('CAPTURE_INTERVAL', 0.3)
 
-        print(f"Start wątku czytającego. Obszar całkowity: {unified_area}")
+        print(f"Start wątku czytającego. Obszar: {unified_area}")
 
         while not self.stop_event.is_set():
             loop_start = time.monotonic()
@@ -135,10 +131,8 @@ class ReaderThread(threading.Thread):
                 continue
 
             for idx, area in enumerate(monitors):
-                # Obsługa czasowego Obszaru 3 (Index 2)
-                if idx == 2:
-                    if time.time() > self.area3_expiry_time:
-                        continue
+                if idx == 2 and time.time() > self.area3_expiry_time:
+                    continue
 
                 rel_x = area['left'] - min_l
                 rel_y = area['top'] - min_t
@@ -149,9 +143,7 @@ class ReaderThread(threading.Thread):
 
                 t1 = time.perf_counter()
                 processed = preprocess_image(crop, self.ocr_scale, self.ocr_grayscale, self.ocr_contrast)
-
                 text = recognize_text(processed, self.combined_regex, self.auto_remove_names)
-
                 t_ocr = (time.perf_counter() - t1) * 1000
 
                 if not text or len(text) < 2: continue
@@ -163,13 +155,14 @@ class ReaderThread(threading.Thread):
                 match = find_best_match(text, optimized_subs, self.subtitle_mode, last_index=self.last_matched_idx)
                 t_match = (time.perf_counter() - t2) * 1000
 
+                matched_line_text = raw_subtitles[match[0]] if match else ""
+
                 if self.log_queue:
-                    matched_text = raw_subtitles[match[0]] if match else ""
                     self.log_queue.put({
                         "time": datetime.now().strftime('%H:%M:%S'),
                         "ocr": text,
                         "match": match,
-                        "line_text": matched_text,
+                        "line_text": matched_line_text,
                         "stats": {"monitor": idx + 1, "cap_ms": t_cap, "ocr_ms": t_ocr, "match_ms": t_match}
                     })
 
@@ -177,13 +170,16 @@ class ReaderThread(threading.Thread):
                     idx_match, score = match
                     self.last_matched_idx = idx_match
 
-                    if idx_match not in self.recent_match_indices:
-                        print(f" >>> DOPASOWANIE ({score}%): {raw_subtitles[idx_match]}")
-                        self.recent_match_indices.append(idx_match)
-                        self.log_buffer.append(f"Match: {score}% | {raw_subtitles[idx_match]}")
+                    if matched_line_text not in self.recent_matches_text:
+                        print(f" >>> DOPASOWANIE ({score}%): {matched_line_text}")
+
+                        self.recent_matches_text.append(matched_line_text)
+                        self.log_buffer.append(f"Match: {score}% | {matched_line_text}")
 
                         audio_file = os.path.join(audio_dir, f"output1 ({idx_match + 1}).ogg")
                         self.audio_queue.put(audio_file)
+                    else:
+                        print(f" >>> POMINIĘTO (Duplikat): {matched_line_text}")
 
             elapsed = time.monotonic() - loop_start
             time.sleep(max(0, interval - elapsed))

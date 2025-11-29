@@ -1,7 +1,7 @@
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, scrolledtext
+from tkinter import ttk, scrolledtext
 import queue
-
+import os
 
 class LogWindow(tk.Toplevel):
     def __init__(self, parent, log_queue):
@@ -11,9 +11,13 @@ class LogWindow(tk.Toplevel):
         self.log_queue = log_queue
         self.is_open = True
 
-        # Checkbox zapisu do pliku
-        self.save_var = tk.BooleanVar(value=False)
-        chk = ttk.Checkbutton(self, text="Zapisuj do pliku (dialog_match.log)", variable=self.save_var)
+        # Ustalanie ścieżki do pliku logu (folder uruchomienia skryptu)
+        self.log_file_path = os.path.abspath("dialog_match.log")
+        print(f"Logi będą zapisywane w: {self.log_file_path}")
+
+        # Checkbox zapisu do pliku - DOMYŚLNIE WŁĄCZONY
+        self.save_var = tk.BooleanVar(value=True)
+        chk = ttk.Checkbutton(self, text=f"Zapisuj do pliku ({self.log_file_path})", variable=self.save_var)
         chk.pack(anchor=tk.W, padx=5, pady=5)
 
         # Obszar tekstowy
@@ -41,12 +45,11 @@ class LogWindow(tk.Toplevel):
     def _append_text(self, data):
         timestamp = data['time']
         ocr = data['ocr']
-        match = data['match']  # (idx, score) lub None
+        match = data['match']
         stats = data.get('stats', {})
 
         msg = f"[{timestamp}] OCR: {ocr}\n"
 
-        # Wyświetlanie statystyk i monitora
         if stats:
             mon = stats.get('monitor', '?')
             t_cap = stats.get('cap_ms', 0)
@@ -60,14 +63,18 @@ class LogWindow(tk.Toplevel):
             msg += "   >>> Brak dopasowania\n"
         msg += "-" * 40 + "\n"
 
+        # GUI Update
         self.text_area.config(state='normal')
         self.text_area.insert(tk.END, msg)
         self.text_area.see(tk.END)
         self.text_area.config(state='disabled')
 
+        # File Write - Z POPRAWKĄ BUFOROWANIA
         if self.save_var.get():
             try:
-                with open("dialog_match.log", "a", encoding="utf-8") as f:
+                with open(self.log_file_path, "a", encoding="utf-8") as f:
                     f.write(msg)
-            except Exception:
-                pass
+                    f.flush()      # Wymusza zapis z bufora Pythona
+                    os.fsync(f.fileno()) # Wymusza zapis z bufora systemu operacyjnego na dysk
+            except Exception as e:
+                print(f"Błąd zapisu logu: {e}")
