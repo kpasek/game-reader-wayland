@@ -3,11 +3,12 @@ import re
 
 def smart_remove_name(text: str) -> str:
     """
-    Inteligentnie usuwa imiona z początku linii PRZED czyszczeniem znaków.
+    Usuwa imiona postaci i separatory z początku linii.
     """
     if not text:
         return ""
 
+    # Regex łapie: Imię (2-25 znaków) + Separator (np. :, -, >) + Reszta
     pattern = r"^([\w\s'’]{2,25}?)\s*([:;_\-»>|]+)\s*(.+)$"
 
     match = re.match(pattern, text)
@@ -19,19 +20,19 @@ def smart_remove_name(text: str) -> str:
 
 def clean_text(text: str) -> str:
     """
-    Normalizuje tekst do porównywania.
+    Normalizuje tekst: lowercase, usuwa znaki specjalne (zostawia litery i cyfry).
     """
     if not text:
         return ""
 
-    # 1. Usuwanie tagów i nawiasów (informacje techniczne)
+    # 1. Usuwanie tagów technicznych
     text = re.sub(r'<[^>]+>|\[[^]]+\]|\([^)]+\)', ' ', text)
 
-    # 2. Usuwanie znaków specjalnych
-    # Zostawiamy litery (polskie też) i cyfry. Usuwamy interpunkcję, bo myli fuzzy match.
+    # 2. Zostawiamy tylko litery (wszystkie języki wspierane przez \w) i cyfry
+    # Usuwamy interpunkcję, bo ona myli fuzzy match przy krótkich tekstach
     text = re.sub(r'[^\w\sąćęłńóśźżĄĆĘŁŃÓŚŹŻ0-9]', ' ', text)
 
-    # 3. Redukcja spacji i lowercase
+    # 3. Redukcja spacji
     text = re.sub(r'\s+', ' ', text).strip().lower()
 
     return text
@@ -39,19 +40,18 @@ def clean_text(text: str) -> str:
 
 def filter_short_words(text: str, min_len: int = 3) -> str:
     """
-    Usuwa krótkie śmieci, ale zachowuje sens.
+    BEZKOMPROMISOWE FILTROWANIE SZUMU.
+    Usuwa wszystkie słowa krótsze niż min_len (domyślnie 3).
+    Jeśli po filtracji nic nie zostanie -> zwraca pusty ciąg.
     """
     if not text:
         return ""
 
     words = text.split()
-    # Zostawiamy słowa >= min_len.
-    # Wyjątek: Zostawiamy 'nie', 'no', 'co', 'ty', 'ja' itp. jeśli są poprawne,
-    # ale tutaj prościej jest po prostu odsiać 1-2 literowe krzaki z OCR.
+    # Zostawiamy TYLKO słowa, które mają 3 lub więcej znaków.
+    # Eliminujemy "to", "co", "no", "a", "w" itp., bo generują false-positive.
     filtered_words = [word for word in words if len(word) >= min_len]
 
-    # Jeśli filtr usunął wszystko (np. "No co"), to przywracamy oryginał
-    if not filtered_words and words:
-        return text
-
+    # Jeśli lista jest pusta, zwracamy pusty string.
+    # To sygnał dla matchera, żeby w ogóle nie szukał.
     return " ".join(filtered_words)
