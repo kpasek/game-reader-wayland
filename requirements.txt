@@ -1,6 +1,7 @@
 Pillow
 pytesseract
 thefuzz
+python-Levenshtein
 pyscreenshot
 mss
 # build

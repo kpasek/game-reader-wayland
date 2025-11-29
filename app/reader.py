@@ -9,7 +9,7 @@ from typing import Optional, Tuple, Dict, Any, List
 # Importy z naszych nowych modułów
 from app.capture import capture_region
 from app.ocr import preprocess_image, recognize_text
-from app.matcher import find_best_match
+from app.matcher import find_best_match, precompute_subtitles
 from app.config_manager import ConfigManager
 
 
@@ -29,9 +29,12 @@ class ReaderThread(threading.Thread):
         self.target_resolution = target_resolution
 
         # Bufory historii
-        self.recent_match_indices = deque(maxlen=5)
+        self.recent_match_indices = deque(maxlen=10)  # Zwiększono bufor, by nie powtarzać zbyt często
         self.last_ocr_texts = deque(maxlen=5)
         self.log_buffer = deque(maxlen=1000)
+
+        # Stan dla optymalizacji matchera
+        self.last_matched_idx = -1
 
         # Ustawienia wydajności
         self.ocr_scale = app_settings.get('ocr_scale_factor', 1.0)
@@ -42,17 +45,15 @@ class ReaderThread(threading.Thread):
         self.combined_regex = ""
 
     def _prepare_regex(self, names_path: str) -> str:
-        """Podmienia {NAMES} w regexie na listę imion z pliku."""
         names = ConfigManager.load_text_lines(names_path)
         if not names or "{NAMES}" not in self.regex_template:
-            return self.regex_template.replace("{NAMES}", r"\0\Z")  # Jeśli brak imion, usuń znacznik
+            return self.regex_template.replace("{NAMES}", r"\0\Z")
 
         escaped_names = [re.escape(n) for n in names]
         pattern = "|".join(escaped_names)
         return self.regex_template.replace("{NAMES}", f"({pattern})")
 
     def _scale_monitor_areas(self, monitors: List[Dict], original_res_str: str) -> List[Dict]:
-        """Przelicza współrzędne obszarów, jeśli rozdzielczość gry jest inna niż natywna."""
         if not self.target_resolution or not original_res_str:
             return monitors
 
@@ -63,7 +64,7 @@ class ReaderThread(threading.Thread):
             if (orig_w, orig_h) == (target_w, target_h):
                 return monitors
 
-            print(f"Skalowanie obszarów: {orig_w}x{orig_h} -> {target_w}x{target_h}")
+            # print(f"Skalowanie obszarów: {orig_w}x{orig_h} -> {target_w}x{target_h}")
             sx = target_w / orig_w
             sy = target_h / orig_h
 
@@ -87,10 +88,17 @@ class ReaderThread(threading.Thread):
             print("Błąd: Nie można wczytać presetu.")
             return
 
-        subtitles = ConfigManager.load_text_lines(preset.get('text_file_path'))
-        if not subtitles:
+        raw_subtitles = ConfigManager.load_text_lines(preset.get('text_file_path'))
+        if not raw_subtitles:
             print("Błąd: Brak pliku z napisami.")
             return
+
+        # --- OPTYMALIZACJA: Pre-obliczanie napisów ---
+        print(f"Przetwarzanie {len(raw_subtitles)} linii napisów... (może zająć chwilę)")
+        t_pre = time.time()
+        optimized_subs = precompute_subtitles(raw_subtitles)
+        print(f"Przetworzono napisy w {time.time() - t_pre:.2f}s. Aktywnych linii: {len(optimized_subs)}")
+        # ---------------------------------------------
 
         self.combined_regex = self._prepare_regex(preset.get('names_file_path'))
 
@@ -103,7 +111,7 @@ class ReaderThread(threading.Thread):
             print("Błąd: Brak zdefiniowanych obszarów.")
             return
 
-        # 3. Obliczanie Unified Bounding Box (aby robić jeden zrzut zamiast N)
+        # 3. Obliczanie Unified Bounding Box
         min_l = min(m['left'] for m in monitors)
         min_t = min(m['top'] for m in monitors)
         max_r = max(m['left'] + m['width'] for m in monitors)
@@ -133,8 +141,6 @@ class ReaderThread(threading.Thread):
 
             # B. Iteracja po podobszarach
             for idx, area in enumerate(monitors):
-                # Wycinamy fragment z dużego obrazka
-                # Współrzędne względne wewnątrz unified_area
                 rel_x = area['left'] - min_l
                 rel_y = area['top'] - min_t
                 rel_w = area['width']
@@ -149,34 +155,42 @@ class ReaderThread(threading.Thread):
                 t_ocr = (time.perf_counter() - t1) * 1000
 
                 if not text or len(text) < 2: continue
-                if text in self.last_ocr_texts: continue  # Ignoruj powtórzenia OCR
+                if text in self.last_ocr_texts: continue
 
                 self.last_ocr_texts.append(text)
 
-                # D. Dopasowanie
+                # D. Dopasowanie (Zoptymalizowane)
                 t2 = time.perf_counter()
-                match = find_best_match(text, subtitles, self.subtitle_mode)
-                t_match = (time.perf_counter() - t2) * 1000
 
-                print(f"OCR [{idx + 1}]: '{text}'")
+                # Przekazujemy self.last_matched_idx, żeby szukać w pobliżu
+                match = find_best_match(text, optimized_subs, self.subtitle_mode, last_index=self.last_matched_idx)
+
+                t_match = (time.perf_counter() - t2) * 1000
 
                 # Logowanie
                 if self.log_queue:
+                    matched_text = raw_subtitles[match[0]] if match else ""
                     self.log_queue.put({
                         "time": datetime.now().strftime('%H:%M:%S'),
                         "ocr": text,
                         "match": match,
-                        "line_text": subtitles[match[0]] if match else "",
+                        "line_text": matched_text,
                         "stats": {"monitor": idx + 1, "cap_ms": t_cap, "ocr_ms": t_ocr, "match_ms": t_match}
                     })
 
                 # E. Akcja po dopasowaniu
                 if match:
                     idx_match, score = match
+
+                    # Aktualizacja stanu dla optymalizacji w następnej klatce
+                    # (Tylko jeśli to "nowa" linia w sensie fabuły, ale tutaj aktualizujemy zawsze,
+                    # bo matcher sam sobie poradzi z oknem wokół tego indeksu)
+                    self.last_matched_idx = idx_match
+
                     if idx_match not in self.recent_match_indices:
-                        print(f" >>> DOPASOWANIE ({score}%): {subtitles[idx_match]}")
+                        print(f" >>> DOPASOWANIE ({score}%): {raw_subtitles[idx_match]}")
                         self.recent_match_indices.append(idx_match)
-                        self.log_buffer.append(f"Match: {score}% | {subtitles[idx_match]}")
+                        self.log_buffer.append(f"Match: {score}% | {raw_subtitles[idx_match]}")
 
                         audio_file = os.path.join(audio_dir, f"output1 ({idx_match + 1}).ogg")
                         self.audio_queue.put(audio_file)
