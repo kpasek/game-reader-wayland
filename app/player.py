@@ -45,13 +45,7 @@ class PlayerThread(threading.Thread):
             volume = self.volume_callback() if self.volume_callback else 1.0
 
             # Budowanie komendy dla ffplay
-            # -nodisp: brak okna wideo
-            # -autoexit: zamknij po odtworzeniu
-            # -af: filtry audio (prędkość, głośność)
-
-            # Formatowanie filtra atempo (dla prędkości spoza zakresu 0.5-2.0 trzeba łączyć filtry,
-            # ale tutaj zakładamy zakres 0.8-2.0 z GUI)
-            filter_complex = f"atempo={speed},volume={volume}"
+            filter_complex = f"atempo={speed},volume={volume},alimiter=limit=0.95"
 
             cmd = [
                 'ffplay',

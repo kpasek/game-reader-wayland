@@ -1,4 +1,4 @@
-# !/usr/bin/env python3
+#!/usr/bin/env python3
 import sys
 import os
 import queue
@@ -46,7 +46,7 @@ stop_event = threading.Event()
 audio_queue = queue.Queue()
 log_queue = queue.Queue()
 
-APP_VERSION = "v0.8.3"
+APP_VERSION = "v0.8.5"
 STANDARD_WIDTH = 3840
 STANDARD_HEIGHT = 2160
 
@@ -55,27 +55,87 @@ class HelpWindow(tk.Toplevel):
     def __init__(self, parent):
         super().__init__(parent)
         self.title("Pomoc i Instrukcja")
-        self.geometry("600x550")
-        # (Treść pomocy bez zmian...)
+        self.geometry("700x750")
         default_font = font.nametofont("TkDefaultFont")
         base_font_family = default_font.actual()["family"]
         txt = scrolledtext.ScrolledText(self, wrap=tk.WORD, padx=15, pady=15, font=(base_font_family, 10))
         txt.pack(fill=tk.BOTH, expand=True)
-        txt.tag_config('h1', font=(base_font_family, 12, 'bold'), spacing1=15, spacing3=5, foreground="#222222")
+
+        # Konfiguracja tagów formatowania tekstu
+        txt.tag_config('h1', font=(base_font_family, 13, 'bold'), spacing1=20, spacing3=10, foreground="#222222")
+        txt.tag_config('h2', font=(base_font_family, 11, 'bold'), spacing1=10, spacing3=5)
         txt.tag_config('bold', font=(base_font_family, 10, 'bold'))
         txt.tag_config('normal', spacing3=2)
+        txt.tag_config('italic', font=(base_font_family, 10, 'italic'))
+
         content = [
             ("JAK TO DZIAŁA?\n", 'h1'),
-            ("Aplikacja Lektor działa w dwóch wątkach: jeden wykonuje zrzuty ekranu, drugi przetwarza tekst (OCR).\n",
+            ("Aplikacja wykonuje cykliczne zrzuty zdefiniowanego obszaru ekranu, przetwarza je przez OCR (rozpoznawanie tekstu) i porównuje z załadowanym plikiem napisów. Gdy znajdzie dopasowanie, odtwarza przypisany plik audio.\n",
              'normal'),
-            ("OPTYMALIZACJA KRÓTKICH TEKSTÓW\n", 'h1'),
-            ("Jeśli tekst jest krótki (poniżej progu), aplikacja spróbuje automatycznie znaleźć jego dokładne położenie, przyciąć obraz i odczytać ponownie z większą dokładnością.\n",
+
+            ("PARAMETRY KONFIGURACJI\n", 'h1'),
+
+            ("1. Skala OCR (0.1 - 1.0)\n", 'h2'),
+            ("Określa, jak bardzo obraz jest skalowany przed odczytem. OCR (Tesseract) działa najlepiej, gdy litery mają określoną wysokość w pikselach.\n",
              'normal'),
-            ("Wyrównanie tekstu:", "bold"),
-            (" Pomaga określić, gdzie spodziewać się napisów (Lewo/Środek/Prawo).\n", 'normal'),
+            ("• Przykład: ", 'bold'),
+            ("Dla ekranu 4K (3840x2160) ustaw 0.3 - 0.4. Dla FullHD (1920x1080) ustaw 0.9 - 1.0.\n", 'normal'),
+
+            ("2. Czułość pustego obrazu (Threshold)\n", 'h2'),
+            ("Zapobiega uruchamianiu OCR na pustych/czarnych klatkach, sprawdzając zróżnicowanie kolorów.\n", 'normal'),
+            ("• Przykład: ", 'bold'),
+            ("Ustawienie 0.15 ignoruje czarne ekrany ładowania. Ustawienie 0.0 wyłącza tę funkcję (analizuje wszystko).\n",
+             'normal'),
+
+            ("3. Skanowanie (Interval)\n", 'h2'),
+            ("Czas w sekundach między kolejnymi zrzutami ekranu.\n", 'normal'),
+            ("• Przykład: ", 'bold'),
+            ("0.5s to standard. Jeśli gra ma bardzo szybkie dialogi, zmniejsz do 0.3s. Jeśli chcesz oszczędzić procesor, zwiększ do 1.0s.\n",
+             'normal'),
+
+            ("4. Tryb dopasowania (Subtitle Mode)\n", 'h2'),
+            ("• Full Lines: ", 'bold'),
+            ("Wymaga, aby OCR rozpoznał całą linię (z małą tolerancją błędów).\n", 'normal'),
+            ("• Partial Lines: ", 'bold'),
+            ("Wystarczy, że rozpoznany tekst zawiera się w linii napisów. Przydatne, gdy OCR ucina końcówki długich zdań.\n",
+             'normal'),
+
+            ("OPTYMALIZACJA (Dla krótkich tekstów)\n", 'h1'),
+
+            ("5. Popraw krótkie (Rerun Threshold)\n", 'h2'),
+            ("Jeśli OCR wykryje tekst krótszy niż X znaków, aplikacja spróbuje 'inteligentnie' wyciąć sam napis z tła, powiększyć go i odczytać ponownie. To drastycznie poprawia skuteczność przy krótkich dialogach (np. 'Tak.', 'Nie.').\n",
+             'normal'),
+            ("• Przykład: ", 'bold'),
+            ("Ustaw na 50-70. Teksty krótsze niż 70 znaków będą skanowane dwukrotnie (z precyzyjnym wycięciem).\n",
+             'normal'),
+
+            ("6. Wyrównanie tekstu (Alignment)\n", 'h2'),
+            ("Podpowiedź dla funkcji 'Popraw krótkie', gdzie spodziewać się tekstu na wycinku.\n", 'normal'),
+            ("• Przykład: ", 'bold'),
+            ("Dla większości gier 'Center'. Jeśli napisy są przyklejone do lewej krawędzi ekranu, wybierz 'Left'.\n",
+             'normal'),
+
+            ("7. Ignoruj dialogi krótsze niż (Min Line Length)\n", 'h2'),
+            ("Filtruje bardzo krótkie 'śmieci' z pliku napisów, które mogłyby zostać błędnie dopasowane do szumu OCR.\n",
+             'normal'),
+            ("• Przykład: ", 'bold'),
+            ("Ustawienie 3 zignoruje wiersze typu 'Hm', 'Aha', ale przepuści 'Tak'.\n", 'normal'),
+
+            ("FILTRACJA\n", 'h1'),
+
+            ("8. Regex i Imiona\n", 'h2'),
+            ("Pozwala usuwać imiona postaci z początku linii, aby OCR porównywał tylko dialog.\n", 'normal'),
+            ("• Standard: ", 'bold'), ("Usuwa 'Geralt: ', 'Vesemir: '.\n", 'normal'),
+            ("• Nawiasy: ", 'bold'), ("Usuwa '[Geralt] '.\n", 'normal'),
         ]
-        for text, tag in content:
-            txt.insert(tk.END, text, tag)
+
+        for item in content:
+            if len(item) == 2:
+                text, tag = item
+                txt.insert(tk.END, text, tag)
+            else:
+                txt.insert(tk.END, item[0])  # Fallback
+
         txt.config(state=tk.DISABLED)
 
 
@@ -83,7 +143,7 @@ class LektorApp:
     def __init__(self, root: tk.Tk, autostart_preset: Optional[str], game_cmd: list):
         self.root = root
         self.root.title(f"Lektor {APP_VERSION}")
-        self.root.geometry("750x850")  # Zwiększona wysokość dla nowych opcji
+        self.root.geometry("750x900")  # Wysokie okno dla wszystkich opcji
 
         self.config_mgr = ConfigManager()
         self.game_cmd = game_cmd
@@ -108,8 +168,9 @@ class LektorApp:
         self.var_capture_interval = tk.DoubleVar(value=0.5)
         self.var_auto_names = tk.BooleanVar(value=True)
 
-        # Nowe opcje optymalizacji
+        # Opcje optymalizacji
         self.var_rerun_threshold = tk.IntVar(value=50)
+        self.var_min_line_len = tk.IntVar(value=0)
         self.var_text_alignment = tk.StringVar(value="Center")
         self.var_save_logs = tk.BooleanVar(value=False)
 
@@ -312,7 +373,7 @@ class LektorApp:
         # Rerun Threshold
         f_rerun = ttk.Frame(grp_opt)
         f_rerun.pack(fill=tk.X, pady=5)
-        ttk.Label(f_rerun, text="Popraw krótkie (< znaki):").pack(side=tk.LEFT)
+        ttk.Label(f_rerun, text="Ponów OCR krótszych dialogów niż:").pack(side=tk.LEFT)
         s_rerun = ttk.Scale(f_rerun, from_=0, to=150, variable=self.var_rerun_threshold,
                             command=lambda v: self.lbl_rerun.config(text=f"{int(float(v))}"))
         s_rerun.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
@@ -320,6 +381,18 @@ class LektorApp:
                      lambda e: self._save_preset_val("rerun_threshold", self.var_rerun_threshold.get()))
         self.lbl_rerun = ttk.Label(f_rerun, text="50", width=5)
         self.lbl_rerun.pack(side=tk.LEFT)
+
+        # Min Line Length Filter
+        f_min = ttk.Frame(grp_opt)
+        f_min.pack(fill=tk.X, pady=5)
+        ttk.Label(f_min, text="Ignoruj dialogi krótsze niż:").pack(side=tk.LEFT)
+        s_min = ttk.Scale(f_min, from_=0, to=20, variable=self.var_min_line_len,
+                          command=lambda v: self.lbl_min.config(text=f"{int(float(v))}"))
+        s_min.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        s_min.bind("<ButtonRelease-1>",
+                   lambda e: self._save_preset_val("min_line_length", self.var_min_line_len.get()))
+        self.lbl_min = ttk.Label(f_min, text="0", width=5)
+        self.lbl_min.pack(side=tk.LEFT)
 
         # Alignment
         f_align = ttk.Frame(grp_opt)
@@ -464,6 +537,10 @@ class LektorApp:
         # Nowe opcje
         self.var_rerun_threshold.set(data.get("rerun_threshold", 50))
         self.lbl_rerun.config(text=f"{self.var_rerun_threshold.get()}")
+
+        self.var_min_line_len.set(data.get("min_line_length", 0))
+        self.lbl_min.config(text=f"{self.var_min_line_len.get()}")
+
         self.var_text_alignment.set(data.get("text_alignment", "Center"))
         self.var_save_logs.set(data.get("save_logs", False))
 

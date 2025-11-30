@@ -153,7 +153,10 @@ class ReaderThread(threading.Thread):
         interval = preset.get('capture_interval', 0.5)
 
         raw_subtitles = ConfigManager.load_text_lines(preset.get('text_file_path'))
-        precomputed_data = precompute_subtitles(raw_subtitles) if raw_subtitles else ([], {})
+
+        min_line_len = preset.get('min_line_length', 0)
+        precomputed_data = precompute_subtitles(raw_subtitles, min_line_len) if raw_subtitles else ([], {})
+
         self.combined_regex = self._prepare_regex(preset.get('names_file_path'))
 
         raw_monitors = preset.get('monitor', [])
@@ -174,12 +177,11 @@ class ReaderThread(threading.Thread):
         capture_worker = CaptureWorker(self.stop_event, self.img_queue, unified_area, interval)
         capture_worker.start()
 
-        # Log start
         if self.log_queue and self.save_logs:
             self.log_queue.put({"time": "INFO",
-                                "line_text": f"Rozpoczęto czytanie. RerunThresh={self.rerun_threshold}, Align={self.text_alignment}"})
+                                "line_text": f"Start. Rerun={self.rerun_threshold}, MinLen={min_line_len}, Align={self.text_alignment}"})
 
-        print(f"ReaderThread started. Scale: {self.ocr_scale}, RerunThresh: {self.rerun_threshold}")
+        print(f"ReaderThread started. Scale: {self.ocr_scale}, MinLen: {min_line_len}")
 
         while not self.stop_event.is_set():
             try:
@@ -205,18 +207,13 @@ class ReaderThread(threading.Thread):
 
                 text = recognize_text(processed, self.combined_regex, self.auto_remove_names, self.empty_threshold)
 
-                # --- SMART RETRY LOGIC ---
-                # Jeśli tekst jest krótki, ale nie pusty, spróbuj przyciąć do samej treści i ponowić.
                 if 0 < len(text) < self.rerun_threshold:
                     retry_text = self._smart_retry_ocr(processed)
-                    # Jeśli ponowny odczyt dał dłuższy (lub inny sensowny) wynik, użyj go.
-                    # Prosta heurystyka: dłuższy tekst = więcej odczytanych liter.
                     if len(retry_text) > len(text):
                         if self.log_queue:
                             self.log_queue.put(
                                 {"time": "DEBUG", "line_text": f"Smart Retry: '{text}' -> '{retry_text}'"})
                         text = retry_text
-                # -------------------------
 
                 t_ocr = (time.perf_counter() - t1) * 1000
 
@@ -240,7 +237,6 @@ class ReaderThread(threading.Thread):
                     }
                     self.log_queue.put(log_entry)
 
-                    # Prosty zapis do pliku jeśli włączony
                     if self.save_logs:
                         with open("session_log.txt", "a", encoding='utf-8') as f:
                             f.write(f"{log_entry['time']} | OCR: {text} | Match: {line_txt} \n")

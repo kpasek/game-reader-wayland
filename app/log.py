@@ -1,7 +1,6 @@
 import tkinter as tk
-from tkinter import ttk, scrolledtext
+from tkinter import  scrolledtext
 import queue
-import os
 
 
 class LogWindow(tk.Toplevel):
@@ -12,13 +11,6 @@ class LogWindow(tk.Toplevel):
         self.log_queue = log_queue
         self.is_open = True
         self.max_lines = 2000  # LIMIT LINII
-
-        self.log_file_path = os.path.abspath("dialog_match.log")
-
-        # Checkbox zapisu do pliku
-        self.save_var = tk.BooleanVar(value=False)
-        chk = ttk.Checkbutton(self, text=f"Zapisuj do pliku ({self.log_file_path})", variable=self.save_var)
-        chk.pack(anchor=tk.W, padx=5, pady=5)
 
         # Obszar tekstowy
         self.text_area = scrolledtext.ScrolledText(self, state='disabled')
@@ -43,25 +35,33 @@ class LogWindow(tk.Toplevel):
         self.after(500, self.update_logs)
 
     def _append_text(self, data):
-        timestamp = data['time']
-        ocr = data['ocr']
-        match = data['match']
+        # Używamy .get() aby uniknąć KeyError przy komunikatach systemowych
+        timestamp = data.get('time', '')
+        ocr = data.get('ocr')
+        match = data.get('match')
         stats = data.get('stats', {})
+        line_text = data.get('line_text', '')
 
-        msg = f"[{timestamp}] OCR: {ocr}\n"
-
-        if stats:
-            mon = stats.get('monitor', '?')
-            t_cap = stats.get('cap_ms', 0)
-            t_ocr = stats.get('ocr_ms', 0)
-            t_match = stats.get('match_ms', 0)
-            msg += f"   [Obszar: {mon} | Zrzut: {t_cap:.0f}ms | OCR: {t_ocr:.0f}ms | Match: {t_match:.0f}ms]\n"
-
-        if match:
-            msg += f"   >>> MATCH ({match[1]}%): {data['line_text']}\n"
+        # Jeśli 'ocr' jest None, traktujemy to jako komunikat informacyjny/debug
+        if ocr is None:
+            msg = f"[{timestamp}] {line_text}\n"
+            msg += "-" * 40 + "\n"
         else:
-            msg += "   >>> Brak dopasowania\n"
-        msg += "-" * 40 + "\n"
+            # Standardowy log z procesu OCR
+            msg = f"[{timestamp}] OCR: {ocr}\n"
+
+            if stats:
+                mon = stats.get('monitor', '?')
+                t_cap = stats.get('cap_ms', 0)
+                t_ocr = stats.get('ocr_ms', 0)
+                t_match = stats.get('match_ms', 0)
+                msg += f"   [Obszar: {mon} | Zrzut: {t_cap:.0f}ms | OCR: {t_ocr:.0f}ms | Match: {t_match:.0f}ms]\n"
+
+            if match:
+                msg += f"   >>> MATCH ({match[1]}%): {line_text}\n"
+            else:
+                msg += "   >>> Brak dopasowania\n"
+            msg += "-" * 40 + "\n"
 
         # GUI Update
         self.text_area.config(state='normal')
@@ -71,15 +71,6 @@ class LogWindow(tk.Toplevel):
         if num_lines > self.max_lines:
             diff = num_lines - self.max_lines
             self.text_area.delete("1.0", f"{diff}.0")
-        # ---------------------------------------------
 
         self.text_area.see(tk.END)
         self.text_area.config(state='disabled')
-
-        # File Write
-        if self.save_var.get():
-            try:
-                with open(self.log_file_path, "a", encoding="utf-8") as f:
-                    f.write(msg)
-            except Exception as e:
-                print(f"Błąd zapisu logu: {e}")

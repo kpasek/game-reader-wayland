@@ -1,3 +1,4 @@
+import re
 from typing import List, Optional, Tuple, Dict
 from app.text_processing import clean_text, smart_remove_name
 
@@ -12,12 +13,13 @@ except ImportError:
 SubtitleEntry = Tuple[str, str, int, int]
 
 
-def precompute_subtitles(raw_lines: List[str]) -> Tuple[List[SubtitleEntry], Dict[str, int]]:
+def precompute_subtitles(raw_lines: List[str], min_length: int = 0) -> Tuple[List[SubtitleEntry], Dict[str, int]]:
     """
     Przetwarza listę napisów na format gotowy do szybkiego wyszukiwania.
     Tworzy również mapę skrótów (hash map) dla idealnych dopasowań.
 
     :param raw_lines: Lista surowych linii z pliku tekstowego.
+    :param min_length: Minimalna długość linii (bez znaków specjalnych), aby była brana pod uwagę.
     :return: Krotka (lista_przetworzona, mapa_idealnych_dopasowan).
     """
     processed = []
@@ -26,6 +28,11 @@ def precompute_subtitles(raw_lines: List[str]) -> Tuple[List[SubtitleEntry], Dic
     for i, line in enumerate(raw_lines):
         cleaned = clean_text(line)
         if len(cleaned) > 0:
+            meaningful_content = re.sub(r'[^\w\s]', '', cleaned)
+
+            if len(meaningful_content) < min_length:
+                continue
+
             length = len(cleaned)
             processed.append((line, cleaned, i, length))
 

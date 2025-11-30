@@ -28,7 +28,8 @@ DEFAULT_PRESET_CONTENT = {
     "auto_remove_names": True,
     "rerun_threshold": 50,
     "text_alignment": "Center",
-    "save_logs": False
+    "save_logs": False,
+    "min_line_length": 0
 }
 
 
