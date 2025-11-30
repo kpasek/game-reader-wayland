@@ -1,23 +1,24 @@
 from typing import List, Optional, Tuple, Dict
+from app.text_processing import clean_text, smart_remove_name
 
-# Próba importu szybkiej biblioteki C++, fallback do Pythona
 try:
     from rapidfuzz import fuzz
 except ImportError:
     from thefuzz import fuzz
 
-    print("OSTRZEŻENIE: Brak biblioteki 'rapidfuzz'. Zainstaluj ją dla lepszej wydajności!")
+    print("OSTRZEŻENIE: Brak 'rapidfuzz'. Używam wolniejszego 'thefuzz'.")
 
-from app.text_processing import clean_text, smart_remove_name
-
-# Rozszerzony typ: (oryginał, clean, index, length)
+# Typ pomocniczy: (oryginalna_linia, oczyszczona_linia, indeks_wiersza, dlugosc_oczyszczona)
 SubtitleEntry = Tuple[str, str, int, int]
 
 
 def precompute_subtitles(raw_lines: List[str]) -> Tuple[List[SubtitleEntry], Dict[str, int]]:
     """
-    Przygotowuje listę do wyszukiwania ORAZ mapę do błyskawicznego dopasowania (hash map).
-    Zwraca: (processed_list, exact_match_map)
+    Przetwarza listę napisów na format gotowy do szybkiego wyszukiwania.
+    Tworzy również mapę skrótów (hash map) dla idealnych dopasowań.
+
+    :param raw_lines: Lista surowych linii z pliku tekstowego.
+    :return: Krotka (lista_przetworzona, mapa_idealnych_dopasowan).
     """
     processed = []
     exact_map = {}
@@ -26,10 +27,9 @@ def precompute_subtitles(raw_lines: List[str]) -> Tuple[List[SubtitleEntry], Dic
         cleaned = clean_text(line)
         if len(cleaned) > 0:
             length = len(cleaned)
-            # Dodajemy długość do krotki, żeby nie liczyć jej w pętli
             processed.append((line, cleaned, i, length))
 
-            # Dodajemy do mapy dokładnych dopasowań (tylko pierwsze wystąpienie)
+            # Optymalizacja: O(1) dla idealnych trafień
             if cleaned not in exact_map:
                 exact_map[cleaned] = i
 
@@ -37,41 +37,45 @@ def precompute_subtitles(raw_lines: List[str]) -> Tuple[List[SubtitleEntry], Dic
 
 
 def find_best_match(ocr_text: str,
-                    precomputed_data: Tuple[List[SubtitleEntry], Dict[str, int]],  # Nowy format wejścia
+                    precomputed_data: Tuple[List[SubtitleEntry], Dict[str, int]],
                     mode: str,
                     last_index: int = -1) -> Optional[Tuple[int, int]]:
+    """
+    Znajduje najlepsze dopasowanie tekstu z OCR w bazie napisów.
+
+    Strategia:
+    1. Sprawdzenie idealnego dopasowania (słownik).
+    2. Wyszukiwanie lokalne (w pobliżu ostatnio znalezionej linii).
+    3. Wyszukiwanie globalne (cały plik) - jeśli lokalne zawiodło.
+
+    :param ocr_text: Tekst rozpoznany przez OCR.
+    :param precomputed_data: Dane zwrócone przez precompute_subtitles.
+    :param mode: Tryb dopasowania ('Full Lines' lub 'Partial Lines').
+    :param last_index: Indeks ostatnio znalezionej linii (dla kontekstu).
+    :return: Krotka (indeks_linii, pewność_dopasowania_%) lub None.
+    """
     if not ocr_text:
         return None
 
-    # Rozpakowanie danych (lista i mapa)
     subtitles_list, exact_map = precomputed_data
 
-    # 1. Przetwarzanie OCR
+    # Wstępne czyszczenie OCR
     ocr_no_name = smart_remove_name(ocr_text)
     ocr_clean = clean_text(ocr_no_name)
 
     if not ocr_clean:
         return None
 
-    # --- OPTYMALIZACJA 1: Exact Match Lookup (O(1)) ---
-    # Jeśli OCR jest idealny (po wyczyszczeniu), znajdujemy go w 0ms.
+    # Szybka ścieżka: Exact Match
     if ocr_clean in exact_map:
         return exact_map[ocr_clean], 100
 
-    # --- Wybór trybu ---
-    effective_mode = mode
-    ocr_len = len(ocr_clean)
-    if ocr_len < 20:
-        effective_mode = "Full Lines"
-
-    # --- Konfiguracja Okna ---
+    # Ustalanie okna wyszukiwania
     WINDOW_BACK = 50
     WINDOW_FWD = 200
-
     candidates_in_window = []
     candidates_outside = []
 
-    # Iteracja jest szybka, bo to tylko przypisanie referencji
     if last_index >= 0:
         for entry in subtitles_list:
             orig_idx = entry[2]
@@ -82,6 +86,11 @@ def find_best_match(ocr_text: str,
     else:
         candidates_outside = subtitles_list
 
+    ocr_len = len(ocr_clean)
+
+    # Wymuś 'Full Lines' dla bardzo krótkich tekstów, aby uniknąć fałszywych dopasowań
+    effective_mode = "Full Lines" if ocr_len < 20 else mode
+
     # 1. Szukanie lokalne
     match = _scan_list(ocr_clean, ocr_len, candidates_in_window, effective_mode)
     if match and match[1] >= 95:
@@ -90,65 +99,56 @@ def find_best_match(ocr_text: str,
     # 2. Szukanie globalne
     global_match = _scan_list(ocr_clean, ocr_len, candidates_outside, effective_mode)
 
-    if local_match := match:
-        if global_match and global_match[1] > local_match[1] + 5:
+    # Jeśli znaleziono dopasowanie lokalne i globalne, preferuj lokalne, chyba że globalne jest znacznie pewniejsze
+    if match:
+        if global_match and global_match[1] > match[1] + 5:
             return global_match
-        return local_match
+        return match
 
     return global_match
 
 
 def _scan_list(ocr_text: str, ocr_len: int, candidates: List[SubtitleEntry], mode: str) -> Optional[Tuple[int, int]]:
+    """Wewnętrzna funkcja iterująca po kandydatach i licząca Levenshtein ratio."""
     best_score = 0
     best_original_idx = -1
     best_len_diff = float('inf')
 
-    # Używamy cached 'sub_len' z krotki
     for _, sub_clean, original_idx, sub_len in candidates:
-
         len_diff = abs(ocr_len - sub_len)
 
-        # === TRYB PEŁNY (Full Lines) ===
         if mode == "Full Lines":
-            # Limit długości (30%)
-            # Mnożenie jest szybsze niż dzielenie
+            # Jeśli różnica długości jest duża (>30%), pomijamy (optymalizacja)
             if len_diff > max(ocr_len, sub_len) * 0.30:
                 continue
-
-            # Rapidfuzz ratio jest znacznie szybszy
             score = fuzz.ratio(sub_clean, ocr_text)
 
-        # === TRYB CZĘŚCIOWY (Partial Lines) ===
         elif mode == "Partial Lines":
             if sub_len < ocr_len - 3:
                 continue
-
             score = fuzz.partial_ratio(sub_clean, ocr_text)
-
+            # Kara za brak zgodności początku przy dużej różnicy długości
             if score > 80 and len_diff > 15:
                 if not sub_clean.startswith(ocr_text[:min(ocr_len, 10)]):
                     score -= 10
         else:
             score = 0
 
-        # --- Aktualizacja wyniku ---
         if score > best_score:
             best_score = score
             best_original_idx = original_idx
             best_len_diff = len_diff
-
-            # Wczesne wyjście dla idealnych dopasowań (optymalizacja pętli)
             if best_score == 100 and len_diff == 0:
                 return best_original_idx, 100
 
         elif score == best_score:
+            # Przy równym wyniku wybierz ten o zbliżonej długości
             if len_diff < best_len_diff:
                 best_original_idx = original_idx
                 best_len_diff = len_diff
 
-    min_score = 85
-    if ocr_len < 6:
-        min_score = 95
+    # Progi akceptacji
+    min_score = 95 if ocr_len < 6 else 85
 
     if best_score >= min_score:
         return best_original_idx, int(best_score)

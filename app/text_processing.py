@@ -1,6 +1,7 @@
 import re
+from typing import List
 
-# Lista poprawnych krótkich słów
+# Lista krótkich słów, które są poprawne w języku polskim i nie powinny być usuwane jako szum.
 VALID_SHORT_WORDS = {
     'a', 'i', 'o', 'u', 'w', 'z',
     'az', 'aż', 'ba', 'bo', 'by', 'ci', 'co', 'da', 'do', 'go', 'ha', 'he', 'hm',
@@ -10,21 +11,25 @@ VALID_SHORT_WORDS = {
     'we', 'wy', 'wu', 'za', 'ze', 'że', 'ół'
 }
 
-# --- PREKOMPILOWANE WYRAŻENIA REGULARNE (Dla wydajności) ---
-# Wzór na imiona (So'lek - Dialog)
+# --- Wyrażenia regularne ---
+# Wykrywanie prefiksu imienia, np. "Geralt: Witaj" lub "Geralt - Witaj"
 RE_NAME_PREFIX = re.compile(r"^([\w\s'’]{2,25}?)\s*([:;_\-»>|]+)\s*(.+)$")
-
-# Tagi techniczne <...> [..] (...)
+# Usuwanie tagów HTML/XML oraz nawiasów kwadratowych i okrągłych
 RE_TAGS = re.compile(r'<[^>]+>|\[[^]]+\]|\([^)]+\)')
-
-# Znaki dozwolone (reszta usuwana)
+# Dozwolone znaki (litery polskie, cyfry, podstawowe znaki). Reszta zamieniana na spacje.
 RE_ALLOWED_CHARS = re.compile(r'[^\w\sąćęłńóśźżĄĆĘŁŃÓŚŹŻ0-9]')
-
-# Wielokrotne spacje
+# Redukcja wielokrotnych spacji
 RE_SPACES = re.compile(r'\s+')
 
 
 def smart_remove_name(text: str) -> str:
+    """
+    Usuwa imię postaci mówiącej z początku tekstu, jeśli pasuje do wzorca.
+    Np. zamienia "Geralt: Cześć" na "Cześć".
+
+    :param text: Surowy tekst z OCR.
+    :return: Tekst bez prefiksu imienia.
+    """
     if not text:
         return ""
 
@@ -35,26 +40,33 @@ def smart_remove_name(text: str) -> str:
 
 
 def clean_text(text: str) -> str:
+    """
+    Główna funkcja czyszcząca tekst przed dopasowaniem.
+    Usuwa znaki specjalne, tagi, nadmiarowe spacje i zamienia na małe litery.
+    Filtruje również bardzo krótkie "słowa-śmieci", które nie są na liście wyjątków.
+
+    :param text: Tekst wejściowy.
+    :return: Oczyszczony, znormalizowany ciąg znaków.
+    """
     if not text:
         return ""
 
-    # 1. Usuwanie tagów
+    # 1. Usuwanie tagów i nawiasów
     text = RE_TAGS.sub(' ', text)
 
-    # 2. Usuwanie znaków specjalnych
+    # 2. Usuwanie znaków niedozwolonych
     text = RE_ALLOWED_CHARS.sub(' ', text)
 
-    # 3. Lowercase i redukcja spacji
+    # 3. Normalizacja (lowercase + spacje)
     text = RE_SPACES.sub(' ', text).strip().lower()
 
     if not text:
         return ""
 
-    # 4. Inteligentne usuwanie szumu (zostawiamy to w Pythonie, bo regex tu nie pomoże)
+    # 4. Inteligentne usuwanie szumu (krótkich zlepków liter)
     words = text.split()
 
-    # Szybka ścieżka: jeśli słowa są długie, nie iterujemy po liście wyjątków
-    # (optymalizacja dla większości przypadków)
+    # Optymalizacja: jeśli wszystkie słowa są długie, zwracamy od razu
     if all(len(w) > 2 for w in words):
         return text
 
