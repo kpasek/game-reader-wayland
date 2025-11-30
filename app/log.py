@@ -3,6 +3,7 @@ from tkinter import ttk, scrolledtext
 import queue
 import os
 
+
 class LogWindow(tk.Toplevel):
     def __init__(self, parent, log_queue):
         super().__init__(parent)
@@ -10,11 +11,11 @@ class LogWindow(tk.Toplevel):
         self.geometry("1000x600")
         self.log_queue = log_queue
         self.is_open = True
+        self.max_lines = 2000  # LIMIT LINII
 
         self.log_file_path = os.path.abspath("dialog_match.log")
-        print(f"Logi: {self.log_file_path}")
 
-        # Checkbox zapisu do pliku - DOMYŚLNIE WYŁĄCZONY
+        # Checkbox zapisu do pliku
         self.save_var = tk.BooleanVar(value=False)
         chk = ttk.Checkbutton(self, text=f"Zapisuj do pliku ({self.log_file_path})", variable=self.save_var)
         chk.pack(anchor=tk.W, padx=5, pady=5)
@@ -57,7 +58,7 @@ class LogWindow(tk.Toplevel):
             msg += f"   [Obszar: {mon} | Zrzut: {t_cap:.0f}ms | OCR: {t_ocr:.0f}ms | Match: {t_match:.0f}ms]\n"
 
         if match:
-            msg += f"   >>> DOPASOWANIE ({match[1]}%): linia {match[0] + 1}: {data['line_text']}\n"
+            msg += f"   >>> MATCH ({match[1]}%): {data['line_text']}\n"
         else:
             msg += "   >>> Brak dopasowania\n"
         msg += "-" * 40 + "\n"
@@ -65,6 +66,13 @@ class LogWindow(tk.Toplevel):
         # GUI Update
         self.text_area.config(state='normal')
         self.text_area.insert(tk.END, msg)
+
+        num_lines = int(self.text_area.index('end-1c').split('.')[0])
+        if num_lines > self.max_lines:
+            diff = num_lines - self.max_lines
+            self.text_area.delete("1.0", f"{diff}.0")
+        # ---------------------------------------------
+
         self.text_area.see(tk.END)
         self.text_area.config(state='disabled')
 
@@ -73,7 +81,5 @@ class LogWindow(tk.Toplevel):
             try:
                 with open(self.log_file_path, "a", encoding="utf-8") as f:
                     f.write(msg)
-                    f.flush()
-                    os.fsync(f.fileno())
             except Exception as e:
                 print(f"Błąd zapisu logu: {e}")

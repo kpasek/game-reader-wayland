@@ -20,6 +20,7 @@ except ImportError:
 if platform.system() == "Windows":
     try:
         import ctypes
+
         ctypes.windll.shcore.SetProcessDpiAwareness(1)
     except Exception:
         pass
@@ -28,6 +29,7 @@ if platform.system() == "Windows":
 # --- PYNPUT HOTKEYS ---
 try:
     from pynput import keyboard
+
     HAS_PYNPUT = True
 except ImportError:
     HAS_PYNPUT = False
@@ -46,7 +48,7 @@ stop_event = threading.Event()
 audio_queue = queue.Queue()
 log_queue = queue.Queue()
 
-APP_VERSION = "v0.8.0"
+APP_VERSION = "v0.8.1"
 STANDARD_WIDTH = 3840
 STANDARD_HEIGHT = 2160
 
@@ -69,7 +71,8 @@ class HelpWindow(tk.Toplevel):
 
         content = [
             ("JAK TO DZIAŁA?\n", 'h1'),
-            ("Aplikacja Lektor działa w dwóch wątkach: jeden wykonuje zrzuty ekranu, drugi przetwarza tekst (OCR) i dopasowuje go do dialogów.\n", 'normal'),
+            ("Aplikacja Lektor działa w dwóch wątkach: jeden wykonuje zrzuty ekranu, drugi przetwarza tekst (OCR) i dopasowuje go do dialogów.\n",
+             'normal'),
 
             ("STRUKTURA LEKTORA\n", 'h1'),
             ("Wskaż katalog zawierający pliki lektora. Wymagana struktura:\n", 'normal'),
@@ -355,12 +358,15 @@ class LektorApp:
         ttk.Label(footer, text=f"Wersja: {APP_VERSION}", font=("Arial", 8)).pack(side=tk.RIGHT)
 
     def auto_detect_resolution(self):
+        """
+        Wykrywa aktualną rozdzielczość ekranu i ustawia ją w GUI.
+        Usunięto powiadomienie (messagebox) dla cichego startu.
+        """
         w = self.root.winfo_screenwidth()
         h = self.root.winfo_screenheight()
         res_str = f"{w}x{h}"
         self.var_resolution.set(res_str)
         self.config_mgr.update_setting('last_resolution_key', res_str)
-        messagebox.showinfo("Auto Detect", f"Wykryto rozdzielczość ekranu: {res_str}")
 
     def _load_initial_state(self, autostart_path):
         self._update_preset_list()
@@ -382,7 +388,9 @@ class LektorApp:
 
         self.var_regex_mode.set(self.config_mgr.get('last_regex_mode', "Standard (Imię: Dialog)"))
         self.var_custom_regex.set(self.config_mgr.get('last_custom_regex', ""))
-        self.var_resolution.set(self.config_mgr.get('last_resolution_key', "1920x1080"))
+
+        self.auto_detect_resolution()
+
         self.on_regex_changed()
 
     def _update_preset_list(self):
