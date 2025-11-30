@@ -36,10 +36,11 @@ class ReaderThread(threading.Thread):
         self.last_matched_idx = -1
         self.area3_expiry_time = 0.0
 
-        self.ocr_scale = app_settings.get('ocr_scale_factor', 1.0)
+        # Wartości domyślne, nadpisane w run()
+        self.ocr_scale = 1.0
+        self.subtitle_mode = 'Full Lines'
         self.ocr_grayscale = app_settings.get('ocr_grayscale', False)
         self.ocr_contrast = app_settings.get('ocr_contrast', False)
-        self.subtitle_mode = app_settings.get('subtitle_mode', 'Full Lines')
 
         self.combined_regex = ""
 
@@ -89,16 +90,20 @@ class ReaderThread(threading.Thread):
         preset = ConfigManager.load_preset(self.config_path)
         if not preset: return
 
+        # Pobranie ustawień z presetu
+        self.ocr_scale = preset.get('ocr_scale_factor', 1.0)
+        self.subtitle_mode = preset.get('subtitle_mode', 'Full Lines')
+        interval = preset.get('capture_interval', 0.5)
+
         raw_subtitles = ConfigManager.load_text_lines(preset.get('text_file_path'))
-        if not raw_subtitles: return
+        if not raw_subtitles:
+            print("Błąd: Nie znaleziono napisów.")
+            return
 
-        print(f"Przetwarzanie {len(raw_subtitles)} linii napisów... (może zająć chwilę)")
-        t_pre = time.time()
+        print(
+            f"Przetwarzanie {len(raw_subtitles)} linii napisów... Mode: {self.subtitle_mode}, Scale: {self.ocr_scale}")
 
-        # ZMIANA: optimized_subs zawiera teraz (lista, mapa)
         precomputed_data = precompute_subtitles(raw_subtitles)
-
-        print(f"Przetworzono napisy w {time.time() - t_pre:.2f}s.")
 
         self.combined_regex = self._prepare_regex(preset.get('names_file_path'))
 
@@ -119,9 +124,8 @@ class ReaderThread(threading.Thread):
         }
 
         audio_dir = preset.get('audio_dir', '')
-        interval = preset.get('CAPTURE_INTERVAL', 0.3)
 
-        print(f"Start wątku czytającego. Obszar całkowity: {unified_area}")
+        print(f"Start wątku czytającego. Obszar: {unified_area}, Interval: {interval}s")
 
         while not self.stop_event.is_set():
             loop_start = time.monotonic()
@@ -148,14 +152,11 @@ class ReaderThread(threading.Thread):
                 t1 = time.perf_counter()
                 processed = preprocess_image(crop, self.ocr_scale, self.ocr_grayscale, self.ocr_contrast)
 
-                # auto_remove_names jest używane w ocr.py, ale matcher też ma swoją logikę
                 text = recognize_text(processed, self.combined_regex, self.auto_remove_names)
 
                 t_ocr = (time.perf_counter() - t1) * 1000
 
                 if not text: continue
-
-                # Szybkie sprawdzenie długości przed wejściem w logikę (optymalizacja)
                 if len(text) < 2: continue
 
                 if text in self.last_ocr_texts: continue
@@ -163,7 +164,6 @@ class ReaderThread(threading.Thread):
 
                 t2 = time.perf_counter()
 
-                # ZMIANA: Przekazujemy precomputed_data (krotka)
                 match = find_best_match(text, precomputed_data, self.subtitle_mode, last_index=self.last_matched_idx)
 
                 t_match = (time.perf_counter() - t2) * 1000

@@ -1,6 +1,6 @@
 @echo off
-set APP_NAME=GameReader
-set ENTRY_FILE=game_reader_gui.py
+set APP_NAME=Lektor
+set ENTRY_FILE=lektor.py
 set BUILD_DIR=build_win
 set ICON_FILE=app_icon.ico
 

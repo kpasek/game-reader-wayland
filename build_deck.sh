@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -e
 
-APP_NAME="reader_deck"
-ENTRY_FILE="game_reader_gui.py"
+APP_NAME="lektor"
+ENTRY_FILE="lektor.py"
 BUILD_DIR="build_deck"
 
 source .venv_deck/bin/activate

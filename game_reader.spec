@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['game_reader_gui.py'],
+    ['lektor.py'],
     pathex=[],
     binaries=[],
     datas=[],

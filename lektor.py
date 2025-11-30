@@ -48,7 +48,7 @@ stop_event = threading.Event()
 audio_queue = queue.Queue()
 log_queue = queue.Queue()
 
-# --- KONFIGURACJA STANDARDU (4K) ---
+APP_VERSION = "v0.7.0"
 STANDARD_WIDTH = 3840
 STANDARD_HEIGHT = 2160
 
@@ -59,46 +59,34 @@ class HelpWindow(tk.Toplevel):
         self.title("Pomoc i Instrukcja")
         self.geometry("600x520")
 
-        # Używamy fontu systemowego dla lepszej czytelności
         default_font = font.nametofont("TkDefaultFont")
         base_font_family = default_font.actual()["family"]
 
         txt = scrolledtext.ScrolledText(self, wrap=tk.WORD, padx=15, pady=15, font=(base_font_family, 10))
         txt.pack(fill=tk.BOTH, expand=True)
 
-        # Konfiguracja stylów (tagów)
-        # spacing1 - odstęp nad, spacing3 - odstęp pod akapitem
         txt.tag_config('h1', font=(base_font_family, 12, 'bold'), spacing1=15, spacing3=5, foreground="#222222")
         txt.tag_config('bold', font=(base_font_family, 10, 'bold'))
-        txt.tag_config('normal', spacing3=2)  # Lekki odstęp pod każdą linią tekstu
+        txt.tag_config('normal', spacing3=2)
 
-        # Budowanie treści - jawne \n na końcu linii jest kluczowe
         content = [
             ("JAK TO DZIAŁA?\n", 'h1'),
-            ("Aplikacja wykonuje zrzuty ekranu w zdefiniowanych obszarach, rozpoznaje tekst (OCR) i porównuje go z plikiem napisów z gry. Gdy znajdzie dopasowanie, odtwarza odpowiedni plik audio.\n",
+            ("Aplikacja wykonuje zrzuty ekranu w zdefiniowanych obszarach, rozpoznaje tekst (OCR) i porównuje go z plikiem napisów. Gdy znajdzie dopasowanie, odtwarza odpowiedni plik audio.\n",
              'normal'),
 
             ("SKRÓTY KLAWISZOWE (Globalne)\n", 'h1'),
             ("Ctrl + F5", 'bold'), (" - Start / Stop czytania\n", 'normal'),
             ("Ctrl + F6", 'bold'), (" - Aktywacja Obszaru 3 (Adnotacje) na 2 sekundy.\n", 'normal'),
-            ("Używane do czytania listów/książek w grze, gdy nie chcemy, aby OCR działał tam ciągle.\n", 'normal'),
 
-            ("KONFIGURACJA OBSZARÓW\n", 'h1'),
-            ("W menu 'Obszary ekranu' możesz zdefiniować do 3 stref:\n", 'normal'),
-            ("• Obszar 1 i 2: ", 'bold'), ("Skanowane ciągle (np. góra i dół ekranu dla dialogów).\n", 'normal'),
-            ("• Obszar 3: ", 'bold'), ("Skanowany TYLKO po wciśnięciu skrótu (Ctrl+F6).\n", 'normal'),
+            ("STRUKTURA LEKTORA\n", 'h1'),
+            ("Wskaż katalog zawierający pliki lektora. Wymagana struktura:\n", 'normal'),
+            ("- lektor.json (konfiguracja)\n", 'normal'),
+            ("- subtitles.txt (napisy)\n", 'normal'),
+            ("- audio/ (katalog z plikami .ogg)\n", 'normal'),
 
             ("FILTROWANIE TEKSTU\n", 'h1'),
             ("• Automatyczne usuwanie imion: ", 'bold'),
-            ("Jeśli gra wyświetla format 'Geralt: Cześć', opcja ta wytnie imię, zostawiając tylko 'Cześć'.\n",
-             'normal'),
-            ("• Regex: ", 'bold'),
-            ("Pozwala na zaawansowane wycinanie fragmentów tekstu przed dopasowaniem.\n", 'normal'),
-
-            ("PORADY\n", 'h1'),
-            ("- Jeśli gra ma niestandardową czcionkę, upewnij się, że obszar obejmuje tylko tekst.\n", 'normal'),
-            ("- Upewnij się, że w tle nie ma innych okien zasłaniających grę (gra musi być widoczna na ekranie).\n",
-             'normal')
+            ("Jeśli gra wyświetla format 'Geralt: Cześć', opcja ta wytnie imię.\n", 'normal'),
         ]
 
         for text, tag in content:
@@ -107,12 +95,11 @@ class HelpWindow(tk.Toplevel):
         txt.config(state=tk.DISABLED)
 
 
-class GameReaderApp:
+class LektorApp:
     def __init__(self, root: tk.Tk, autostart_preset: Optional[str], game_cmd: list):
         self.root = root
-        self.root.title("Game Reader")
-        # Zmniejszony rozmiar okna
-        self.root.geometry("700x500")
+        self.root.title(f"Lektor {APP_VERSION}")
+        self.root.geometry("750x650")
 
         self.config_mgr = ConfigManager()
         self.game_cmd = game_cmd
@@ -126,20 +113,26 @@ class GameReaderApp:
         self.is_running = False
 
         # Zmienne UI
-        self.var_preset = tk.StringVar()
-        self.var_audio_dir = tk.StringVar()
-        self.var_subs_file = tk.StringVar()
-        self.var_names_file = tk.StringVar()
+        self.var_preset_display = tk.StringVar()
+        self.full_preset_paths = []
 
+        self.var_preset_full_path = tk.StringVar()
+
+        # Opcje Lektora (zapisywane w lektor.json)
+        self.var_subtitle_mode = tk.StringVar(value="Full Lines")
+        self.var_ocr_scale = tk.DoubleVar(value=1.0)
+        self.var_capture_interval = tk.DoubleVar(value=0.5)
+        self.var_auto_names = tk.BooleanVar(value=True)
+
+        # Filtry i Regex
         self.var_regex_mode = tk.StringVar()
         self.var_custom_regex = tk.StringVar()
-        self.var_auto_names = tk.BooleanVar(value=True)  # Nowy checkbox
-        self.var_resolution = tk.StringVar()
 
+        # Audio i Inne
+        self.var_resolution = tk.StringVar()
         self.var_speed = tk.DoubleVar(value=1.15)
         self.var_volume = tk.DoubleVar(value=1.0)
 
-        # Mapy
         self.regex_map = {
             "Brak": r"",
             "Standard (Imię: Dialog)": r"^(?i)({NAMES})\s*[:：\-; ]*",
@@ -192,14 +185,13 @@ class GameReaderApp:
         menubar = tk.Menu(self.root)
 
         file_menu = tk.Menu(menubar, tearoff=0)
-        file_menu.add_command(label="Ustawienia zaawansowane", command=self.open_settings)
+        file_menu.add_command(label="Ustawienia OCR (Szarość/Kontrast)", command=self.open_settings)
         file_menu.add_separator()
         file_menu.add_command(label="Wyjdź", command=self.on_close)
         menubar.add_cascade(label="Plik", menu=file_menu)
 
-        # Zmiana nazwy Profil -> Lektor
         preset_menu = tk.Menu(menubar, tearoff=0)
-        preset_menu.add_command(label="Wczytaj inny profil...", command=self.browse_preset)
+        preset_menu.add_command(label="Wybierz katalog z lektorem...", command=self.browse_lector_folder)
 
         area_menu = tk.Menu(preset_menu, tearoff=0)
         for i in range(3):
@@ -211,9 +203,12 @@ class GameReaderApp:
         preset_menu.add_cascade(label="Obszary ekranu", menu=area_menu)
 
         preset_menu.add_separator()
-        preset_menu.add_command(label="Zmień folder audio", command=lambda: self.change_path('audio_dir'))
-        preset_menu.add_command(label="Zmień plik napisów", command=lambda: self.change_path('text_file_path'))
-        preset_menu.add_command(label="Zmień plik imion", command=lambda: self.change_path('names_file_path'))
+        preset_menu.add_command(label="Zmień folder audio (Zaawansowane)",
+                                command=lambda: self.change_path('audio_dir'))
+        preset_menu.add_command(label="Zmień plik napisów (Zaawansowane)",
+                                command=lambda: self.change_path('text_file_path'))
+        preset_menu.add_command(label="Zmień plik imion (Zaawansowane)",
+                                command=lambda: self.change_path('names_file_path'))
         menubar.add_cascade(label="Lektor", menu=preset_menu)
 
         tools_menu = tk.Menu(menubar, tearoff=0)
@@ -230,12 +225,48 @@ class GameReaderApp:
         panel = ttk.Frame(self.root, padding=10)
         panel.pack(fill=tk.BOTH, expand=True)
 
-        ttk.Label(panel, text="Aktywny profil lektora:").pack(anchor=tk.W)
-        self.cb_preset = ttk.Combobox(panel, textvariable=self.var_preset, state="readonly", width=60)
+        # Wybór lektora
+        ttk.Label(panel, text="Aktywny lektor (Katalog):").pack(anchor=tk.W)
+        self.cb_preset = ttk.Combobox(panel, textvariable=self.var_preset_display, state="readonly", width=60)
         self.cb_preset.pack(fill=tk.X, pady=5)
-        self.cb_preset.bind("<<ComboboxSelected>>", self.on_preset_changed)
+        self.cb_preset.bind("<<ComboboxSelected>>", self.on_preset_selected_from_combo)
 
-        # Regex i Filtry
+        # --- KONFIGURACJA LEKTORA (Grupa) ---
+        grp_lector_cfg = ttk.LabelFrame(panel, text="Konfiguracja Lektora", padding=10)
+        grp_lector_cfg.pack(fill=tk.X, pady=10)
+
+        # Rząd 1: Tryb dopasowania i Skala OCR
+        row1 = ttk.Frame(grp_lector_cfg)
+        row1.pack(fill=tk.X, pady=5)
+
+        ttk.Label(row1, text="Tryb dopasowania:").pack(side=tk.LEFT)
+        modes = ["Full Lines", "Partial Lines"]
+        cb_mode = ttk.Combobox(row1, textvariable=self.var_subtitle_mode, values=modes, state="readonly", width=15)
+        cb_mode.pack(side=tk.LEFT, padx=(5, 20))
+        cb_mode.bind("<<ComboboxSelected>>",
+                     lambda e: self._save_preset_val("subtitle_mode", self.var_subtitle_mode.get()))
+
+        ttk.Label(row1, text="Skala OCR:").pack(side=tk.LEFT)
+        scale_vals = [round(x * 0.1, 1) for x in range(10, 1, -1)]
+        cb_scale = ttk.Combobox(row1, textvariable=self.var_ocr_scale, values=scale_vals, state="readonly", width=5)
+        cb_scale.pack(side=tk.LEFT, padx=5)
+        cb_scale.bind("<<ComboboxSelected>>",
+                      lambda e: self._save_preset_val("ocr_scale_factor", float(self.var_ocr_scale.get())))
+        ttk.Label(row1, text="(mniejsza = szybciej)").pack(side=tk.LEFT)
+
+        # Rząd 2: Częstotliwość skanowania
+        row2 = ttk.Frame(grp_lector_cfg)
+        row2.pack(fill=tk.X, pady=5)
+        ttk.Label(row2, text="Częstotliwość skanowania:").pack(side=tk.LEFT)
+        s_interval = ttk.Scale(row2, from_=0.3, to=1.0, variable=self.var_capture_interval,
+                               command=lambda v: self.lbl_interval.config(text=f"{float(v):.2f}s"))
+        s_interval.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=10)
+        s_interval.bind("<ButtonRelease-1>",
+                        lambda e: self._save_preset_val("capture_interval", round(self.var_capture_interval.get(), 2)))
+        self.lbl_interval = ttk.Label(row2, text="0.50s", width=6)
+        self.lbl_interval.pack(side=tk.LEFT)
+
+        # --- FILTRACJA TEKSTU ---
         grp_regex = ttk.LabelFrame(panel, text="Filtracja tekstu", padding=5)
         grp_regex.pack(fill=tk.X, pady=10)
 
@@ -253,7 +284,6 @@ class GameReaderApp:
         self.ent_regex.bind("<FocusOut>",
                             lambda e: self.config_mgr.update_setting('last_custom_regex', self.var_custom_regex.get()))
 
-        # Nowy Checkbox
         f_opts = ttk.Frame(grp_regex)
         f_opts.pack(fill=tk.X, pady=(5, 0))
         chk_names = ttk.Checkbutton(f_opts, text="Automatyczne usuwanie imion (np. 'Geralt: Witaj')",
@@ -263,9 +293,11 @@ class GameReaderApp:
         chk_names.pack(side=tk.LEFT)
 
         # Rozdzielczość
-        ttk.Label(panel, text="Rozdzielczość gry (dla skalowania obszarów):").pack(anchor=tk.W, pady=(10, 0))
-        self.cb_res = ttk.Combobox(panel, textvariable=self.var_resolution, values=self.resolutions)
-        self.cb_res.pack(fill=tk.X, pady=5)
+        f_res = ttk.Frame(panel)
+        f_res.pack(fill=tk.X, pady=5)
+        ttk.Label(f_res, text="Rozdzielczość gry:").pack(side=tk.LEFT)
+        self.cb_res = ttk.Combobox(f_res, textvariable=self.var_resolution, values=self.resolutions)
+        self.cb_res.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         self.cb_res.bind("<FocusOut>",
                          lambda e: self.config_mgr.update_setting('last_resolution_key', self.var_resolution.get()))
 
@@ -303,14 +335,28 @@ class GameReaderApp:
         self.btn_stop = ttk.Button(frm_btn, text="STOP (Ctrl+F5)", command=self.stop_reading, state="disabled")
         self.btn_stop.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
-    def _load_initial_state(self, autostart_path):
-        recents = self.config_mgr.get('recent_presets', [])
-        self.cb_preset['values'] = recents
+        # Stopka
+        footer = ttk.Frame(self.root)
+        footer.pack(side=tk.BOTTOM, fill=tk.X, padx=5, pady=2)
+        ttk.Label(footer, text=f"Wersja: {APP_VERSION}", font=("Arial", 8)).pack(side=tk.RIGHT)
 
-        initial_preset = autostart_path if autostart_path else (recents[0] if recents else "")
-        if initial_preset and os.path.exists(initial_preset):
-            self.var_preset.set(initial_preset)
-            self.on_preset_changed()
+    def _load_initial_state(self, autostart_path):
+        self._update_preset_list()
+
+        initial_path = autostart_path
+        if not initial_path and self.full_preset_paths:
+            initial_path = self.full_preset_paths[0]
+
+        if initial_path and os.path.exists(initial_path):
+            self.var_preset_full_path.set(initial_path)
+            # Ustawienie display value
+            try:
+                dirname = os.path.basename(os.path.dirname(initial_path))
+                self.var_preset_display.set(dirname)
+            except:
+                pass
+
+            self.on_preset_loaded()
             if autostart_path:
                 self.root.after(500, self.start_reading)
 
@@ -319,19 +365,47 @@ class GameReaderApp:
         self.var_resolution.set(self.config_mgr.get('last_resolution_key', "1920x1080"))
         self.on_regex_changed()
 
-    def on_preset_changed(self, event=None):
-        path = self.var_preset.get()
+    def _update_preset_list(self):
+        recents = self.config_mgr.get('recent_presets', [])
+        # Filtrujemy tylko istniejące
+        recents = [p for p in recents if os.path.exists(p)]
+        self.full_preset_paths = recents
+
+        # Tworzymy ładne nazwy (tylko katalog)
+        display_names = []
+        for p in recents:
+            d_name = os.path.basename(os.path.dirname(p))
+            if not d_name: d_name = p
+            display_names.append(d_name)
+
+        self.cb_preset['values'] = display_names
+
+    def on_preset_selected_from_combo(self, event=None):
+        idx = self.cb_preset.current()
+        if idx >= 0 and idx < len(self.full_preset_paths):
+            path = self.full_preset_paths[idx]
+            self.var_preset_full_path.set(path)
+            self.on_preset_loaded()
+
+    def on_preset_loaded(self):
+        path = self.var_preset_full_path.get()
         if not path or not os.path.exists(path): return
 
         data = self.config_mgr.load_preset(path)
+
         self.var_speed.set(data.get("audio_speed", 1.15))
         self.lbl_speed.config(text=f"{self.var_speed.get():.2f}x")
 
         self.var_volume.set(data.get("audio_volume", 1.0))
         self.lbl_vol.config(text=f"{self.var_volume.get():.2f}")
 
-        # Wczytanie stanu checkboxa (domyślnie True)
         self.var_auto_names.set(data.get("auto_remove_names", True))
+
+        # Nowe pola
+        self.var_subtitle_mode.set(data.get("subtitle_mode", "Full Lines"))
+        self.var_ocr_scale.set(data.get("ocr_scale_factor", 1.0))
+        self.var_capture_interval.set(data.get("capture_interval", 0.5))
+        self.lbl_interval.config(text=f"{self.var_capture_interval.get():.2f}s")
 
         if "regex_mode_name" in data:
             self.var_regex_mode.set(data["regex_mode_name"])
@@ -353,7 +427,7 @@ class GameReaderApp:
             self._save_preset_val("regex_mode_name", mode)
 
     def _save_preset_val(self, key, val):
-        path = self.var_preset.get()
+        path = self.var_preset_full_path.get()
         if path and os.path.exists(path):
             data = self.config_mgr.load_preset(path)
             data[key] = val
@@ -361,24 +435,35 @@ class GameReaderApp:
 
     # --- AKCJE ---
 
-    def browse_preset(self):
-        path = filedialog.askopenfilename(filetypes=[("JSON", "*.json")])
-        if path:
-            self.config_mgr.add_recent_preset(path)
-            self.cb_preset['values'] = self.config_mgr.get('recent_presets')
-            self.var_preset.set(path)
-            self.on_preset_changed()
+    def browse_lector_folder(self):
+        directory = filedialog.askdirectory(title="Wybierz katalog z lektorem")
+        if not directory:
+            return
+
+        # Sprawdź lub utwórz lektor.json
+        preset_path = self.config_mgr.ensure_preset_exists(directory)
+
+        self.config_mgr.add_recent_preset(preset_path)
+        self._update_preset_list()
+
+        # Ustawienie wyboru
+        self.var_preset_full_path.set(preset_path)
+        self.var_preset_display.set(os.path.basename(directory))
+        self.on_preset_loaded()
 
     def change_path(self, key):
-        preset_path = self.var_preset.get()
-        if not preset_path: return
+        preset_path = self.var_preset_full_path.get()
+        if not preset_path: return messagebox.showerror("Błąd", "Najpierw wybierz lektora.")
+
+        base_dir = os.path.dirname(preset_path)
 
         if key == 'audio_dir':
-            new_path = filedialog.askdirectory()
+            new_path = filedialog.askdirectory(initialdir=base_dir)
         else:
-            new_path = filedialog.askopenfilename(filetypes=[("Text", "*.txt")])
+            new_path = filedialog.askopenfilename(initialdir=base_dir, filetypes=[("Text", "*.txt")])
 
         if new_path:
+            # config_mgr.save_preset automatycznie zamieni to na relative path
             self._save_preset_val(key, new_path)
             messagebox.showinfo("Sukces", "Zaktualizowano ścieżkę w profilu.")
 
@@ -391,7 +476,7 @@ class GameReaderApp:
         }
 
     def set_area(self, idx):
-        preset_path = self.var_preset.get()
+        preset_path = self.var_preset_full_path.get()
         if not preset_path: return messagebox.showerror("Błąd", "Wybierz profil.")
 
         self.root.withdraw()
@@ -444,7 +529,7 @@ class GameReaderApp:
             self.config_mgr.save_preset(preset_path, data)
 
     def clear_area(self, idx):
-        preset_path = self.var_preset.get()
+        preset_path = self.var_preset_full_path.get()
         if not preset_path: return
         data = self.config_mgr.load_preset(preset_path)
         mons = data.get('monitor', [])
@@ -475,16 +560,16 @@ class GameReaderApp:
     # --- START / STOP ---
 
     def start_reading(self):
-        path = self.var_preset.get()
+        path = self.var_preset_full_path.get()
         if not path or not os.path.exists(path):
             return messagebox.showerror("Błąd", "Brak poprawnego profilu.")
 
         self.config_mgr.add_recent_preset(path)
+        self._update_preset_list()
 
         mode = self.var_regex_mode.get()
         pattern = self.var_custom_regex.get() if mode == "Własny (Regex)" else self.regex_map.get(mode, "")
 
-        # Pobieramy stan checkboxa
         auto_remove_names = self.var_auto_names.get()
 
         res_str = self.var_resolution.get()
@@ -508,7 +593,7 @@ class GameReaderApp:
         self.reader_thread = ReaderThread(
             path, pattern, self.config_mgr.settings, stop_event, audio_queue,
             target_resolution=target_res, log_queue=log_queue,
-            auto_remove_names=auto_remove_names  # Przekazanie flagi
+            auto_remove_names=auto_remove_names
         )
 
         self.player_thread.start()
@@ -533,6 +618,7 @@ class GameReaderApp:
         state = "disabled" if running else "normal"
         self.btn_start.config(state=state)
         self.btn_stop.config(state="normal" if running else "disabled")
+        # Combos disabled
         self.cb_preset.config(state="disabled" if running else "readonly")
 
     def on_close(self):
@@ -548,7 +634,7 @@ class GameReaderApp:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--preset', type=str, help="Ścieżka do profilu startowego")
+    parser.add_argument('--preset', type=str, help="Ścieżka do pliku lektor.json")
     parser.add_argument('game_command', nargs=argparse.REMAINDER, help="Komenda gry")
     args = parser.parse_args()
 
@@ -556,7 +642,7 @@ def main():
     if cmd and cmd[0] == '--': cmd.pop(0)
 
     root = tk.Tk()
-    app = GameReaderApp(root, args.preset, cmd)
+    app = LektorApp(root, args.preset, cmd)
     root.mainloop()
 
 

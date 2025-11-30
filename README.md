@@ -60,7 +60,7 @@ Ta metoda tworzy **jeden, duży plik wykonywalny**, który zawiera Pythona, wszy
 
 2.  W głównym katalogu projektu uruchom budowanie:
     ```bash
-    pyinstaller --onefile --windowed --name=game_reader game_reader_gui.py
+    pyinstaller --onefile --windowed --name=game_reader lektor.py
     ```
     * `--onefile`: Tworzy jeden plik.
     * `--windowed`: Ukrywa czarne okno konsoli podczas uruchamiania GUI.

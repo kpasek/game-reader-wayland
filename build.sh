@@ -5,8 +5,8 @@ set -e
 # Konfiguracja builda Nuitka
 # -------------------------
 
-APP_NAME="reader"
-ENTRY_FILE="game_reader_gui.py"
+APP_NAME="lektor"
+ENTRY_FILE="lektor.py"
 BUILD_DIR="build"
 
 # Opcjonalnie: aktywuj wirtualne środowisko, jeśli masz

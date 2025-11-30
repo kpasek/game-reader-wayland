@@ -28,4 +28,4 @@ dependencies = [
 
 [project.scripts]
 # To tworzy polecenie "game_reader" w systemie
-game_reader = "game_reader_gui:main"
+game_reader = "lektor:main"
