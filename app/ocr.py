@@ -16,7 +16,7 @@ from app.text_processing import smart_remove_name
 # Konfiguracja języka OCR
 OCR_LANGUAGE = 'pol'
 
-# Zdefiniowanie znaków do whitelist.
+# Znakowy whitelist (bezpieczny dla shlex/cmd)
 WHITELIST_CHARS = "aąbcćdeęfghijklłmnńoóprsśtuwyzźżAĄBCĆDEĘFGHIJKLŁMNŃOÓPRSŚTUWYZŹŻ0123456789.,:;-?!()[] "
 
 # --- TWORZENIE PLIKU KONFIGURACYJNEGO TESSERACTA ---
@@ -25,14 +25,13 @@ HAS_CONFIG_FILE = False
 
 try:
     with open(CONFIG_FILE_PATH, "w", encoding="utf-8") as f:
-        # Format pliku config Tesseracta: klucz wartość
         f.write(f"tessedit_char_whitelist {WHITELIST_CHARS}")
     HAS_CONFIG_FILE = True
 except Exception as e:
     print(f"Ostrzeżenie: Nie udało się utworzyć pliku config dla OCR: {e}", file=sys.stderr)
 # ---------------------------------------------------
 
-# --- KONFIGURACJA ŚCIEŻEK WINDOWS ---
+# --- KONFIGURACJA WINDOWS ---
 if platform.system() == "Windows":
     path_tesseract = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
     path_tessdata = r"C:\Program Files\Tesseract-OCR\tessdata"
@@ -43,7 +42,7 @@ if platform.system() == "Windows":
             os.environ['TESSDATA_PREFIX'] = path_tessdata
 
 
-# ------------------------------------
+# ----------------------------
 
 
 def preprocess_image(image: Image.Image, scale: float = 1.0,
@@ -68,11 +67,10 @@ def preprocess_image(image: Image.Image, scale: float = 1.0,
         return image
 
 
-def is_image_empty(image: Image.Image, threshold: float = 35.0) -> bool:
+def is_image_empty(image: Image.Image, threshold: float) -> bool:
     """
-    Sprawdza, czy obraz ma wystarczającą wariancję (czy cokolwiek na nim jest).
-    Zwiększony próg pozwala agresywniej pomijać tło gry (trawę, ściany),
-    które Tesseract próbuje czytać jako krzaki "„_--^".
+    Sprawdza, czy obraz ma wystarczającą wariancję (tekst vs tło).
+    :param threshold: Próg odchylenia standardowego.
     """
     try:
         if image.mode != 'L':
@@ -81,22 +79,21 @@ def is_image_empty(image: Image.Image, threshold: float = 35.0) -> bool:
             stat_img = image
 
         stat = ImageStat.Stat(stat_img)
-        # Odchylenie standardowe pikseli.
         return stat.stddev[0] < threshold
     except Exception:
         return False
 
 
-def recognize_text(image: Image.Image, regex_pattern: str = "", auto_remove_names: bool = True) -> str:
+def recognize_text(image: Image.Image, regex_pattern: str = "",
+                   auto_remove_names: bool = True, empty_threshold: float = 0.15) -> str:
     """
     Główna funkcja OCR.
-    Używa pliku konfiguracyjnego do whitelist, co jest bezpieczne i szybkie.
+    :param empty_threshold: Próg detekcji pustego obrazu. 0.0 wyłącza sprawdzanie.
     """
-    # 1. Optymalizacja: Pomiń puste klatki
-    if is_image_empty(image):
-        return ""
-
-    text = ""
+    # 1. Optymalizacja: Pomiń puste klatki (tylko jeśli threshold > 0)
+    if empty_threshold > 0.001:
+        if is_image_empty(image, empty_threshold):
+            return ""
 
     # 2. Wykonanie OCR
     try:
@@ -106,7 +103,8 @@ def recognize_text(image: Image.Image, regex_pattern: str = "", auto_remove_name
         else:
             text = pytesseract.image_to_string(image, lang=OCR_LANGUAGE, config='--psm 6')
 
-    except Exception as e:
+    except Exception:
+        # Retry bez configu
         try:
             text = pytesseract.image_to_string(image, lang=OCR_LANGUAGE, config='--psm 6')
         except Exception:
