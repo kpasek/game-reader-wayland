@@ -3,9 +3,11 @@ import re
 import os
 import platform
 import tempfile
+from typing import Optional, Tuple
 
 try:
     import pytesseract
+    from pytesseract import Output
     from PIL import Image, ImageOps, ImageEnhance, ImageStat
 except ImportError:
     print("Brak biblioteki Pillow lub pytesseract.", file=sys.stderr)
@@ -82,6 +84,38 @@ def is_image_empty(image: Image.Image, threshold: float) -> bool:
         return stat.stddev[0] < threshold
     except Exception:
         return False
+
+
+def get_text_bounds(image: Image.Image) -> Optional[Tuple[int, int, int, int]]:
+    """
+    Używa pytesseract.image_to_data, aby znaleźć bounding box wokół faktycznego tekstu.
+    Zwraca (left, top, right, bottom) lub None.
+    """
+    try:
+        # Używamy Output.DICT, aby łatwo przetwarzać dane
+        data = pytesseract.image_to_data(image, lang=OCR_LANGUAGE, output_type=Output.DICT)
+
+        n_boxes = len(data['text'])
+        min_l, min_t = image.width, image.height
+        max_r, max_b = 0, 0
+        found = False
+
+        for i in range(n_boxes):
+            # Ignoruj puste teksty lub bardzo niską pewność (szum)
+            if int(data['conf'][i]) > 10 and data['text'][i].strip():
+                (x, y, w, h) = (data['left'][i], data['top'][i], data['width'][i], data['height'][i])
+                min_l = min(min_l, x)
+                min_t = min(min_t, y)
+                max_r = max(max_r, x + w)
+                max_b = max(max_b, y + h)
+                found = True
+
+        if found:
+            return (min_l, min_t, max_r, max_b)
+        return None
+
+    except Exception:
+        return None
 
 
 def recognize_text(image: Image.Image, regex_pattern: str = "",

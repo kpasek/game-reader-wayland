@@ -25,7 +25,10 @@ DEFAULT_PRESET_CONTENT = {
     "capture_interval": 0.5,
     "audio_speed": 1.15,
     "audio_volume": 1.0,
-    "auto_remove_names": True
+    "auto_remove_names": True,
+    "rerun_threshold": 50,
+    "text_alignment": "Center",
+    "save_logs": False
 }
 
 

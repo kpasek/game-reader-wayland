@@ -6,9 +6,10 @@ import queue
 from collections import deque
 from datetime import datetime
 from typing import Optional, Tuple, Dict, Any, List
+from PIL import Image
 
 from app.capture import capture_region
-from app.ocr import preprocess_image, recognize_text
+from app.ocr import preprocess_image, recognize_text, get_text_bounds
 from app.matcher import find_best_match, precompute_subtitles
 from app.config_manager import ConfigManager
 
@@ -76,6 +77,10 @@ class ReaderThread(threading.Thread):
         # Cache ustawień
         self.ocr_scale = 1.0
         self.empty_threshold = 0.15
+        self.rerun_threshold = 50
+        self.text_alignment = "Center"
+        self.save_logs = False
+
         self.subtitle_mode = 'Full Lines'
         self.ocr_grayscale = app_settings.get('ocr_grayscale', False)
         self.ocr_contrast = app_settings.get('ocr_contrast', False)
@@ -109,12 +114,41 @@ class ReaderThread(threading.Thread):
         except:
             return monitors
 
+    def _smart_retry_ocr(self, image: Image.Image) -> str:
+        """
+        Próbuje znaleźć obszar tekstu, przyciąć go i ponownie odczytać.
+        """
+        bounds = get_text_bounds(image)
+        if not bounds:
+            return ""
+
+        l, t, r, b = bounds
+        # Margines 10px
+        l = max(0, l - 10)
+        t = max(0, t - 10)
+        r = min(image.width, r + 10)
+        b = min(image.height, b + 10)
+
+        # Jeśli przycięcie jest niewiele mniejsze od oryginału, ignoruj
+        if (r - l) > image.width * 0.9 and (b - t) > image.height * 0.9:
+            return ""
+
+        crop = image.crop((l, t, r, b))
+        # Powiększ fragment 2x, aby ułatwić OCR
+        crop = crop.resize((crop.width * 2, crop.height * 2), Image.BICUBIC)
+
+        return recognize_text(crop, self.combined_regex, self.auto_remove_names, empty_threshold=0.0)
+
     def run(self):
         preset = ConfigManager.load_preset(self.config_path)
         if not preset: return
 
         self.ocr_scale = preset.get('ocr_scale_factor', 1.0)
         self.empty_threshold = preset.get('empty_image_threshold', 0.15)
+        self.rerun_threshold = preset.get('rerun_threshold', 50)
+        self.text_alignment = preset.get('text_alignment', "Center")
+        self.save_logs = preset.get('save_logs', False)
+
         self.subtitle_mode = preset.get('subtitle_mode', 'Full Lines')
         interval = preset.get('capture_interval', 0.5)
 
@@ -140,7 +174,12 @@ class ReaderThread(threading.Thread):
         capture_worker = CaptureWorker(self.stop_event, self.img_queue, unified_area, interval)
         capture_worker.start()
 
-        print(f"ReaderThread started. Scale: {self.ocr_scale}, EmptyThresh: {self.empty_threshold}")
+        # Log start
+        if self.log_queue and self.save_logs:
+            self.log_queue.put({"time": "INFO",
+                                "line_text": f"Rozpoczęto czytanie. RerunThresh={self.rerun_threshold}, Align={self.text_alignment}"})
+
+        print(f"ReaderThread started. Scale: {self.ocr_scale}, RerunThresh: {self.rerun_threshold}")
 
         while not self.stop_event.is_set():
             try:
@@ -164,8 +203,21 @@ class ReaderThread(threading.Thread):
                 t1 = time.perf_counter()
                 processed = preprocess_image(crop, self.ocr_scale, self.ocr_grayscale, self.ocr_contrast)
 
-                # Przekazanie progu z ustawień
                 text = recognize_text(processed, self.combined_regex, self.auto_remove_names, self.empty_threshold)
+
+                # --- SMART RETRY LOGIC ---
+                # Jeśli tekst jest krótki, ale nie pusty, spróbuj przyciąć do samej treści i ponowić.
+                if 0 < len(text) < self.rerun_threshold:
+                    retry_text = self._smart_retry_ocr(processed)
+                    # Jeśli ponowny odczyt dał dłuższy (lub inny sensowny) wynik, użyj go.
+                    # Prosta heurystyka: dłuższy tekst = więcej odczytanych liter.
+                    if len(retry_text) > len(text):
+                        if self.log_queue:
+                            self.log_queue.put(
+                                {"time": "DEBUG", "line_text": f"Smart Retry: '{text}' -> '{retry_text}'"})
+                        text = retry_text
+                # -------------------------
+
                 t_ocr = (time.perf_counter() - t1) * 1000
 
                 if not text:
@@ -181,11 +233,17 @@ class ReaderThread(threading.Thread):
 
                 if self.log_queue:
                     line_txt = raw_subtitles[match[0]] if match else ""
-                    self.log_queue.put({
+                    log_entry = {
                         "time": datetime.now().strftime('%H:%M:%S'),
                         "ocr": text, "match": match, "line_text": line_txt,
                         "stats": {"monitor": idx + 1, "cap_ms": t_cap, "ocr_ms": t_ocr, "match_ms": t_match}
-                    })
+                    }
+                    self.log_queue.put(log_entry)
+
+                    # Prosty zapis do pliku jeśli włączony
+                    if self.save_logs:
+                        with open("session_log.txt", "a", encoding='utf-8') as f:
+                            f.write(f"{log_entry['time']} | OCR: {text} | Match: {line_txt} \n")
 
                 if match:
                     idx_match, score = match

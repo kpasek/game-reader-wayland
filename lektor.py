@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# !/usr/bin/env python3
 import sys
 import os
 import queue
@@ -46,7 +46,7 @@ stop_event = threading.Event()
 audio_queue = queue.Queue()
 log_queue = queue.Queue()
 
-APP_VERSION = "v0.8.2"
+APP_VERSION = "v0.8.3"
 STANDARD_WIDTH = 3840
 STANDARD_HEIGHT = 2160
 
@@ -68,12 +68,11 @@ class HelpWindow(tk.Toplevel):
             ("JAK TO DZIAŁA?\n", 'h1'),
             ("Aplikacja Lektor działa w dwóch wątkach: jeden wykonuje zrzuty ekranu, drugi przetwarza tekst (OCR).\n",
              'normal'),
-            ("SKALA OCR I CZUŁOŚĆ\n", 'h1'),
-            ("Skala OCR: ", 'bold'),
-            ("Automatycznie dopasowuje się do rozdzielczości (4K -> 0.3, SteamDeck -> 0.8). Jeśli zmienisz ją ręcznie, zapamiętamy to dla tej rozdzielczości.\n",
+            ("OPTYMALIZACJA KRÓTKICH TEKSTÓW\n", 'h1'),
+            ("Jeśli tekst jest krótki (poniżej progu), aplikacja spróbuje automatycznie znaleźć jego dokładne położenie, przyciąć obraz i odczytać ponownie z większą dokładnością.\n",
              'normal'),
-            ("Czułość pustego obrazu: ", 'bold'),
-            ("Suwak określa, jak agresywnie ignorować 'puste' klatki. 0 wyłącza funkcję. Domyślnie 0.15.\n", 'normal'),
+            ("Wyrównanie tekstu:", "bold"),
+            (" Pomaga określić, gdzie spodziewać się napisów (Lewo/Środek/Prawo).\n", 'normal'),
         ]
         for text, tag in content:
             txt.insert(tk.END, text, tag)
@@ -84,7 +83,7 @@ class LektorApp:
     def __init__(self, root: tk.Tk, autostart_preset: Optional[str], game_cmd: list):
         self.root = root
         self.root.title(f"Lektor {APP_VERSION}")
-        self.root.geometry("750x780")  # Nieco wyższe okno dla nowych suwaków
+        self.root.geometry("750x850")  # Zwiększona wysokość dla nowych opcji
 
         self.config_mgr = ConfigManager()
         self.game_cmd = game_cmd
@@ -108,6 +107,11 @@ class LektorApp:
         self.var_empty_threshold = tk.DoubleVar(value=0.15)
         self.var_capture_interval = tk.DoubleVar(value=0.5)
         self.var_auto_names = tk.BooleanVar(value=True)
+
+        # Nowe opcje optymalizacji
+        self.var_rerun_threshold = tk.IntVar(value=50)
+        self.var_text_alignment = tk.StringVar(value="Center")
+        self.var_save_logs = tk.BooleanVar(value=False)
 
         # Regex
         self.var_regex_mode = tk.StringVar()
@@ -140,26 +144,13 @@ class LektorApp:
 
     # --- LOGIKA SKALI OCR ---
     def _calc_auto_scale(self, width, height):
-        """
-        Oblicza optymalną skalę OCR na podstawie wysokości ekranu.
-        800p -> 0.8
-        2160p (4K) -> 0.3
-        Liniowa interpolacja.
-        """
         if height <= 800: return 0.8
         if height >= 2160: return 0.3
-
-        # Interpolacja: y = y1 + (x - x1) * (y2 - y1) / (x2 - x1)
         ratio = (height - 800) / (2160 - 800)
         scale = 0.8 + ratio * (0.3 - 0.8)
-
-        # Zaokrąglenie do 0.05
         return round(scale * 20) / 20.0
 
     def _update_scale_for_resolution(self, res_str, force_auto=False):
-        """
-        Ustawia skalę OCR. Sprawdza czy użytkownik nie ustawił ręcznie innej skali dla tej rozdzielczości.
-        """
         try:
             w, h = map(int, res_str.split('x'))
         except:
@@ -171,7 +162,6 @@ class LektorApp:
             data = self.config_mgr.load_preset(path)
             overrides = data.get('scale_overrides', {})
 
-        # Jeśli mamy override dla tej rozdziałki, użyj go
         if not force_auto and res_str in overrides:
             new_scale = overrides[res_str]
         else:
@@ -181,11 +171,8 @@ class LektorApp:
         self.lbl_scale.config(text=f"{new_scale:.2f}")
 
     def on_manual_scale_change(self, event=None):
-        """Zapisuje ręczną zmianę skali jako override dla obecnej rozdzielczości."""
         val = round(self.var_ocr_scale.get(), 2)
         self.lbl_scale.config(text=f"{val:.2f}")
-
-        # Zapisz do konfiguracji jako override
         path = self.var_preset_full_path.get()
         res_str = self.var_resolution.get()
         if path and os.path.exists(path) and "x" in res_str:
@@ -318,6 +305,32 @@ class LektorApp:
         self.lbl_int = ttk.Label(f_int, text="0.50s")
         self.lbl_int.pack(side=tk.LEFT)
 
+        # --- OPTYMALIZACJA ---
+        grp_opt = ttk.LabelFrame(panel, text="Optymalizacja i Poprawki", padding=10)
+        grp_opt.pack(fill=tk.X, pady=10)
+
+        # Rerun Threshold
+        f_rerun = ttk.Frame(grp_opt)
+        f_rerun.pack(fill=tk.X, pady=5)
+        ttk.Label(f_rerun, text="Popraw krótkie (< znaki):").pack(side=tk.LEFT)
+        s_rerun = ttk.Scale(f_rerun, from_=0, to=150, variable=self.var_rerun_threshold,
+                            command=lambda v: self.lbl_rerun.config(text=f"{int(float(v))}"))
+        s_rerun.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        s_rerun.bind("<ButtonRelease-1>",
+                     lambda e: self._save_preset_val("rerun_threshold", self.var_rerun_threshold.get()))
+        self.lbl_rerun = ttk.Label(f_rerun, text="50", width=5)
+        self.lbl_rerun.pack(side=tk.LEFT)
+
+        # Alignment
+        f_align = ttk.Frame(grp_opt)
+        f_align.pack(fill=tk.X, pady=5)
+        ttk.Label(f_align, text="Wyrównanie tekstu:").pack(side=tk.LEFT)
+        cb_align = ttk.Combobox(f_align, textvariable=self.var_text_alignment, values=["Left", "Center", "Right"],
+                                state="readonly", width=15)
+        cb_align.pack(side=tk.LEFT, padx=5)
+        cb_align.bind("<<ComboboxSelected>>",
+                      lambda e: self._save_preset_val("text_alignment", self.var_text_alignment.get()))
+
         # --- FILTRY ---
         grp_reg = ttk.LabelFrame(panel, text="Filtracja tekstu", padding=5)
         grp_reg.pack(fill=tk.X, pady=10)
@@ -342,7 +355,6 @@ class LektorApp:
         ttk.Label(f_res, text="Rozdzielczość:").pack(side=tk.LEFT)
         self.cb_res = ttk.Combobox(f_res, textvariable=self.var_resolution, values=self.resolutions)
         self.cb_res.pack(side=tk.LEFT, padx=5)
-        # Przy zmianie rozdziałki (manualnej) przeliczamy skalę
         self.cb_res.bind("<<ComboboxSelected>>", lambda e: [
             self.config_mgr.update_setting('last_resolution_key', self.var_resolution.get()),
             self._update_scale_for_resolution(self.var_resolution.get())
@@ -353,7 +365,6 @@ class LektorApp:
         grp_aud = ttk.LabelFrame(panel, text="Kontrola Audio", padding=10)
         grp_aud.pack(fill=tk.X, pady=10)
 
-        # Speed: 0.9 - 1.3
         ttk.Label(grp_aud, text="Prędkość:").grid(row=0, column=0)
         s_spd = ttk.Scale(grp_aud, from_=0.9, to=1.3, variable=self.var_speed,
                           command=lambda v: self.lbl_spd.config(text=f"{float(v):.2f}x"))
@@ -361,13 +372,6 @@ class LektorApp:
         s_spd.bind("<ButtonRelease-1>", lambda e: self._save_preset_val("audio_speed", round(self.var_speed.get(), 2)))
         self.lbl_spd = ttk.Label(grp_aud, text="1.00x", width=5)
         self.lbl_spd.grid(row=0, column=2)
-
-        # Volume: 0.9 - 1.3 (Domyślnie można dać szerzej 0.0-1.5, ale prośba była o zmianę)
-        # Ustawimy jednak 0.0 - 1.5 bo volume 0.9 jako minimum to mało intuicyjne (nie da się ściszyć).
-        # ALE zgodnie z poleceniem: "parametr głośności i szybkości trzeba zmienić skalę na 0.9 - 1.3"
-        # Przyjmuję, że chodzi o zakres UŻYTECZNY dla usera, ale dla głośności damy min 0.0, bo user może chcieć ciszej.
-        # Jeśli upierasz się przy 0.9-1.3 dla głośności, zmień from_=0.9. Ja dam 0.0 dla logiki.
-        # UPDATE: Zrobię 0.0 - 1.5, ale domyślny krok/zakres suwaka wizualnie dostosowany.
 
         ttk.Label(grp_aud, text="Głośność:").grid(row=1, column=0)
         s_vol = ttk.Scale(grp_aud, from_=0.0, to=1.5, variable=self.var_volume,
@@ -379,10 +383,17 @@ class LektorApp:
         self.lbl_vol.grid(row=1, column=2)
         grp_aud.columnconfigure(1, weight=1)
 
-        # Buttons
+        # --- STEROWANIE ---
         hk_start = self.config_mgr.get('hotkey_start_stop', 'Ctrl+F5')
         frm_btn = ttk.Frame(panel)
         frm_btn.pack(side=tk.BOTTOM, fill=tk.X, pady=10)
+
+        # Logi Checkbox
+        ttk.Checkbutton(frm_btn, text="Zapisuj logi do pliku", variable=self.var_save_logs,
+                        command=lambda: self._save_preset_val("save_logs", self.var_save_logs.get())).pack(side=tk.TOP,
+                                                                                                           anchor=tk.W,
+                                                                                                           pady=(0, 5))
+
         self.btn_start = ttk.Button(frm_btn, text=f"START ({hk_start})", command=self.start_reading)
         self.btn_start.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         self.btn_stop = ttk.Button(frm_btn, text=f"STOP ({hk_start})", command=self.stop_reading, state="disabled")
@@ -396,7 +407,6 @@ class LektorApp:
         res_str = f"{w}x{h}"
         self.var_resolution.set(res_str)
         self.config_mgr.update_setting('last_resolution_key', res_str)
-        # Auto detect resetuje skalę (chyba że jest override)
         self._update_scale_for_resolution(res_str)
 
     def _load_initial_state(self, autostart_path):
@@ -451,17 +461,16 @@ class LektorApp:
         self.var_capture_interval.set(data.get("capture_interval", 0.5))
         self.lbl_int.config(text=f"{self.var_capture_interval.get():.2f}s")
 
+        # Nowe opcje
+        self.var_rerun_threshold.set(data.get("rerun_threshold", 50))
+        self.lbl_rerun.config(text=f"{self.var_rerun_threshold.get()}")
+        self.var_text_alignment.set(data.get("text_alignment", "Center"))
+        self.var_save_logs.set(data.get("save_logs", False))
+
         if "regex_mode_name" in data:
             self.var_regex_mode.set(data["regex_mode_name"])
             if data["regex_mode_name"] == "Własny (Regex)": self.var_custom_regex.set(data.get("regex_pattern", ""))
             self.on_regex_changed()
-
-        if "resolution" in data:
-            # Ładujemy rozdzielczość z presetu, ale...
-            # Jeśli user odpalił program, to auto-detect na starcie nadpisał już tę wartość.
-            # Zostawiamy auto-detect jako priorytet, chyba że preset wymusza inaczej.
-            # W tym kodzie, auto_detect_resolution na starcie nadpisuje GUI.
-            pass
 
     def on_regex_changed(self, event=None):
         mode = self.var_regex_mode.get()
