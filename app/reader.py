@@ -40,7 +40,6 @@ class CaptureWorker(threading.Thread):
             if full_img:
                 try:
                     # Non-blocking put. Jeśli kolejka jest pełna, czyścimy ją, żeby wrzucić najnowszy.
-                    # Używamy kolejki o rozmiarze 1 dla minimalnego laga.
                     if self.img_queue.full():
                         try:
                             self.img_queue.get_nowait()
@@ -91,8 +90,8 @@ class ReaderThread(threading.Thread):
 
         self.combined_regex = ""
 
-        # Kolejka obrazów między CaptureWorker a ReaderThread
-        self.img_queue = queue.Queue(maxsize=2)
+        # Kolejka zostanie zainicjalizowana w run() po załadowaniu konfiguracji
+        self.img_queue = None
 
     def trigger_area_3(self, duration: float = 2.0):
         self.area3_expiry_time = time.time() + duration
@@ -157,6 +156,7 @@ class ReaderThread(threading.Thread):
         raw_monitors = preset.get('monitor', [])
         if isinstance(raw_monitors, dict): raw_monitors = [raw_monitors]
 
+        # Filtrowanie i skalowanie monitorów
         monitors = self._scale_monitor_areas([m for m in raw_monitors if m], preset.get('resolution'))
         if not monitors: return
 
@@ -171,9 +171,13 @@ class ReaderThread(threading.Thread):
             'width': max_r - min_l, 'height': max_b - min_t
         }
 
+        # Dynamiczny rozmiar kolejki: ilość obszarów + 1
+        queue_size = len(monitors) + 1
+        self.img_queue = queue.Queue(maxsize=queue_size)
+
         audio_dir = preset.get('audio_dir', '')
 
-        print(f"Start Lektora. Obszar: {unified_area}, Interval: {interval}s")
+        print(f"Start Lektora. Obszar: {unified_area}, Interval: {interval}s, Queue Size: {queue_size}")
 
         # Start workera zrzucającego ekran
         capture_worker = CaptureWorker(self.stop_event, self.img_queue, unified_area, interval)
