@@ -11,12 +11,11 @@ class LogWindow(tk.Toplevel):
         self.log_queue = log_queue
         self.is_open = True
 
-        # Ustalanie ścieżki do pliku logu (folder uruchomienia skryptu)
         self.log_file_path = os.path.abspath("dialog_match.log")
-        print(f"Logi będą zapisywane w: {self.log_file_path}")
+        print(f"Logi: {self.log_file_path}")
 
-        # Checkbox zapisu do pliku - DOMYŚLNIE WŁĄCZONY
-        self.save_var = tk.BooleanVar(value=True)
+        # Checkbox zapisu do pliku - DOMYŚLNIE WYŁĄCZONY
+        self.save_var = tk.BooleanVar(value=False)
         chk = ttk.Checkbutton(self, text=f"Zapisuj do pliku ({self.log_file_path})", variable=self.save_var)
         chk.pack(anchor=tk.W, padx=5, pady=5)
 
@@ -69,12 +68,12 @@ class LogWindow(tk.Toplevel):
         self.text_area.see(tk.END)
         self.text_area.config(state='disabled')
 
-        # File Write - Z POPRAWKĄ BUFOROWANIA
+        # File Write
         if self.save_var.get():
             try:
                 with open(self.log_file_path, "a", encoding="utf-8") as f:
                     f.write(msg)
-                    f.flush()      # Wymusza zapis z bufora Pythona
-                    os.fsync(f.fileno()) # Wymusza zapis z bufora systemu operacyjnego na dysk
+                    f.flush()
+                    os.fsync(f.fileno())
             except Exception as e:
                 print(f"Błąd zapisu logu: {e}")

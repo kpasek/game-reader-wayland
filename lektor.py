@@ -7,7 +7,7 @@ import subprocess
 import time
 import argparse
 import platform
-from typing import Optional, Dict, List
+from typing import Optional, Dict
 
 try:
     import tkinter as tk
@@ -20,7 +20,6 @@ except ImportError:
 if platform.system() == "Windows":
     try:
         import ctypes
-
         ctypes.windll.shcore.SetProcessDpiAwareness(1)
     except Exception:
         pass
@@ -29,7 +28,6 @@ if platform.system() == "Windows":
 # --- PYNPUT HOTKEYS ---
 try:
     from pynput import keyboard
-
     HAS_PYNPUT = True
 except ImportError:
     HAS_PYNPUT = False
@@ -48,7 +46,7 @@ stop_event = threading.Event()
 audio_queue = queue.Queue()
 log_queue = queue.Queue()
 
-APP_VERSION = "v0.7.0"
+APP_VERSION = "v0.8.0"
 STANDARD_WIDTH = 3840
 STANDARD_HEIGHT = 2160
 
@@ -57,7 +55,7 @@ class HelpWindow(tk.Toplevel):
     def __init__(self, parent):
         super().__init__(parent)
         self.title("Pomoc i Instrukcja")
-        self.geometry("600x520")
+        self.geometry("600x550")
 
         default_font = font.nametofont("TkDefaultFont")
         base_font_family = default_font.actual()["family"]
@@ -71,18 +69,19 @@ class HelpWindow(tk.Toplevel):
 
         content = [
             ("JAK TO DZIAŁA?\n", 'h1'),
-            ("Aplikacja wykonuje zrzuty ekranu w zdefiniowanych obszarach, rozpoznaje tekst (OCR) i porównuje go z plikiem napisów. Gdy znajdzie dopasowanie, odtwarza odpowiedni plik audio.\n",
-             'normal'),
-
-            ("SKRÓTY KLAWISZOWE (Globalne)\n", 'h1'),
-            ("Ctrl + F5", 'bold'), (" - Start / Stop czytania\n", 'normal'),
-            ("Ctrl + F6", 'bold'), (" - Aktywacja Obszaru 3 (Adnotacje) na 2 sekundy.\n", 'normal'),
+            ("Aplikacja Lektor działa w dwóch wątkach: jeden wykonuje zrzuty ekranu, drugi przetwarza tekst (OCR) i dopasowuje go do dialogów.\n", 'normal'),
 
             ("STRUKTURA LEKTORA\n", 'h1'),
             ("Wskaż katalog zawierający pliki lektora. Wymagana struktura:\n", 'normal'),
-            ("- lektor.json (konfiguracja)\n", 'normal'),
-            ("- subtitles.txt (napisy)\n", 'normal'),
-            ("- audio/ (katalog z plikami .ogg)\n", 'normal'),
+            ("• lektor.json (konfiguracja, tworzony automatycznie)\n", 'normal'),
+            ("• subtitles.txt (plik z napisami)\n", 'normal'),
+            ("• audio/ (katalog z plikami .ogg)\n", 'normal'),
+            ("• names.txt (opcjonalny plik z imionami)\n", 'normal'),
+
+            ("SKRÓTY KLAWISZOWE\n", 'h1'),
+            ("Możesz je zmienić w menu Plik -> Ustawienia aplikacji.\n", 'normal'),
+            ("• Start / Stop: ", 'bold'), ("Domyślnie Ctrl + F5\n", 'normal'),
+            ("• Obszar 3 (Adnotacje): ", 'bold'), ("Domyślnie Ctrl + F6 (aktywuje strefę na 2 sekundy)\n", 'normal'),
 
             ("FILTROWANIE TEKSTU\n", 'h1'),
             ("• Automatyczne usuwanie imion: ", 'bold'),
@@ -99,7 +98,7 @@ class LektorApp:
     def __init__(self, root: tk.Tk, autostart_preset: Optional[str], game_cmd: list):
         self.root = root
         self.root.title(f"Lektor {APP_VERSION}")
-        self.root.geometry("750x650")
+        self.root.geometry("750x680")
 
         self.config_mgr = ConfigManager()
         self.game_cmd = game_cmd
@@ -111,11 +110,11 @@ class LektorApp:
         self.log_window = None
         self.help_window = None
         self.is_running = False
+        self.hotkey_listener = None
 
         # Zmienne UI
         self.var_preset_display = tk.StringVar()
         self.full_preset_paths = []
-
         self.var_preset_full_path = tk.StringVar()
 
         # Opcje Lektora (zapisywane w lektor.json)
@@ -154,15 +153,26 @@ class LektorApp:
             self._start_hotkey_listener()
 
     def _start_hotkey_listener(self):
+        # Pobieranie skrótów z konfiguracji
+        hk_start = self.config_mgr.get('hotkey_start_stop', '<ctrl>+<f5>')
+        hk_area3 = self.config_mgr.get('hotkey_area3', '<ctrl>+<f6>')
+
+        if hasattr(self, 'hotkey_listener') and self.hotkey_listener:
+            self.hotkey_listener.stop()
+
         hotkeys = {
-            '<ctrl>+<f5>': self._on_hotkey_start_stop,
-            '<ctrl>+<f6>': self._on_hotkey_area3
+            hk_start: self._on_hotkey_start_stop,
+            hk_area3: self._on_hotkey_area3
         }
         try:
-            self.listener = keyboard.GlobalHotKeys(hotkeys)
-            self.listener.start()
+            self.hotkey_listener = keyboard.GlobalHotKeys(hotkeys)
+            self.hotkey_listener.start()
         except Exception as e:
-            print(f"Błąd inicjalizacji skrótów: {e}")
+            print(f"Błąd inicjalizacji skrótów: {e} (Sprawdź format skrótów)")
+
+    def _restart_hotkeys(self):
+        if HAS_PYNPUT:
+            self._start_hotkey_listener()
 
     def _on_hotkey_start_stop(self):
         self.root.after(0, self._toggle_start_stop_hotkey)
@@ -185,7 +195,7 @@ class LektorApp:
         menubar = tk.Menu(self.root)
 
         file_menu = tk.Menu(menubar, tearoff=0)
-        file_menu.add_command(label="Ustawienia OCR (Szarość/Kontrast)", command=self.open_settings)
+        file_menu.add_command(label="Ustawienia aplikacji (Skróty)", command=self.open_settings)
         file_menu.add_separator()
         file_menu.add_command(label="Wyjdź", command=self.on_close)
         menubar.add_cascade(label="Plik", menu=file_menu)
@@ -196,7 +206,7 @@ class LektorApp:
         area_menu = tk.Menu(preset_menu, tearoff=0)
         for i in range(3):
             sub = tk.Menu(area_menu, tearoff=0)
-            suffix = " (CZASOWY - Ctrl+F6)" if i == 2 else ""
+            suffix = " (CZASOWY)" if i == 2 else ""
             sub.add_command(label=f"Definiuj Obszar {i + 1}{suffix}", command=lambda x=i: self.set_area(x))
             sub.add_command(label=f"Wyczyść Obszar {i + 1}", command=lambda x=i: self.clear_area(x))
             area_menu.add_cascade(label=f"Obszar {i + 1}{suffix}", menu=sub)
@@ -216,7 +226,7 @@ class LektorApp:
         menubar.add_cascade(label="Narzędzia", menu=tools_menu)
 
         help_menu = tk.Menu(menubar, tearoff=0)
-        help_menu.add_command(label="Instrukcja / Skróty", command=self.show_help)
+        help_menu.add_command(label="Instrukcja", command=self.show_help)
         menubar.add_cascade(label="Pomoc", menu=help_menu)
 
         self.root.config(menu=menubar)
@@ -296,10 +306,13 @@ class LektorApp:
         f_res = ttk.Frame(panel)
         f_res.pack(fill=tk.X, pady=5)
         ttk.Label(f_res, text="Rozdzielczość gry:").pack(side=tk.LEFT)
-        self.cb_res = ttk.Combobox(f_res, textvariable=self.var_resolution, values=self.resolutions)
-        self.cb_res.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.cb_res = ttk.Combobox(f_res, textvariable=self.var_resolution, values=self.resolutions, width=15)
+        self.cb_res.pack(side=tk.LEFT, padx=5)
         self.cb_res.bind("<FocusOut>",
                          lambda e: self.config_mgr.update_setting('last_resolution_key', self.var_resolution.get()))
+
+        # Przycisk Auto
+        ttk.Button(f_res, text="Auto Detect", command=self.auto_detect_resolution).pack(side=tk.LEFT, padx=5)
 
         # Audio Controls
         grp_audio = ttk.LabelFrame(panel, text="Kontrola Audio", padding=10)
@@ -328,17 +341,26 @@ class LektorApp:
         grp_audio.columnconfigure(1, weight=1)
 
         # Buttons
+        hk_start_txt = self.config_mgr.get('hotkey_start_stop', 'Ctrl+F5')
         frm_btn = ttk.Frame(panel)
         frm_btn.pack(side=tk.BOTTOM, fill=tk.X, pady=10)
-        self.btn_start = ttk.Button(frm_btn, text="START (Ctrl+F5)", command=self.start_reading)
+        self.btn_start = ttk.Button(frm_btn, text=f"START ({hk_start_txt})", command=self.start_reading)
         self.btn_start.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        self.btn_stop = ttk.Button(frm_btn, text="STOP (Ctrl+F5)", command=self.stop_reading, state="disabled")
+        self.btn_stop = ttk.Button(frm_btn, text=f"STOP ({hk_start_txt})", command=self.stop_reading, state="disabled")
         self.btn_stop.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
         # Stopka
         footer = ttk.Frame(self.root)
         footer.pack(side=tk.BOTTOM, fill=tk.X, padx=5, pady=2)
         ttk.Label(footer, text=f"Wersja: {APP_VERSION}", font=("Arial", 8)).pack(side=tk.RIGHT)
+
+    def auto_detect_resolution(self):
+        w = self.root.winfo_screenwidth()
+        h = self.root.winfo_screenheight()
+        res_str = f"{w}x{h}"
+        self.var_resolution.set(res_str)
+        self.config_mgr.update_setting('last_resolution_key', res_str)
+        messagebox.showinfo("Auto Detect", f"Wykryto rozdzielczość ekranu: {res_str}")
 
     def _load_initial_state(self, autostart_path):
         self._update_preset_list()
@@ -349,13 +371,11 @@ class LektorApp:
 
         if initial_path and os.path.exists(initial_path):
             self.var_preset_full_path.set(initial_path)
-            # Ustawienie display value
             try:
                 dirname = os.path.basename(os.path.dirname(initial_path))
                 self.var_preset_display.set(dirname)
             except:
                 pass
-
             self.on_preset_loaded()
             if autostart_path:
                 self.root.after(500, self.start_reading)
@@ -367,11 +387,9 @@ class LektorApp:
 
     def _update_preset_list(self):
         recents = self.config_mgr.get('recent_presets', [])
-        # Filtrujemy tylko istniejące
         recents = [p for p in recents if os.path.exists(p)]
         self.full_preset_paths = recents
 
-        # Tworzymy ładne nazwy (tylko katalog)
         display_names = []
         for p in recents:
             d_name = os.path.basename(os.path.dirname(p))
@@ -401,7 +419,6 @@ class LektorApp:
 
         self.var_auto_names.set(data.get("auto_remove_names", True))
 
-        # Nowe pola
         self.var_subtitle_mode.set(data.get("subtitle_mode", "Full Lines"))
         self.var_ocr_scale.set(data.get("ocr_scale_factor", 1.0))
         self.var_capture_interval.set(data.get("capture_interval", 0.5))
@@ -433,20 +450,16 @@ class LektorApp:
             data[key] = val
             self.config_mgr.save_preset(path, data)
 
-    # --- AKCJE ---
-
     def browse_lector_folder(self):
         directory = filedialog.askdirectory(title="Wybierz katalog z lektorem")
         if not directory:
             return
 
-        # Sprawdź lub utwórz lektor.json
         preset_path = self.config_mgr.ensure_preset_exists(directory)
 
         self.config_mgr.add_recent_preset(preset_path)
         self._update_preset_list()
 
-        # Ustawienie wyboru
         self.var_preset_full_path.set(preset_path)
         self.var_preset_display.set(os.path.basename(directory))
         self.on_preset_loaded()
@@ -463,7 +476,6 @@ class LektorApp:
             new_path = filedialog.askopenfilename(initialdir=base_dir, filetypes=[("Text", "*.txt")])
 
         if new_path:
-            # config_mgr.save_preset automatycznie zamieni to na relative path
             self._save_preset_val(key, new_path)
             messagebox.showinfo("Sukces", "Zaktualizowano ścieżkę w profilu.")
 
@@ -544,6 +556,11 @@ class LektorApp:
     def open_settings(self):
         SettingsDialog(self.root, self.config_mgr.settings)
         self.config_mgr.save_app_config()
+        # Odśwież skróty i przyciski
+        self._restart_hotkeys()
+        hk = self.config_mgr.get('hotkey_start_stop', '<ctrl>+<f5>')
+        self.btn_start.config(text=f"START ({hk})")
+        self.btn_stop.config(text=f"STOP ({hk})")
 
     def show_logs(self):
         if not self.log_window or not self.log_window.winfo_exists():
@@ -618,7 +635,6 @@ class LektorApp:
         state = "disabled" if running else "normal"
         self.btn_start.config(state=state)
         self.btn_stop.config(state="normal" if running else "disabled")
-        # Combos disabled
         self.cb_preset.config(state="disabled" if running else "readonly")
 
     def on_close(self):
@@ -627,8 +643,8 @@ class LektorApp:
             self.stop_reading()
         if self.game_process:
             self.game_process.terminate()
-        if hasattr(self, 'listener'):
-            self.listener.stop()
+        if hasattr(self, 'hotkey_listener') and self.hotkey_listener:
+            self.hotkey_listener.stop()
         self.root.destroy()
 
 

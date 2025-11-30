@@ -2,6 +2,7 @@ import threading
 import time
 import os
 import re
+import queue
 from collections import deque
 from datetime import datetime
 from typing import Optional, Tuple, Dict, Any, List
@@ -12,7 +13,54 @@ from app.matcher import find_best_match, precompute_subtitles
 from app.config_manager import ConfigManager
 
 
+class CaptureWorker(threading.Thread):
+    """
+    Wątek PRODUCENTA: Zajmuje się wyłącznie robieniem zrzutów ekranu w zadanym interwale.
+    Wrzuca obrazy na kolejkę. Jeśli kolejka jest pełna (procesor OCR nie nadąża),
+    najstarszy obraz jest usuwany lub nowy pomijany, aby zachować 'świeżość'.
+    """
+
+    def __init__(self, stop_event: threading.Event, img_queue: queue.Queue,
+                 unified_area: Dict[str, int], interval: float):
+        super().__init__(daemon=True)
+        self.name = "CaptureWorker"
+        self.stop_event = stop_event
+        self.img_queue = img_queue
+        self.unified_area = unified_area
+        self.interval = interval
+
+    def run(self):
+        while not self.stop_event.is_set():
+            loop_start = time.monotonic()
+
+            t0 = time.perf_counter()
+            full_img = capture_region(self.unified_area)
+            t_cap = (time.perf_counter() - t0) * 1000
+
+            if full_img:
+                try:
+                    # Non-blocking put. Jeśli kolejka jest pełna, czyścimy ją, żeby wrzucić najnowszy.
+                    # Używamy kolejki o rozmiarze 1 dla minimalnego laga.
+                    if self.img_queue.full():
+                        try:
+                            self.img_queue.get_nowait()
+                        except queue.Empty:
+                            pass
+
+                    self.img_queue.put((full_img, t_cap), block=False)
+                except queue.Full:
+                    pass
+
+            elapsed = time.monotonic() - loop_start
+            time.sleep(max(0, self.interval - elapsed))
+
+
 class ReaderThread(threading.Thread):
+    """
+    Wątek KONSUMENTA: Pobiera obraz z kolejki, przetwarza (OCR) i dopasowuje (Matcher).
+    Jest też głównym zarządcą CaptureWorkera.
+    """
+
     def __init__(self, config_path: str, regex_template: str, app_settings: Dict[str, Any],
                  stop_event: threading.Event, audio_queue,
                  target_resolution: Optional[Tuple[int, int]],
@@ -36,13 +84,15 @@ class ReaderThread(threading.Thread):
         self.last_matched_idx = -1
         self.area3_expiry_time = 0.0
 
-        # Wartości domyślne, nadpisane w run()
         self.ocr_scale = 1.0
         self.subtitle_mode = 'Full Lines'
         self.ocr_grayscale = app_settings.get('ocr_grayscale', False)
         self.ocr_contrast = app_settings.get('ocr_contrast', False)
 
         self.combined_regex = ""
+
+        # Kolejka obrazów między CaptureWorker a ReaderThread
+        self.img_queue = queue.Queue(maxsize=2)
 
     def trigger_area_3(self, duration: float = 2.0):
         self.area3_expiry_time = time.time() + duration
@@ -90,7 +140,6 @@ class ReaderThread(threading.Thread):
         preset = ConfigManager.load_preset(self.config_path)
         if not preset: return
 
-        # Pobranie ustawień z presetu
         self.ocr_scale = preset.get('ocr_scale_factor', 1.0)
         self.subtitle_mode = preset.get('subtitle_mode', 'Full Lines')
         interval = preset.get('capture_interval', 0.5)
@@ -100,9 +149,7 @@ class ReaderThread(threading.Thread):
             print("Błąd: Nie znaleziono napisów.")
             return
 
-        print(
-            f"Przetwarzanie {len(raw_subtitles)} linii napisów... Mode: {self.subtitle_mode}, Scale: {self.ocr_scale}")
-
+        print(f"Przetwarzanie {len(raw_subtitles)} linii napisów... Mode: {self.subtitle_mode}")
         precomputed_data = precompute_subtitles(raw_subtitles)
 
         self.combined_regex = self._prepare_regex(preset.get('names_file_path'))
@@ -113,6 +160,7 @@ class ReaderThread(threading.Thread):
         monitors = self._scale_monitor_areas([m for m in raw_monitors if m], preset.get('resolution'))
         if not monitors: return
 
+        # Obliczenie wspólnego obszaru dla CaptureWorkera
         min_l = min(m['left'] for m in monitors)
         min_t = min(m['top'] for m in monitors)
         max_r = max(m['left'] + m['width'] for m in monitors)
@@ -125,17 +173,17 @@ class ReaderThread(threading.Thread):
 
         audio_dir = preset.get('audio_dir', '')
 
-        print(f"Start wątku czytającego. Obszar: {unified_area}, Interval: {interval}s")
+        print(f"Start Lektora. Obszar: {unified_area}, Interval: {interval}s")
+
+        # Start workera zrzucającego ekran
+        capture_worker = CaptureWorker(self.stop_event, self.img_queue, unified_area, interval)
+        capture_worker.start()
 
         while not self.stop_event.is_set():
-            loop_start = time.monotonic()
-
-            t0 = time.perf_counter()
-            full_img = capture_region(unified_area)
-            t_cap = (time.perf_counter() - t0) * 1000
-
-            if not full_img:
-                time.sleep(0.1)
+            try:
+                # Czekamy na obraz z kolejki (timeout pozwala sprawdzić stop_event)
+                full_img, t_cap = self.img_queue.get(timeout=0.2)
+            except queue.Empty:
                 continue
 
             for idx, area in enumerate(monitors):
@@ -151,9 +199,7 @@ class ReaderThread(threading.Thread):
 
                 t1 = time.perf_counter()
                 processed = preprocess_image(crop, self.ocr_scale, self.ocr_grayscale, self.ocr_contrast)
-
                 text = recognize_text(processed, self.combined_regex, self.auto_remove_names)
-
                 t_ocr = (time.perf_counter() - t1) * 1000
 
                 if not text: continue
@@ -163,9 +209,7 @@ class ReaderThread(threading.Thread):
                 self.last_ocr_texts.append(text)
 
                 t2 = time.perf_counter()
-
                 match = find_best_match(text, precomputed_data, self.subtitle_mode, last_index=self.last_matched_idx)
-
                 t_match = (time.perf_counter() - t2) * 1000
 
                 if self.log_queue:
@@ -190,5 +234,5 @@ class ReaderThread(threading.Thread):
                         audio_file = os.path.join(audio_dir, f"output1 ({idx_match + 1}).ogg")
                         self.audio_queue.put(audio_file)
 
-            elapsed = time.monotonic() - loop_start
-            time.sleep(max(0, interval - elapsed))
+        # Po wyjściu z pętli czekamy na workera
+        capture_worker.join()

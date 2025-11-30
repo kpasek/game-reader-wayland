@@ -9,7 +9,9 @@ DEFAULT_CONFIG = {
     'last_regex': r"",
     'ocr_grayscale': False,
     'ocr_contrast': False,
-    'last_resolution_key': 'Niestandardowa'
+    'last_resolution_key': 'Niestandardowa',
+    'hotkey_start_stop': '<ctrl>+<f5>',
+    'hotkey_area3': '<ctrl>+<f6>'
 }
 
 DEFAULT_PRESET_CONTENT = {
@@ -101,7 +103,6 @@ class ConfigManager:
             with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
 
-            # Konwersja ścieżek relatywnych na absolutne dla działania programu
             base_dir = os.path.dirname(os.path.abspath(path))
             for key in ['audio_dir', 'text_file_path', 'names_file_path']:
                 if key in data and isinstance(data[key], str):
@@ -114,16 +115,13 @@ class ConfigManager:
     @classmethod
     def save_preset(cls, path: str, data: Dict[str, Any]):
         try:
-            # Kopia, aby nie modyfikować oryginału w pamięci (używanego przez GUI)
             save_data = data.copy()
             base_dir = os.path.dirname(os.path.abspath(path))
 
-            # Konwersja na relatywne
             for key in ['audio_dir', 'text_file_path', 'names_file_path']:
                 if key in save_data and isinstance(save_data[key], str):
                     save_data[key] = cls._to_relative(base_dir, save_data[key])
 
-            # Czyszczenie nadmiarowych pól, jeśli jakieś są, ale zachowujemy customy
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(save_data, f, indent=4)
         except Exception as e:
@@ -131,7 +129,6 @@ class ConfigManager:
 
     @staticmethod
     def load_text_lines(path: str) -> List[str]:
-        """Wczytuje linie z pliku tekstowego (napisy/imiona)."""
         if not path or not os.path.exists(path):
             return []
         try:
