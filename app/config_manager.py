@@ -21,15 +21,16 @@ DEFAULT_PRESET_CONTENT = {
     "monitor": [],
     "resolution": "1920x1080",
     "subtitle_mode": "Full Lines",
-    "ocr_scale_factor": 1.0,
+    "ocr_scale_factor": 0.5,
     "capture_interval": 0.5,
     "audio_speed": 1.15,
     "audio_volume": 1.0,
+    "audio_ext": ".mp3",
     "auto_remove_names": True,
     "rerun_threshold": 50,
     "text_alignment": "Center",
     "save_logs": False,
-    "min_line_length": 0
+    "min_line_length": 3
 }
 
 

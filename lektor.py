@@ -182,6 +182,7 @@ class LektorApp:
         self.var_resolution = tk.StringVar()
         self.var_speed = tk.DoubleVar(value=1.0)
         self.var_volume = tk.DoubleVar(value=1.0)
+        self.var_audio_ext = tk.StringVar(value=".ogg")
 
         self.regex_map = {
             "Brak": r"",
@@ -454,6 +455,10 @@ class LektorApp:
                    lambda e: self._save_preset_val("audio_volume", round(self.var_volume.get(), 2)))
         self.lbl_vol = ttk.Label(grp_aud, text="1.00", width=5)
         self.lbl_vol.grid(row=1, column=2)
+
+        ttk.Label(grp_aud, text="Format:").grid(row=2, column=0)
+        ttk.Label(grp_aud, textvariable=self.var_audio_ext, font=("Arial", 8, "bold")).grid(row=2, column=1, sticky="w",
+                                                                                            padx=10)
         grp_aud.columnconfigure(1, weight=1)
 
         # --- STEROWANIE ---
@@ -521,6 +526,16 @@ class LektorApp:
 
         self.var_volume.set(data.get("audio_volume", 1.0))
         self.lbl_vol.config(text=f"{self.var_volume.get():.2f}")
+
+        detected_ext = self._detect_audio_format(data.get("audio_dir", ""))
+        current_ext = data.get("audio_ext", ".ogg")
+
+        if detected_ext and detected_ext != current_ext:
+            data['audio_ext'] = detected_ext
+            self.config_mgr.save_preset(path, data)
+            current_ext = detected_ext
+
+        self.var_audio_ext.set(current_ext)
 
         self.var_auto_names.set(data.get("auto_remove_names", True))
         self.var_subtitle_mode.set(data.get("subtitle_mode", "Full Lines"))
@@ -697,6 +712,20 @@ class LektorApp:
         self.btn_stop.config(state="normal" if running else "disabled")
         self.cb_preset.config(state=s)
         self.cb_res.config(state=s)
+
+    def _detect_audio_format(self, audio_dir_path: str) -> Optional[str]:
+        if not audio_dir_path or not os.path.exists(audio_dir_path):
+            return None
+
+        valid_exts = {".ogg", ".mp3", ".wav"}
+        try:
+            for f in os.listdir(audio_dir_path):
+                base, ext = os.path.splitext(f)
+                if ext.lower() in valid_exts:
+                    return ext.lower()
+        except Exception:
+            pass
+        return None
 
     def on_close(self):
         self.is_running = False

@@ -173,6 +173,7 @@ class ReaderThread(threading.Thread):
         queue_size = 2
         self.img_queue = queue.Queue(maxsize=queue_size)
         audio_dir = preset.get('audio_dir', '')
+        audio_ext = preset.get('audio_ext', '.mp3')
 
         capture_worker = CaptureWorker(self.stop_event, self.img_queue, unified_area, interval)
         capture_worker.start()
@@ -247,6 +248,6 @@ class ReaderThread(threading.Thread):
                     if idx_match not in self.recent_match_indices:
                         print(f"Match: {score}% -> Line {idx_match}")
                         self.recent_match_indices.append(idx_match)
-                        self.audio_queue.put(os.path.join(audio_dir, f"output1 ({idx_match + 1}).ogg"))
+                        self.audio_queue.put(os.path.join(audio_dir, f"output1 ({idx_match + 1}){audio_ext}"))
 
         capture_worker.join()
