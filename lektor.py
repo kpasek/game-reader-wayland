@@ -46,7 +46,7 @@ stop_event = threading.Event()
 audio_queue = queue.Queue()
 log_queue = queue.Queue()
 
-APP_VERSION = "v0.8.5"
+APP_VERSION = "v0.8.7"
 STANDARD_WIDTH = 3840
 STANDARD_HEIGHT = 2160
 
@@ -143,7 +143,7 @@ class LektorApp:
     def __init__(self, root: tk.Tk, autostart_preset: Optional[str], game_cmd: list):
         self.root = root
         self.root.title(f"Lektor {APP_VERSION}")
-        self.root.geometry("750x900")  # Wysokie okno dla wszystkich opcji
+        self.root.geometry("750x300")
 
         self.config_mgr = ConfigManager()
         self.game_cmd = game_cmd
@@ -230,11 +230,9 @@ class LektorApp:
             new_scale = self._calc_auto_scale(w, h)
 
         self.var_ocr_scale.set(new_scale)
-        self.lbl_scale.config(text=f"{new_scale:.2f}")
 
     def on_manual_scale_change(self, event=None):
         val = round(self.var_ocr_scale.get(), 2)
-        self.lbl_scale.config(text=f"{val:.2f}")
         path = self.var_preset_full_path.get()
         res_str = self.var_resolution.get()
         if path and os.path.exists(path) and "x" in res_str:
@@ -318,111 +316,6 @@ class LektorApp:
         self.cb_preset.pack(fill=tk.X, pady=5)
         self.cb_preset.bind("<<ComboboxSelected>>", self.on_preset_selected_from_combo)
 
-        # --- CONFIG GROUP ---
-        grp_cfg = ttk.LabelFrame(panel, text="Konfiguracja Lektora", padding=10)
-        grp_cfg.pack(fill=tk.X, pady=10)
-
-        # Row 1: Mode
-        f_mode = ttk.Frame(grp_cfg)
-        f_mode.pack(fill=tk.X, pady=5)
-        ttk.Label(f_mode, text="Tryb dopasowania:").pack(side=tk.LEFT)
-        cb_mode = ttk.Combobox(f_mode, textvariable=self.var_subtitle_mode, values=["Full Lines", "Partial Lines"],
-                               state="readonly")
-        cb_mode.pack(side=tk.LEFT, padx=(5, 20))
-        cb_mode.bind("<<ComboboxSelected>>",
-                     lambda e: self._save_preset_val("subtitle_mode", self.var_subtitle_mode.get()))
-
-        # Row 2: Skala OCR (Slider)
-        f_scale = ttk.Frame(grp_cfg)
-        f_scale.pack(fill=tk.X, pady=5)
-        ttk.Label(f_scale, text="Skala OCR:").pack(side=tk.LEFT)
-        s_scale = ttk.Scale(f_scale, from_=0.1, to=1.0, variable=self.var_ocr_scale,
-                            command=lambda v: self.lbl_scale.config(text=f"{float(v):.2f}"))
-        s_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        s_scale.bind("<ButtonRelease-1>", self.on_manual_scale_change)
-        self.lbl_scale = ttk.Label(f_scale, text="1.00", width=5)
-        self.lbl_scale.pack(side=tk.LEFT)
-
-        # Row 3: Empty Threshold (Slider)
-        f_empty = ttk.Frame(grp_cfg)
-        f_empty.pack(fill=tk.X, pady=5)
-        ttk.Label(f_empty, text="Czułość pustego:").pack(side=tk.LEFT)
-        s_empty = ttk.Scale(f_empty, from_=0.0, to=0.6, variable=self.var_empty_threshold,
-                            command=lambda v: self.lbl_empty.config(text=f"{float(v):.2f}"))
-        s_empty.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        s_empty.bind("<ButtonRelease-1>",
-                     lambda e: self._save_preset_val("empty_image_threshold", round(self.var_empty_threshold.get(), 2)))
-        self.lbl_empty = ttk.Label(f_empty, text="0.15")
-        self.lbl_empty.pack(side=tk.LEFT)
-
-        # Row 4: Interval
-        f_int = ttk.Frame(grp_cfg)
-        f_int.pack(fill=tk.X, pady=5)
-        ttk.Label(f_int, text="Skanowanie (s):").pack(side=tk.LEFT)
-        s_int = ttk.Scale(f_int, from_=0.3, to=1.0, variable=self.var_capture_interval,
-                          command=lambda v: self.lbl_int.config(text=f"{float(v):.2f}s"))
-        s_int.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        s_int.bind("<ButtonRelease-1>",
-                   lambda e: self._save_preset_val("capture_interval", round(self.var_capture_interval.get(), 2)))
-        self.lbl_int = ttk.Label(f_int, text="0.50s")
-        self.lbl_int.pack(side=tk.LEFT)
-
-        # --- OPTYMALIZACJA ---
-        grp_opt = ttk.LabelFrame(panel, text="Optymalizacja i Poprawki", padding=10)
-        grp_opt.pack(fill=tk.X, pady=10)
-
-        # Rerun Threshold
-        f_rerun = ttk.Frame(grp_opt)
-        f_rerun.pack(fill=tk.X, pady=5)
-        ttk.Label(f_rerun, text="Ponów OCR krótszych dialogów niż:").pack(side=tk.LEFT)
-        s_rerun = ttk.Scale(f_rerun, from_=0, to=150, variable=self.var_rerun_threshold,
-                            command=lambda v: self.lbl_rerun.config(text=f"{int(float(v))}"))
-        s_rerun.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        s_rerun.bind("<ButtonRelease-1>",
-                     lambda e: self._save_preset_val("rerun_threshold", self.var_rerun_threshold.get()))
-        self.lbl_rerun = ttk.Label(f_rerun, text="50", width=5)
-        self.lbl_rerun.pack(side=tk.LEFT)
-
-        # Min Line Length Filter
-        f_min = ttk.Frame(grp_opt)
-        f_min.pack(fill=tk.X, pady=5)
-        ttk.Label(f_min, text="Ignoruj dialogi krótsze niż:").pack(side=tk.LEFT)
-        s_min = ttk.Scale(f_min, from_=0, to=20, variable=self.var_min_line_len,
-                          command=lambda v: self.lbl_min.config(text=f"{int(float(v))}"))
-        s_min.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        s_min.bind("<ButtonRelease-1>",
-                   lambda e: self._save_preset_val("min_line_length", self.var_min_line_len.get()))
-        self.lbl_min = ttk.Label(f_min, text="0", width=5)
-        self.lbl_min.pack(side=tk.LEFT)
-
-        # Alignment
-        f_align = ttk.Frame(grp_opt)
-        f_align.pack(fill=tk.X, pady=5)
-        ttk.Label(f_align, text="Wyrównanie tekstu:").pack(side=tk.LEFT)
-        cb_align = ttk.Combobox(f_align, textvariable=self.var_text_alignment, values=["Left", "Center", "Right"],
-                                state="readonly", width=15)
-        cb_align.pack(side=tk.LEFT, padx=5)
-        cb_align.bind("<<ComboboxSelected>>",
-                      lambda e: self._save_preset_val("text_alignment", self.var_text_alignment.get()))
-
-        # --- FILTRY ---
-        grp_reg = ttk.LabelFrame(panel, text="Filtracja tekstu", padding=5)
-        grp_reg.pack(fill=tk.X, pady=10)
-        f_r = ttk.Frame(grp_reg)
-        f_r.pack(fill=tk.X)
-        ttk.Label(f_r, text="Regex:").pack(side=tk.LEFT)
-        self.cb_regex = ttk.Combobox(f_r, textvariable=self.var_regex_mode, values=list(self.regex_map.keys()),
-                                     state="readonly", width=25)
-        self.cb_regex.pack(side=tk.LEFT, padx=5)
-        self.cb_regex.bind("<<ComboboxSelected>>", self.on_regex_changed)
-        self.ent_regex = ttk.Entry(f_r, textvariable=self.var_custom_regex, state="disabled")
-        self.ent_regex.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        self.ent_regex.bind("<FocusOut>",
-                            lambda e: self.config_mgr.update_setting('last_custom_regex', self.var_custom_regex.get()))
-        ttk.Checkbutton(grp_reg, text="Usuwaj imiona (Smart)", variable=self.var_auto_names,
-                        command=lambda: self._save_preset_val("auto_remove_names", self.var_auto_names.get())).pack(
-            anchor=tk.W)
-
         # --- ROZDZIELCZOŚĆ ---
         f_res = ttk.Frame(panel)
         f_res.pack(fill=tk.X, pady=5)
@@ -465,12 +358,6 @@ class LektorApp:
         hk_start = self.config_mgr.get('hotkey_start_stop', 'Ctrl+F5')
         frm_btn = ttk.Frame(panel)
         frm_btn.pack(side=tk.BOTTOM, fill=tk.X, pady=10)
-
-        # Logi Checkbox
-        ttk.Checkbutton(frm_btn, text="Zapisuj logi do pliku", variable=self.var_save_logs,
-                        command=lambda: self._save_preset_val("save_logs", self.var_save_logs.get())).pack(side=tk.TOP,
-                                                                                                           anchor=tk.W,
-                                                                                                           pady=(0, 5))
 
         self.btn_start = ttk.Button(frm_btn, text=f"START ({hk_start})", command=self.start_reading)
         self.btn_start.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
@@ -527,6 +414,7 @@ class LektorApp:
         self.var_volume.set(data.get("audio_volume", 1.0))
         self.lbl_vol.config(text=f"{self.var_volume.get():.2f}")
 
+        # Automatyczna detekcja formatu audio
         detected_ext = self._detect_audio_format(data.get("audio_dir", ""))
         current_ext = data.get("audio_ext", ".ogg")
 
@@ -541,20 +429,19 @@ class LektorApp:
         self.var_subtitle_mode.set(data.get("subtitle_mode", "Full Lines"))
 
         self.var_ocr_scale.set(data.get("ocr_scale_factor", 1.0))
-        self.lbl_scale.config(text=f"{self.var_ocr_scale.get():.2f}")
+        # Label scale usunięty
 
         self.var_empty_threshold.set(data.get("empty_image_threshold", 0.15))
-        self.lbl_empty.config(text=f"{self.var_empty_threshold.get():.2f}")
+        # Label empty usunięty
 
         self.var_capture_interval.set(data.get("capture_interval", 0.5))
-        self.lbl_int.config(text=f"{self.var_capture_interval.get():.2f}s")
+        # Label int usunięty
 
-        # Nowe opcje
         self.var_rerun_threshold.set(data.get("rerun_threshold", 50))
-        self.lbl_rerun.config(text=f"{self.var_rerun_threshold.get()}")
+        # Label rerun usunięty
 
         self.var_min_line_len.set(data.get("min_line_length", 0))
-        self.lbl_min.config(text=f"{self.var_min_line_len.get()}")
+        # Label min usunięty
 
         self.var_text_alignment.set(data.get("text_alignment", "Center"))
         self.var_save_logs.set(data.get("save_logs", False))
@@ -566,7 +453,14 @@ class LektorApp:
 
     def on_regex_changed(self, event=None):
         mode = self.var_regex_mode.get()
-        self.ent_regex.config(state="normal" if mode == "Własny (Regex)" else "disabled")
+
+        if hasattr(self, 'ent_regex') and self.ent_regex:
+            try:
+                self.ent_regex.config(state="normal" if mode == "Własny (Regex)" else "disabled")
+            except Exception:
+                # Widget mógł zostać zniszczony po zamknięciu okna ustawień
+                self.ent_regex = None
+
         self.config_mgr.update_setting('last_regex_mode', mode)
         if mode != "Własny (Regex)":
             self._save_preset_val("regex_pattern", self.regex_map.get(mode, ""))
@@ -648,7 +542,7 @@ class LektorApp:
             self.config_mgr.save_preset(path, data)
 
     def open_settings(self):
-        SettingsDialog(self.root, self.config_mgr.settings)
+        SettingsDialog(self.root, self.config_mgr.settings, self)
         self.config_mgr.save_app_config()
         self._restart_hotkeys()
         hk = self.config_mgr.get('hotkey_start_stop', '<ctrl>+<f5>')
