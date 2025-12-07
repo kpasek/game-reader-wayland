@@ -5,7 +5,6 @@ rapidfuzz
 python-Levenshtein
 pyscreenshot
 mss
-easyocr
 # build
 nuitka
 ordered-set

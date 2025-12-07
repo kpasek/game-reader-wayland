@@ -239,7 +239,7 @@ class ReaderThread(threading.Thread):
                     self.log_queue.put(log_entry)
 
                     if self.save_logs:
-                        with open("session_log_easy_ocr.txt", "a", encoding='utf-8') as f:
+                        with open("session_log.txt", "a", encoding='utf-8') as f:
                             f.write(f"{log_entry['time']} | OCR: {text} | Match: {line_txt} \n")
 
                 if match:
