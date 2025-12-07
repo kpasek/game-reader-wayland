@@ -163,6 +163,7 @@ class LektorApp:
 
         # Opcje Lektora
         self.var_subtitle_mode = tk.StringVar(value="Full Lines")
+        self.var_ocr_engine = tk.StringVar(value="Tesseract")
         self.var_ocr_scale = tk.DoubleVar(value=1.0)
         self.var_empty_threshold = tk.DoubleVar(value=0.15)
         self.var_capture_interval = tk.DoubleVar(value=0.5)
@@ -427,6 +428,7 @@ class LektorApp:
 
         self.var_auto_names.set(data.get("auto_remove_names", True))
         self.var_subtitle_mode.set(data.get("subtitle_mode", "Full Lines"))
+        self.var_ocr_engine.set(data.get("ocr_engine", "Tesseract"))
 
         self.var_ocr_scale.set(data.get("ocr_scale_factor", 1.0))
         # Label scale usunięty

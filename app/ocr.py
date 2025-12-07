@@ -3,6 +3,7 @@ import re
 import os
 import platform
 import tempfile
+import numpy as np
 from typing import Optional, Tuple
 
 try:
@@ -12,6 +13,8 @@ try:
 except ImportError:
     print("Brak biblioteki Pillow lub pytesseract.", file=sys.stderr)
     sys.exit(1)
+
+EASYOCR_READER = None
 
 from app.text_processing import smart_remove_name
 
@@ -46,11 +49,26 @@ if platform.system() == "Windows":
 
 # ----------------------------
 
+def _get_easyocr_reader():
+    """Inicjalizuje EasyOCR tylko wtedy, gdy jest potrzebny (Lazy Loading)."""
+    global EASYOCR_READER
+    if EASYOCR_READER is None:
+        try:
+            import easyocr
+            print("Inicjalizacja EasyOCR... (może chwilę potrwać)", file=sys.stderr)
+            EASYOCR_READER = easyocr.Reader(['pl'], gpu=True)
+        except ImportError:
+            print("Błąd: Brak biblioteki easyocr. Zainstaluj ją przez pip.", file=sys.stderr)
+            return None
+        except Exception as e:
+            print(f"Błąd inicjalizacji EasyOCR: {e}", file=sys.stderr)
+            return None
+    return EASYOCR_READER
+
 
 def preprocess_image(image: Image.Image, scale: float = 1.0,
                      grayscale: bool = False, contrast: bool = False) -> Image.Image:
     try:
-        # Skalowanie tylko jeśli jest istotna różnica (>5%), oszczędność CPU
         if abs(scale - 1.0) > 0.05:
             new_w = int(image.width * scale)
             new_h = int(image.height * scale)
@@ -70,10 +88,6 @@ def preprocess_image(image: Image.Image, scale: float = 1.0,
 
 
 def is_image_empty(image: Image.Image, threshold: float) -> bool:
-    """
-    Sprawdza, czy obraz ma wystarczającą wariancję (tekst vs tło).
-    :param threshold: Próg odchylenia standardowego.
-    """
     try:
         if image.mode != 'L':
             stat_img = ImageOps.grayscale(image)
@@ -88,20 +102,17 @@ def is_image_empty(image: Image.Image, threshold: float) -> bool:
 
 def get_text_bounds(image: Image.Image) -> Optional[Tuple[int, int, int, int]]:
     """
-    Używa pytesseract.image_to_data, aby znaleźć bounding box wokół faktycznego tekstu.
-    Zwraca (left, top, right, bottom) lub None.
+    Funkcja pomocnicza do wycinania tekstu (używana przy ponownym skanowaniu).
+    Na razie zostawiamy implementację opartą na Tesseract, ponieważ jest szybka.
     """
     try:
-        # Używamy Output.DICT, aby łatwo przetwarzać dane
         data = pytesseract.image_to_data(image, lang=OCR_LANGUAGE, output_type=Output.DICT)
-
         n_boxes = len(data['text'])
         min_l, min_t = image.width, image.height
         max_r, max_b = 0, 0
         found = False
 
         for i in range(n_boxes):
-            # Ignoruj puste teksty lub bardzo niską pewność (szum)
             if int(data['conf'][i]) > 10 and data['text'][i].strip():
                 (x, y, w, h) = (data['left'][i], data['top'][i], data['width'][i], data['height'][i])
                 min_l = min(min_l, x)
@@ -113,36 +124,44 @@ def get_text_bounds(image: Image.Image) -> Optional[Tuple[int, int, int, int]]:
         if found:
             return (min_l, min_t, max_r, max_b)
         return None
-
     except Exception:
         return None
 
 
 def recognize_text(image: Image.Image, regex_pattern: str = "",
-                   auto_remove_names: bool = True, empty_threshold: float = 0.15) -> str:
+                   auto_remove_names: bool = True, empty_threshold: float = 0.15,
+                   engine: str = "Tesseract") -> str:
     """
-    Główna funkcja OCR.
-    :param empty_threshold: Próg detekcji pustego obrazu. 0.0 wyłącza sprawdzanie.
+    Główna funkcja OCR z obsługą wyboru silnika.
     """
-    # 1. Optymalizacja: Pomiń puste klatki (tylko jeśli threshold > 0)
+    # 1. Optymalizacja: Pomiń puste klatki
     if empty_threshold > 0.001:
         if is_image_empty(image, empty_threshold):
             return ""
 
-    # 2. Wykonanie OCR
-    try:
-        if HAS_CONFIG_FILE:
-            config_str = f'--psm 6 "{CONFIG_FILE_PATH}"'
-            text = pytesseract.image_to_string(image, lang=OCR_LANGUAGE, config=config_str)
-        else:
-            text = pytesseract.image_to_string(image, lang=OCR_LANGUAGE, config='--psm 6')
+    text = ""
 
-    except Exception:
-        # Retry bez configu
-        try:
-            text = pytesseract.image_to_string(image, lang=OCR_LANGUAGE, config='--psm 6')
-        except Exception:
-            return ""
+    # 2. Wykonanie OCR w zależności od silnika
+    try:
+        if engine == "EasyOCR":
+            reader = _get_easyocr_reader()
+            if reader:
+                # EasyOCR wymaga tablicy numpy
+                image_np = np.array(image)
+                # detail=0 zwraca sam tekst jako listę stringów
+                results = reader.readtext(image_np, detail=0, paragraph=True)
+                text = " ".join(results)
+        else:
+            # Fallback to Tesseract
+            if HAS_CONFIG_FILE:
+                config_str = f'--psm 6 "{CONFIG_FILE_PATH}"'
+                text = pytesseract.image_to_string(image, lang=OCR_LANGUAGE, config=config_str)
+            else:
+                text = pytesseract.image_to_string(image, lang=OCR_LANGUAGE, config='--psm 6')
+
+    except Exception as e:
+        print(f"Błąd OCR ({engine}): {e}")
+        return ""
 
     # 3. Czyszczenie wyniku
     try:

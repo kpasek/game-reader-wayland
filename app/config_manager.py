@@ -21,6 +21,7 @@ DEFAULT_PRESET_CONTENT = {
     "monitor": [],
     "resolution": "1920x1080",
     "subtitle_mode": "Full Lines",
+    "ocr_engine": "Tesseract",
     "ocr_scale_factor": 0.5,
     "capture_interval": 0.5,
     "audio_speed": 1.15,

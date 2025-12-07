@@ -197,6 +197,20 @@ class SettingsDialog(tk.Toplevel):
         tab_img = ttk.Frame(tabs)
         tabs.add(tab_img, text="OCR i Obraz")
 
+        lf_engine = ttk.LabelFrame(tab_img, text="Silnik OCR", padding=10)
+        lf_engine.pack(fill=tk.X, pady=10, padx=5)
+
+        ttk.Label(lf_engine, text="Wybierz bibliotekę:").pack(side=tk.LEFT)
+        cb_engine = ttk.Combobox(lf_engine, textvariable=self.app.var_ocr_engine,
+                                 values=["Tesseract", "EasyOCR"], state="readonly", width=15)
+        cb_engine.pack(side=tk.LEFT, padx=10)
+        cb_engine.bind("<<ComboboxSelected>>",
+                       lambda e: self.app._save_preset_val("ocr_engine", self.app.var_ocr_engine.get()))
+
+
+        ttk.Label(lf_engine, text="(EasyOCR jest wolniejszy, ale często dokładniejszy)",
+                  font=("Arial", 8), foreground="gray").pack(side=tk.LEFT, padx=5)
+
         lf_ocr = ttk.LabelFrame(tab_img, text="Filtry obrazu", padding=10)
         lf_ocr.pack(fill=tk.X, pady=10, padx=5)
 
