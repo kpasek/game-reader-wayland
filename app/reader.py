@@ -299,6 +299,20 @@ class ReaderThread(threading.Thread):
                     if idx_match not in self.recent_match_indices:
                         print(f"Match: {score}% -> Line {idx_match}")
                         self.recent_match_indices.append(idx_match)
-                        self.audio_queue.put(os.path.join(audio_dir, f"output1 ({idx_match + 1}){audio_ext}"))
+
+                        audio_path = os.path.join(audio_dir, f"output1 ({idx_match + 1}){audio_ext}")
+
+                        # --- LOGIKA PRZYSPIESZANIA ---
+                        # Sprawdzamy obłożenie kolejki w momencie dodawania
+                        q_size = self.audio_queue.qsize()
+                        speed_multiplier = 1.0
+
+                        if q_size == 1:
+                            speed_multiplier = 1.10  # +10% jeśli jeden element czeka
+                        elif q_size > 1:
+                            speed_multiplier = 1.20  # +20% jeśli więcej niż jeden
+
+                        # Przekazujemy krotkę: (ścieżka, wyliczony_mnożnik)
+                        self.audio_queue.put((audio_path, speed_multiplier))
 
         capture_worker.join()

@@ -31,21 +31,35 @@ class PlayerThread(threading.Thread):
     def run(self):
         while not self.stop_event.is_set():
             try:
-                # Czekamy na plik audio w kolejce (z timeoutem, by sprawdzać stop_event)
-                audio_file = self.audio_queue.get(timeout=0.5)
+                # Czekamy na dane w kolejce
+                data = self.audio_queue.get(timeout=0.5)
             except queue.Empty:
                 continue
+
+            # Obsługa formatu danych (Tuple vs String dla kompatybilności)
+            if isinstance(data, tuple):
+                audio_file, dynamic_multiplier = data
+            else:
+                audio_file = data
+                dynamic_multiplier = 1.0
 
             if not os.path.exists(audio_file):
                 print(f"Błąd: Plik audio nie istnieje: {audio_file}")
                 continue
 
-            # Pobieramy aktualne ustawienia
-            speed = self.base_speed_callback() if self.base_speed_callback else 1.0
-            volume = self.volume_callback() if self.volume_callback else 1.0
+            # Pobieramy bazowe ustawienia z GUI
+            base_speed = self.base_speed_callback() if self.base_speed_callback else 1.0
+            base_volume = self.volume_callback() if self.volume_callback else 1.0
+
+            # Wyliczamy ostateczną prędkość
+            final_speed = base_speed * dynamic_multiplier
+
+            # Zabezpieczenie dla filtra atempo (limit ffplay to 0.5 - 100.0)
+            final_speed = max(0.5, min(final_speed, 100.0))
 
             # Budowanie komendy dla ffplay
-            filter_complex = f"atempo={speed},volume={volume},alimiter=limit=0.95"
+            # Używamy final_speed w filtrze atempo
+            filter_complex = f"atempo={final_speed:.2f},volume={base_volume:.2f},alimiter=limit=0.95"
 
             cmd = [
                 'ffplay',
@@ -60,8 +74,8 @@ class PlayerThread(threading.Thread):
                 self.current_process = subprocess.Popen(
                     cmd,
                     startupinfo=self._get_startup_info(),
-                    stdout=subprocess.DEVNULL,  # Wyślij logi w nicość
-                    stderr=subprocess.DEVNULL  # Wyślij błędy w nicość
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
                 )
 
                 # Czekamy na zakończenie odtwarzania lub sygnał stop
