@@ -74,9 +74,7 @@ def preprocess_image(image: Image.Image, scale: float = 1.0,
         total_pixels = image.width * image.height
         density = black_pixels / total_pixels
 
-        # Jeśli czarnych pikseli jest mniej niż 0.5% powierzchni lub mniej niż 50 pikseli ogółem,
-        # uznajemy, że to szum tła gry, a nie tekst.
-        if density < 0.005 or black_pixels < 50:
+        if density < 0.005 or black_pixels < 80:
             return image, False
 
         return image, True

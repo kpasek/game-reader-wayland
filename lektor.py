@@ -181,7 +181,7 @@ class LektorApp:
 
         # Audio
         self.var_resolution = tk.StringVar()
-        self.var_speed = tk.DoubleVar(value=1.0)
+        self.var_speed = tk.DoubleVar(value=1.2)
         self.var_volume = tk.DoubleVar(value=1.0)
         self.var_audio_ext = tk.StringVar(value=".ogg")
 
@@ -332,7 +332,7 @@ class LektorApp:
         grp_aud.pack(fill=tk.X, pady=10)
 
         ttk.Label(grp_aud, text="Prędkość:").grid(row=0, column=0)
-        s_spd = ttk.Scale(grp_aud, from_=0.9, to=1.3, variable=self.var_speed,
+        s_spd = ttk.Scale(grp_aud, from_=0.9, to=1.5, variable=self.var_speed,
                           command=lambda v: self.lbl_spd.config(text=f"{float(v):.2f}x"))
         s_spd.grid(row=0, column=1, sticky="ew", padx=10)
         s_spd.bind("<ButtonRelease-1>", lambda e: self._save_preset_val("audio_speed", round(self.var_speed.get(), 2)))
