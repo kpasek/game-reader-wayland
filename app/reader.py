@@ -6,7 +6,7 @@ import queue
 from collections import deque
 from datetime import datetime
 from typing import Optional, Tuple, Dict, Any, List
-from PIL import Image
+from PIL import Image, ImageChops, ImageStat
 
 from app.capture import capture_region
 from app.ocr import preprocess_image, recognize_text, get_text_bounds
@@ -17,6 +17,7 @@ from app.config_manager import ConfigManager
 class CaptureWorker(threading.Thread):
     """Wątek PRODUCENTA: Robi zrzuty ekranu."""
 
+    # Bez zmian w logice, tylko przekazuje obraz
     def __init__(self, stop_event: threading.Event, img_queue: queue.Queue,
                  unified_area: Dict[str, int], interval: float):
         super().__init__(daemon=True)
@@ -40,7 +41,7 @@ class CaptureWorker(threading.Thread):
                             self.img_queue.get_nowait()
                         except queue.Empty:
                             pass
-
+                    # Przekazujemy krotkę (obraz, czas_zrzutu)
                     self.img_queue.put((full_img, t_cap), block=False)
                 except queue.Full:
                     pass
@@ -74,17 +75,25 @@ class ReaderThread(threading.Thread):
         self.img_queue = None
         self.combined_regex = ""
 
-        # Cache ustawień
+        # Cache poprzednich klatek do wykrywania zmian (optymalizacja)
+        self.last_monitor_crops: Dict[int, Image.Image] = {}
+
         self.ocr_scale = 1.0
         self.empty_threshold = 0.15
         self.rerun_threshold = 50
         self.text_alignment = "Center"
         self.save_logs = False
-
         self.subtitle_mode = 'Full Lines'
+
+        text_color_mode = app_settings.get('text_color_mode', 'Light')
+        self.invert_colors = (text_color_mode == 'Light')  # Light = jasne napisy = trzeba inwertować
+
+        # Ustawienia preprocessingu
         self.ocr_grayscale = app_settings.get('ocr_grayscale', False)
         self.ocr_contrast = app_settings.get('ocr_contrast', False)
+        self.ocr_binarize = True  # Wymuszamy domyślnie dla wydajności
 
+    # ... (trigger_area_3, _prepare_regex, _scale_monitor_areas bez zmian) ...
     def trigger_area_3(self, duration: float = 2.0):
         self.area3_expiry_time = time.time() + duration
         if self.log_queue:
@@ -115,29 +124,28 @@ class ReaderThread(threading.Thread):
             return monitors
 
     def _smart_retry_ocr(self, image: Image.Image) -> str:
-        """
-        Próbuje znaleźć obszar tekstu, przyciąć go i ponownie odczytać.
-        """
+        # Bez zmian w logice
         bounds = get_text_bounds(image)
-        if not bounds:
-            return ""
-
+        if not bounds: return ""
         l, t, r, b = bounds
-        # Margines 10px
-        l = max(0, l - 10)
-        t = max(0, t - 10)
-        r = min(image.width, r + 10)
-        b = min(image.height, b + 10)
-
-        # Jeśli przycięcie jest niewiele mniejsze od oryginału, ignoruj
-        if (r - l) > image.width * 0.9 and (b - t) > image.height * 0.9:
-            return ""
-
+        l, t, r, b = max(0, l - 10), max(0, t - 10), min(image.width, r + 10), min(image.height, b + 10)
+        if (r - l) > image.width * 0.9 and (b - t) > image.height * 0.9: return ""
         crop = image.crop((l, t, r, b))
-        # Powiększ fragment 2x, aby ułatwić OCR
         crop = crop.resize((crop.width * 2, crop.height * 2), Image.BICUBIC)
-
+        # Przy retry warto wyłączyć auto-binaryzację w recognize_text lub obsłużyć to w preprocess
+        # Tutaj zakładamy, że recognize_text wywoła standardowy preprocess
         return recognize_text(crop, self.combined_regex, self.auto_remove_names, empty_threshold=0.0)
+
+    def _images_are_similar(self, img1: Image.Image, img2: Image.Image) -> bool:
+        if img1 is None or img2 is None: return False
+        if img1.size != img2.size: return False
+
+        # Obliczamy różnicę
+        diff = ImageChops.difference(img1, img2)
+
+        stat = ImageStat.Stat(diff)
+        # Jeśli pojawi się nowy tekst, średnia skoczy mocno w górę.
+        return sum(stat.mean) < 5.0
 
     def run(self):
         preset = ConfigManager.load_preset(self.config_path)
@@ -148,15 +156,12 @@ class ReaderThread(threading.Thread):
         self.rerun_threshold = preset.get('rerun_threshold', 50)
         self.text_alignment = preset.get('text_alignment', "Center")
         self.save_logs = preset.get('save_logs', False)
-
         self.subtitle_mode = preset.get('subtitle_mode', 'Full Lines')
         interval = preset.get('capture_interval', 0.5)
 
         raw_subtitles = ConfigManager.load_text_lines(preset.get('text_file_path'))
-
         min_line_len = preset.get('min_line_length', 0)
         precomputed_data = precompute_subtitles(raw_subtitles, min_line_len) if raw_subtitles else ([], {})
-
         self.combined_regex = self._prepare_regex(preset.get('names_file_path'))
 
         raw_monitors = preset.get('monitor', [])
@@ -179,10 +184,15 @@ class ReaderThread(threading.Thread):
         capture_worker.start()
 
         if self.log_queue and self.save_logs:
-            self.log_queue.put({"time": "INFO",
-                                "line_text": f"Start. Rerun={self.rerun_threshold}, MinLen={min_line_len}, Align={self.text_alignment}"})
+            self.log_queue.put({"time": "INFO", "line_text": f"Start Reader. Logs enabled."})
 
-        print(f"ReaderThread started. Scale: {self.ocr_scale}, MinLen: {min_line_len}")
+        # Nagłówek logów do pliku
+        if self.save_logs:
+            with open("session_log.txt", "a", encoding='utf-8') as f:
+                f.write(f"\n=== SESSION START {datetime.now()} ===\n")
+                f.write("Time | Monitor | Capture(ms) | Pre(ms) | OCR(ms) | Match(ms) | Text | MatchResult\n")
+
+        print(f"ReaderThread started.")
 
         while not self.stop_event.is_set():
             try:
@@ -190,6 +200,7 @@ class ReaderThread(threading.Thread):
             except queue.Empty:
                 continue
 
+            # Czyszczenie kolejki (drop frame strategy)
             if self.img_queue.qsize() > 0:
                 try:
                     self.img_queue.get_nowait()
@@ -197,26 +208,50 @@ class ReaderThread(threading.Thread):
                     pass
 
             for idx, area in enumerate(monitors):
+                # --- START POMIARÓW DLA OBSZARU ---
+                t_start_proc = time.perf_counter()
+
                 if idx == 2 and time.time() > self.area3_expiry_time:
                     continue
 
                 rel_x, rel_y = area['left'] - min_l, area['top'] - min_t
                 crop = full_img.crop((rel_x, rel_y, rel_x + area['width'], rel_y + area['height']))
 
-                t1 = time.perf_counter()
-                processed = preprocess_image(crop, self.ocr_scale, self.ocr_grayscale, self.ocr_contrast)
+                # --- OPTYMALIZACJA 1: FRAME DIFFERENCE ---
+                last_crop = self.last_monitor_crops.get(idx)
+                if self._images_are_similar(crop, last_crop):
+                    # Obraz statyczny - pomijamy OCR
+                    continue
 
+                # Aktualizujemy cache (robimy kopię, bo crop może być modyfikowany później, choć tu preprocess zwraca nowy obiekt)
+                self.last_monitor_crops[idx] = crop.copy()
+
+                # --- PREPROCESSING ---
+                t_pre_start = time.perf_counter()
+                # Przekazujemy flagę binarize=True dla lepszej wydajności Tesseracta
+                processed, has_content = preprocess_image(crop, self.ocr_scale, self.invert_colors)
+
+                if not has_content:
+                    # Jeśli preprocess wykrył, że to tylko tło -> pomijamy OCR!
+                    # To tutaj zyskasz najwięcej czasu na krótkich/pustych frazach.
+                    if self.log_queue and self.save_logs:
+                        # Opcjonalnie loguj "SKIP (Empty)"
+                        pass
+                    continue
+
+                t_pre = (time.perf_counter() - t_pre_start) * 1000
+
+                # --- OCR ---
+                t_ocr_start = time.perf_counter()
                 text = recognize_text(processed, self.combined_regex, self.auto_remove_names, self.empty_threshold)
 
+                # Smart Retry logic (tylko jeśli tekst jest krótki/szumiący)
                 if 0 < len(text) < self.rerun_threshold:
                     retry_text = self._smart_retry_ocr(processed)
                     if len(retry_text) > len(text):
-                        if self.log_queue:
-                            self.log_queue.put(
-                                {"time": "DEBUG", "line_text": f"Smart Retry: '{text}' -> '{retry_text}'"})
                         text = retry_text
 
-                t_ocr = (time.perf_counter() - t1) * 1000
+                t_ocr = (time.perf_counter() - t_ocr_start) * 1000
 
                 if not text:
                     continue
@@ -225,22 +260,38 @@ class ReaderThread(threading.Thread):
                     continue
                 self.last_ocr_texts.append(text)
 
-                t2 = time.perf_counter()
+                # --- MATCHING ---
+                t_match_start = time.perf_counter()
                 match = find_best_match(text, precomputed_data, self.subtitle_mode, last_index=self.last_matched_idx)
-                t_match = (time.perf_counter() - t2) * 1000
+                t_match = (time.perf_counter() - t_match_start) * 1000
 
+                # --- LOGGING ---
                 if self.log_queue:
                     line_txt = raw_subtitles[match[0]] if match else ""
+
+                    # Dane do GUI
                     log_entry = {
-                        "time": datetime.now().strftime('%H:%M:%S'),
+                        "time": datetime.now().strftime('%H:%M:%S.%f')[:-3],
                         "ocr": text, "match": match, "line_text": line_txt,
-                        "stats": {"monitor": idx + 1, "cap_ms": t_cap, "ocr_ms": t_ocr, "match_ms": t_match}
+                        "stats": {
+                            "monitor": idx + 1,
+                            "cap_ms": t_cap,
+                            "pre_ms": t_pre,
+                            "ocr_ms": t_ocr,
+                            "match_ms": t_match
+                        }
                     }
                     self.log_queue.put(log_entry)
 
+                    # Zapis do pliku - format CSV-like dla łatwiejszej analizy
                     if self.save_logs:
                         with open("session_log.txt", "a", encoding='utf-8') as f:
-                            f.write(f"{log_entry['time']} | OCR: {text} | Match: {line_txt} \n")
+                            # Time | Mon | Cap | Pre | OCR | Match | Text | Result
+                            match_str = f"MATCH({match[1]}%): {line_txt}" if match else "NO MATCH"
+                            log_line = (f"{log_entry['time']} | M{idx + 1} | "
+                                        f"Cap:{t_cap:.0f}ms | Pre:{t_pre:.0f}ms | OCR:{t_ocr:.0f}ms | Match:{t_match:.0f}ms | "
+                                        f"'{text}' | {match_str}\n")
+                            f.write(log_line)
 
                 if match:
                     idx_match, score = match

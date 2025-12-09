@@ -143,7 +143,7 @@ class LektorApp:
     def __init__(self, root: tk.Tk, autostart_preset: Optional[str], game_cmd: list):
         self.root = root
         self.root.title(f"Lektor {APP_VERSION}")
-        self.root.geometry("750x300")
+        self.root.geometry("750x350")
 
         self.config_mgr = ConfigManager()
         self.game_cmd = game_cmd
@@ -278,8 +278,6 @@ class LektorApp:
     def _init_gui(self):
         menubar = tk.Menu(self.root)
         file_menu = tk.Menu(menubar, tearoff=0)
-        file_menu.add_command(label="Ustawienia aplikacji", command=self.open_settings)
-        file_menu.add_separator()
         file_menu.add_command(label="Wyjdź", command=self.on_close)
         menubar.add_cascade(label="Plik", menu=file_menu)
 
@@ -363,6 +361,9 @@ class LektorApp:
         self.btn_start.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         self.btn_stop = ttk.Button(frm_btn, text=f"STOP ({hk_start})", command=self.stop_reading, state="disabled")
         self.btn_stop.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+
+        self.btn_settings = ttk.Button(frm_btn, text="⚙ Ustawienia", command=self.open_settings)
+        self.btn_settings.pack(side=tk.LEFT, padx=5)
 
         ttk.Label(self.root, text=f"Wersja: {APP_VERSION}", font=("Arial", 8)).pack(side=tk.BOTTOM, anchor=tk.E, padx=5)
 

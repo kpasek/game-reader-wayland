@@ -35,27 +35,26 @@ class LogWindow(tk.Toplevel):
         self.after(500, self.update_logs)
 
     def _append_text(self, data):
-        # Używamy .get() aby uniknąć KeyError przy komunikatach systemowych
         timestamp = data.get('time', '')
         ocr = data.get('ocr')
         match = data.get('match')
         stats = data.get('stats', {})
         line_text = data.get('line_text', '')
 
-        # Jeśli 'ocr' jest None, traktujemy to jako komunikat informacyjny/debug
         if ocr is None:
             msg = f"[{timestamp}] {line_text}\n"
             msg += "-" * 40 + "\n"
         else:
-            # Standardowy log z procesu OCR
             msg = f"[{timestamp}] OCR: {ocr}\n"
-
             if stats:
                 mon = stats.get('monitor', '?')
                 t_cap = stats.get('cap_ms', 0)
+                t_pre = stats.get('pre_ms', 0)
                 t_ocr = stats.get('ocr_ms', 0)
                 t_match = stats.get('match_ms', 0)
-                msg += f"   [Obszar: {mon} | Zrzut: {t_cap:.0f}ms | OCR: {t_ocr:.0f}ms | Match: {t_match:.0f}ms]\n"
+
+                # Bardziej zwarty format
+                msg += f"   [M{mon} | Cap:{t_cap:.0f} | Pre:{t_pre:.0f} | OCR:{t_ocr:.0f} | Match:{t_match:.0f} ms]\n"
 
             if match:
                 msg += f"   >>> MATCH ({match[1]}%): {line_text}\n"
@@ -63,7 +62,6 @@ class LogWindow(tk.Toplevel):
                 msg += "   >>> Brak dopasowania\n"
             msg += "-" * 40 + "\n"
 
-        # GUI Update
         self.text_area.config(state='normal')
         self.text_area.insert(tk.END, msg)
 
