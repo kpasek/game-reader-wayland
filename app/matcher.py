@@ -96,7 +96,7 @@ def find_best_match(ocr_text: str,
     ocr_len = len(ocr_clean)
 
     # Wymuś 'Full Lines' dla bardzo krótkich tekstów, aby uniknąć fałszywych dopasowań
-    effective_mode = "Full Lines" if ocr_len < 20 else mode
+    effective_mode = "Full Lines" if ocr_len < 25 else mode
 
     # 1. Szukanie lokalne
     match = _scan_list(ocr_clean, ocr_len, candidates_in_window, effective_mode)
@@ -124,22 +124,15 @@ def _scan_list(ocr_text: str, ocr_len: int, candidates: List[SubtitleEntry], mod
     for _, sub_clean, original_idx, sub_len in candidates:
         len_diff = abs(ocr_len - sub_len)
 
-        if mode == "Full Lines":
-            # Jeśli różnica długości jest duża (>30%), pomijamy (optymalizacja)
-            if len_diff > max(ocr_len, sub_len) * 0.30:
+        if mode == "Partial Lines":
+            if sub_len < ocr_len - 5:
                 continue
-            score = fuzz.ratio(sub_clean, ocr_text)
-
-        elif mode == "Partial Lines":
-            if sub_len < ocr_len - 3:
-                continue
-            score = fuzz.partial_ratio(sub_clean, ocr_text)
-            # Kara za brak zgodności początku przy dużej różnicy długości
-            if score > 80 and len_diff > 15:
-                if not sub_clean.startswith(ocr_text[:min(ocr_len, 10)]):
-                    score -= 10
+            sub_clean = sub_clean[:ocr_len + 5]
         else:
-            score = 0
+            # Jeśli różnica długości jest duża, pomijamy (optymalizacja)
+            if len_diff > max(ocr_len, sub_len) * 0.25:
+                continue
+        score = fuzz.ratio(sub_clean, ocr_text)
 
         if score > best_score:
             best_score = score
@@ -155,7 +148,7 @@ def _scan_list(ocr_text: str, ocr_len: int, candidates: List[SubtitleEntry], mod
                 best_len_diff = len_diff
 
     # Progi akceptacji
-    min_score = 95 if ocr_len < 6 else 85
+    min_score = 90 if ocr_len < 6 else 75
 
     if best_score >= min_score:
         return best_original_idx, int(best_score)

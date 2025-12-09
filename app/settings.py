@@ -27,7 +27,7 @@ class SettingsDialog(tk.Toplevel):
         self.var_hk_area3 = tk.StringVar(value=settings.get('hotkey_area3', '<ctrl>+<f6>'))
 
         self._build_ui()
-        self.geometry("550x700")  # Zwiększone okno, by pomieścić opcje
+        self.geometry("650x730")
         self.grab_set()
 
     def _build_ui(self):
@@ -116,6 +116,21 @@ class SettingsDialog(tk.Toplevel):
         s_int.bind("<ButtonRelease-1>",
                    lambda e: self.app._save_preset_val("capture_interval",
                                                        round(self.app.var_capture_interval.get(), 2)))
+        f_color = ttk.Frame(grp_cfg)
+        f_color.pack(fill=tk.X, pady=5)
+        ttk.Label(f_color, text="Kolor napisów:").pack(side=tk.LEFT)
+
+        # Wartości: Light (Jasne na ciemnym), Dark (Ciemne na jasnym)
+        cb_color = ttk.Combobox(f_color, textvariable=self.app.var_text_color,
+                                values=["Light", "Dark"], state="readonly", width=15)
+        cb_color.pack(side=tk.LEFT, padx=5)
+        cb_color.bind("<<ComboboxSelected>>",
+                      lambda e: self.app._save_preset_val("text_color_mode", self.app.var_text_color.get()))
+
+        # Krótka legenda dla użytkownika
+        ttk.Label(f_color, text="(Light = Jasne napisy, ciemne tło)", font=("Arial", 8, "italic"),
+                  foreground="gray").pack(side=tk.LEFT, padx=5)
+
         lbl_int.pack(side=tk.LEFT)
 
         # --- Optymalizacja ---

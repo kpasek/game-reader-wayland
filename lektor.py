@@ -163,6 +163,7 @@ class LektorApp:
 
         # Opcje Lektora
         self.var_subtitle_mode = tk.StringVar(value="Full Lines")
+        self.var_text_color = tk.StringVar(value="Light")
         self.var_ocr_scale = tk.DoubleVar(value=1.0)
         self.var_empty_threshold = tk.DoubleVar(value=0.15)
         self.var_capture_interval = tk.DoubleVar(value=0.5)
@@ -442,7 +443,8 @@ class LektorApp:
         # Label rerun usunięty
 
         self.var_min_line_len.set(data.get("min_line_length", 0))
-        # Label min usunięty
+
+        self.var_text_color.set(data.get("text_color_mode", "Light"))
 
         self.var_text_alignment.set(data.get("text_alignment", "Center"))
         self.var_save_logs.set(data.get("save_logs", False))
