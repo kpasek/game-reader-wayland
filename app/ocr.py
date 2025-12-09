@@ -74,7 +74,7 @@ def preprocess_image(image: Image.Image, scale: float = 1.0,
         total_pixels = image.width * image.height
         density = black_pixels / total_pixels
 
-        if density < 0.005 or black_pixels < 80:
+        if density < 0.015 or black_pixels < 80:
             return image, False
 
         return image, True

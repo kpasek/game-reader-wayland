@@ -46,7 +46,7 @@ stop_event = threading.Event()
 audio_queue = queue.Queue()
 log_queue = queue.Queue()
 
-APP_VERSION = "v0.8.7"
+APP_VERSION = "v0.9.0"
 STANDARD_WIDTH = 3840
 STANDARD_HEIGHT = 2160
 
