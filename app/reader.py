@@ -6,7 +6,8 @@ import queue
 from collections import deque
 from datetime import datetime
 from typing import Optional, Tuple, Dict, Any, List
-from PIL import Image, ImageChops, ImageStat
+# Zmiana: Dodano ImageOps i ImageFilter do importów
+from PIL import Image, ImageChops, ImageStat, ImageOps, ImageFilter
 
 from app.capture import capture_region
 from app.ocr import preprocess_image, recognize_text, get_text_bounds
@@ -123,17 +124,65 @@ class ReaderThread(threading.Thread):
         except:
             return monitors
 
+    def _get_fast_text_bounds(self, image: Image.Image, padding: int = 6) -> Optional[Tuple[int, int, int, int]]:
+        """
+        Szybka metoda (native PIL) do znajdowania obszaru tekstu.
+        Ignoruje drobny szum dzięki filtrowaniu morfologicznemu.
+        Zastępuje powolne pytesseract.image_to_data.
+        """
+        try:
+            # Upewniamy się, że pracujemy na obrazie w skali szarości ('L')
+            # Obraz wejściowy jest z preprocess_image (zwykle '1' lub 'L', Text=0, BG=255)
+            if image.mode != 'L':
+                img_l = image.convert('L')
+            else:
+                img_l = image
+
+            # 1. Filtr MaxFilter(3) zadziała jak erozja na czarnym tekście (Text=0).
+            # Jeśli piksel jest czarny (0), a sąsiedzi biali (255), MaxFilter wybierze 255.
+            # To usunie "szum" (pojedyncze czarne kropki lub bardzo cienkie linie < 2px).
+            filtered = img_l.filter(ImageFilter.MaxFilter(3))
+
+            # 2. Inwersja, aby tekst stał się "obiektem" (255) dla funkcji getbbox()
+            inverted = ImageOps.invert(filtered)
+
+            # 3. getbbox zwraca prostokąt obejmujący wszystkie niezerowe piksele
+            bbox = inverted.getbbox()
+
+            if not bbox:
+                return None
+
+            # 4. Dodanie marginesu i przycięcie do wymiarów obrazu
+            l, t, r, b = bbox
+            w, h = image.size
+            l = max(0, l - padding)
+            t = max(0, t - padding)
+            r = min(w, r + padding)
+            b = min(h, b + padding)
+
+            return (l, t, r, b)
+        except Exception:
+            # Fallback w razie dziwnych błędów PIL
+            return None
+
     def _smart_retry_ocr(self, image: Image.Image) -> str:
-        # Bez zmian w logice
-        bounds = get_text_bounds(image)
+        # Zastąpiono wolne get_text_bounds (Tesseract) szybką wersją PIL
+        bounds = self._get_fast_text_bounds(image)
+
         if not bounds: return ""
+
         l, t, r, b = bounds
-        l, t, r, b = max(0, l - 10), max(0, t - 10), min(image.width, r + 10), min(image.height, b + 10)
-        if (r - l) > image.width * 0.9 and (b - t) > image.height * 0.9: return ""
+
+        # Jeśli wykryty obszar nadal zajmuje prawie cały obraz (np. 90%+),
+        # to znaczy, że szum jest duży lub tekst jest długi - nie ma sensu cropować i tracić czasu.
+        if (r - l) > image.width * 0.92 and (b - t) > image.height * 0.92:
+            return ""
+
         crop = image.crop((l, t, r, b))
         crop = crop.resize((crop.width * 2, crop.height * 2), Image.BICUBIC)
-        # Przy retry warto wyłączyć auto-binaryzację w recognize_text lub obsłużyć to w preprocess
-        # Tutaj zakładamy, że recognize_text wywoła standardowy preprocess
+
+        # Wywołujemy OCR na oczyszczonym i powiększonym wycinku
+        # empty_threshold=0.0 wyłącza ponowne sprawdzanie pustego obrazu
         return recognize_text(crop, self.combined_regex, self.auto_remove_names, empty_threshold=0.0)
 
     def _images_are_similar(self, img1: Image.Image, img2: Image.Image) -> bool:
