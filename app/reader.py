@@ -6,7 +6,6 @@ import queue
 from collections import deque
 from datetime import datetime
 from typing import Optional, Tuple, Dict, Any, List
-# Zmiana: Dodano ImageOps i ImageFilter do importów
 from PIL import Image, ImageChops, ImageStat, ImageOps, ImageFilter
 
 from app.capture import capture_region
@@ -18,7 +17,6 @@ from app.config_manager import ConfigManager
 class CaptureWorker(threading.Thread):
     """Wątek PRODUCENTA: Robi zrzuty ekranu."""
 
-    # Bez zmian w logice, tylko przekazuje obraz
     def __init__(self, stop_event: threading.Event, img_queue: queue.Queue,
                  unified_area: Dict[str, int], interval: float):
         super().__init__(daemon=True)
@@ -42,7 +40,6 @@ class CaptureWorker(threading.Thread):
                             self.img_queue.get_nowait()
                         except queue.Empty:
                             pass
-                    # Przekazujemy krotkę (obraz, czas_zrzutu)
                     self.img_queue.put((full_img, t_cap), block=False)
                 except queue.Full:
                     pass
@@ -75,26 +72,29 @@ class ReaderThread(threading.Thread):
         self.area3_expiry_time = 0.0
         self.img_queue = None
         self.combined_regex = ""
-
-        # Cache poprzednich klatek do wykrywania zmian (optymalizacja)
         self.last_monitor_crops: Dict[int, Image.Image] = {}
 
         self.ocr_scale = 1.0
         self.empty_threshold = 0.15
+        self.ocr_density_threshold = 0.015
         self.rerun_threshold = 50
         self.text_alignment = "Center"
         self.save_logs = False
         self.subtitle_mode = 'Full Lines'
 
-        text_color_mode = app_settings.get('text_color_mode', 'Light')
-        self.invert_colors = (text_color_mode == 'Light')  # Light = jasne napisy = trzeba inwertować
+        # Nowe parametry Matchera
+        self.matcher_config = {}
+        # Nowe parametry Audio
+        self.audio_speed_inc_1 = 1.2
+        self.audio_speed_inc_2 = 1.3
 
-        # Ustawienia preprocessingu
+        text_color_mode = app_settings.get('text_color_mode', 'Light')
+        self.invert_colors = (text_color_mode == 'Light')
+
         self.ocr_grayscale = app_settings.get('ocr_grayscale', False)
         self.ocr_contrast = app_settings.get('ocr_contrast', False)
-        self.ocr_binarize = True  # Wymuszamy domyślnie dla wydajności
+        self.ocr_binarize = True
 
-    # ... (trigger_area_3, _prepare_regex, _scale_monitor_areas bez zmian) ...
     def trigger_area_3(self, duration: float = 2.0):
         self.area3_expiry_time = time.time() + duration
         if self.log_queue:
@@ -125,34 +125,18 @@ class ReaderThread(threading.Thread):
             return monitors
 
     def _get_fast_text_bounds(self, image: Image.Image, padding: int = 6) -> Optional[Tuple[int, int, int, int]]:
-        """
-        Szybka metoda (native PIL) do znajdowania obszaru tekstu.
-        Ignoruje drobny szum dzięki filtrowaniu morfologicznemu.
-        Zastępuje powolne pytesseract.image_to_data.
-        """
         try:
-            # Upewniamy się, że pracujemy na obrazie w skali szarości ('L')
-            # Obraz wejściowy jest z preprocess_image (zwykle '1' lub 'L', Text=0, BG=255)
             if image.mode != 'L':
                 img_l = image.convert('L')
             else:
                 img_l = image
-
-            # 1. Filtr MaxFilter(3) zadziała jak erozja na czarnym tekście (Text=0).
-            # Jeśli piksel jest czarny (0), a sąsiedzi biali (255), MaxFilter wybierze 255.
-            # To usunie "szum" (pojedyncze czarne kropki lub bardzo cienkie linie < 2px).
             filtered = img_l.filter(ImageFilter.MaxFilter(3))
-
-            # 2. Inwersja, aby tekst stał się "obiektem" (255) dla funkcji getbbox()
             inverted = ImageOps.invert(filtered)
-
-            # 3. getbbox zwraca prostokąt obejmujący wszystkie niezerowe piksele
             bbox = inverted.getbbox()
 
             if not bbox:
                 return None
 
-            # 4. Dodanie marginesu i przycięcie do wymiarów obrazu
             l, t, r, b = bbox
             w, h = image.size
             l = max(0, l - padding)
@@ -162,51 +146,50 @@ class ReaderThread(threading.Thread):
 
             return (l, t, r, b)
         except Exception:
-            # Fallback w razie dziwnych błędów PIL
             return None
 
     def _smart_retry_ocr(self, image: Image.Image) -> str:
-        # Zastąpiono wolne get_text_bounds (Tesseract) szybką wersją PIL
         bounds = self._get_fast_text_bounds(image)
-
         if not bounds: return ""
-
         l, t, r, b = bounds
-
-        # Jeśli wykryty obszar nadal zajmuje prawie cały obraz (np. 90%+),
-        # to znaczy, że szum jest duży lub tekst jest długi - nie ma sensu cropować i tracić czasu.
         if (r - l) > image.width * 0.92 and (b - t) > image.height * 0.92:
             return ""
-
         crop = image.crop((l, t, r, b))
         crop = crop.resize((crop.width * 2, crop.height * 2), Image.BICUBIC)
-
-        # Wywołujemy OCR na oczyszczonym i powiększonym wycinku
-        # empty_threshold=0.0 wyłącza ponowne sprawdzanie pustego obrazu
+        # Przekazujemy również density_threshold (ewentualnie 0.0, by uniknąć odrzucenia fragmentu)
         return recognize_text(crop, self.combined_regex, self.auto_remove_names, empty_threshold=0.0)
 
     def _images_are_similar(self, img1: Image.Image, img2: Image.Image) -> bool:
         if img1 is None or img2 is None: return False
         if img1.size != img2.size: return False
-
-        # Obliczamy różnicę
         diff = ImageChops.difference(img1, img2)
-
         stat = ImageStat.Stat(diff)
-        # Jeśli pojawi się nowy tekst, średnia skoczy mocno w górę.
         return sum(stat.mean) < 5.0
 
     def run(self):
         preset = ConfigManager.load_preset(self.config_path)
         if not preset: return
 
+        # Ładowanie parametrów
         self.ocr_scale = preset.get('ocr_scale_factor', 1.0)
         self.empty_threshold = preset.get('empty_image_threshold', 0.15)
+        self.ocr_density_threshold = preset.get('ocr_density_threshold', 0.015)
         self.rerun_threshold = preset.get('rerun_threshold', 50)
         self.text_alignment = preset.get('text_alignment', "Center")
         self.save_logs = preset.get('save_logs', False)
         self.subtitle_mode = preset.get('subtitle_mode', 'Full Lines')
         interval = preset.get('capture_interval', 0.5)
+
+        self.audio_speed_inc_1 = preset.get('audio_speed_inc_1', 1.20)
+        self.audio_speed_inc_2 = preset.get('audio_speed_inc_2', 1.30)
+
+        # Konfiguracja dla matchera
+        self.matcher_config = {
+            'match_score_short': preset.get('match_score_short', 90),
+            'match_score_long': preset.get('match_score_long', 75),
+            'match_len_diff_ratio': preset.get('match_len_diff_ratio', 0.25),
+            'partial_mode_min_len': preset.get('partial_mode_min_len', 25)
+        }
 
         raw_subtitles = ConfigManager.load_text_lines(preset.get('text_file_path'))
         min_line_len = preset.get('min_line_length', 0)
@@ -234,8 +217,6 @@ class ReaderThread(threading.Thread):
 
         if self.log_queue and self.save_logs:
             self.log_queue.put({"time": "INFO", "line_text": f"Start Reader. Logs enabled."})
-
-        # Nagłówek logów do pliku
         if self.save_logs:
             with open("session_log.txt", "a", encoding='utf-8') as f:
                 f.write(f"\n=== SESSION START {datetime.now()} ===\n")
@@ -249,7 +230,6 @@ class ReaderThread(threading.Thread):
             except queue.Empty:
                 continue
 
-            # Czyszczenie kolejki (drop frame strategy)
             if self.img_queue.qsize() > 0:
                 try:
                     self.img_queue.get_nowait()
@@ -257,7 +237,6 @@ class ReaderThread(threading.Thread):
                     pass
 
             for idx, area in enumerate(monitors):
-                # --- START POMIARÓW DLA OBSZARU ---
                 t_start_proc = time.perf_counter()
 
                 if idx == 2 and time.time() > self.area3_expiry_time:
@@ -266,35 +245,25 @@ class ReaderThread(threading.Thread):
                 rel_x, rel_y = area['left'] - min_l, area['top'] - min_t
                 crop = full_img.crop((rel_x, rel_y, rel_x + area['width'], rel_y + area['height']))
 
-                # --- OPTYMALIZACJA 1: FRAME DIFFERENCE ---
                 last_crop = self.last_monitor_crops.get(idx)
                 if self._images_are_similar(crop, last_crop):
-                    # Obraz statyczny - pomijamy OCR
                     continue
-
-                # Aktualizujemy cache (robimy kopię, bo crop może być modyfikowany później, choć tu preprocess zwraca nowy obiekt)
                 self.last_monitor_crops[idx] = crop.copy()
 
-                # --- PREPROCESSING ---
                 t_pre_start = time.perf_counter()
-                # Przekazujemy flagę binarize=True dla lepszej wydajności Tesseracta
-                processed, has_content = preprocess_image(crop, self.ocr_scale, self.invert_colors)
+
+                # Przekazanie parametru density_threshold
+                processed, has_content = preprocess_image(crop, self.ocr_scale, self.invert_colors,
+                                                          self.ocr_density_threshold)
 
                 if not has_content:
-                    # Jeśli preprocess wykrył, że to tylko tło -> pomijamy OCR!
-                    # To tutaj zyskasz najwięcej czasu na krótkich/pustych frazach.
-                    if self.log_queue and self.save_logs:
-                        # Opcjonalnie loguj "SKIP (Empty)"
-                        pass
                     continue
 
                 t_pre = (time.perf_counter() - t_pre_start) * 1000
 
-                # --- OCR ---
                 t_ocr_start = time.perf_counter()
                 text = recognize_text(processed, self.combined_regex, self.auto_remove_names, self.empty_threshold)
 
-                # Smart Retry logic (tylko jeśli tekst jest krótki/szumiący)
                 if 0 < len(text) < self.rerun_threshold:
                     retry_text = self._smart_retry_ocr(processed)
                     if len(retry_text) > len(text):
@@ -309,16 +278,15 @@ class ReaderThread(threading.Thread):
                     continue
                 self.last_ocr_texts.append(text)
 
-                # --- MATCHING ---
                 t_match_start = time.perf_counter()
-                match = find_best_match(text, precomputed_data, self.subtitle_mode, last_index=self.last_matched_idx)
+                # Przekazanie matcher_config
+                match = find_best_match(text, precomputed_data, self.subtitle_mode,
+                                        last_index=self.last_matched_idx,
+                                        matcher_config=self.matcher_config)
                 t_match = (time.perf_counter() - t_match_start) * 1000
 
-                # --- LOGGING ---
                 if self.log_queue:
                     line_txt = raw_subtitles[match[0]] if match else ""
-
-                    # Dane do GUI
                     log_entry = {
                         "time": datetime.now().strftime('%H:%M:%S.%f')[:-3],
                         "ocr": text, "match": match, "line_text": line_txt,
@@ -331,11 +299,8 @@ class ReaderThread(threading.Thread):
                         }
                     }
                     self.log_queue.put(log_entry)
-
-                    # Zapis do pliku - format CSV-like dla łatwiejszej analizy
                     if self.save_logs:
                         with open("session_log.txt", "a", encoding='utf-8') as f:
-                            # Time | Mon | Cap | Pre | OCR | Match | Text | Result
                             match_str = f"MATCH({match[1]}%): {line_txt}" if match else "NO MATCH"
                             log_line = (f"{log_entry['time']} | M{idx + 1} | "
                                         f"Cap:{t_cap:.0f}ms | Pre:{t_pre:.0f}ms | OCR:{t_ocr:.0f}ms | Match:{t_match:.0f}ms | "
@@ -351,17 +316,15 @@ class ReaderThread(threading.Thread):
 
                         audio_path = os.path.join(audio_dir, f"output1 ({idx_match + 1}){audio_ext}")
 
-                        # --- LOGIKA PRZYSPIESZANIA ---
-                        # Sprawdzamy obłożenie kolejki w momencie dodawania
+                        # --- Zaktualizowana logika przyspieszania ---
                         q_size = self.audio_queue.qsize()
                         speed_multiplier = 1.0
 
                         if q_size == 1:
-                            speed_multiplier = 1.10  # +10% jeśli jeden element czeka
+                            speed_multiplier = self.audio_speed_inc_1
                         elif q_size > 1:
-                            speed_multiplier = 1.20  # +20% jeśli więcej niż jeden
+                            speed_multiplier = self.audio_speed_inc_2
 
-                        # Przekazujemy krotkę: (ścieżka, wyliczony_mnożnik)
                         self.audio_queue.put((audio_path, speed_multiplier))
 
         capture_worker.join()

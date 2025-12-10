@@ -39,10 +39,13 @@ if platform.system() == "Windows":
 
 
 def preprocess_image(image: Image.Image, scale: float = 1.0,
-                     invert_colors: bool = False) -> Tuple[Image.Image, bool]:
+                     invert_colors: bool = False,
+                     density_threshold: float = 0.015) -> Tuple[Image.Image, bool]:
     """
     Zwraca krotkę: (przetworzony_obraz, czy_zawiera_tresc).
     Jeśli czy_zawiera_tresc == False, należy pominąć OCR.
+
+    :param density_threshold: Minimalne zagęszczenie czarnych pikseli, aby uznać obraz za zawierający treść.
     """
     try:
         # 1. Skalowanie
@@ -74,7 +77,8 @@ def preprocess_image(image: Image.Image, scale: float = 1.0,
         total_pixels = image.width * image.height
         density = black_pixels / total_pixels
 
-        if density < 0.015 or black_pixels < 80:
+        # Użycie parametru z ustawień
+        if density < density_threshold or black_pixels < 80:
             return image, False
 
         return image, True
@@ -82,6 +86,7 @@ def preprocess_image(image: Image.Image, scale: float = 1.0,
     except Exception as e:
         print(f"Błąd preprocessingu: {e}", file=sys.stderr)
         return image, True
+
 
 def is_image_empty(image: Image.Image, threshold: float) -> bool:
     try:
@@ -91,10 +96,10 @@ def is_image_empty(image: Image.Image, threshold: float) -> bool:
             stat_img = image
 
         stat = ImageStat.Stat(stat_img)
-        # Dla obrazów binarnych ('1') stddev działa inaczej, ale nadal wykrywa "płaskie" obrazy
         return stat.stddev[0] < threshold
     except Exception:
         return False
+
 
 # ... (reszta funkcji get_text_bounds i recognize_text bez zmian) ...
 def get_text_bounds(image: Image.Image) -> Optional[Tuple[int, int, int, int]]:
@@ -129,9 +134,8 @@ def recognize_text(image: Image.Image, regex_pattern: str = "",
                    auto_remove_names: bool = True, empty_threshold: float = 0.15) -> str:
     """
     Główna funkcja OCR.
-    :param empty_threshold: Próg detekcji pustego obrazu. 0.0 wyłącza sprawdzanie.
     """
-    # 1. Optymalizacja: Pomiń puste klatki (tylko jeśli threshold > 0)
+    # 1. Optymalizacja: Pomiń puste klatki
     if empty_threshold > 0.001:
         if is_image_empty(image, empty_threshold):
             return ""
@@ -139,7 +143,6 @@ def recognize_text(image: Image.Image, regex_pattern: str = "",
     # 2. Wykonanie OCR
     try:
         if HAS_CONFIG_FILE:
-            # Używamy PSM 7 (Single text line) jeśli to krótkie frazy, lub 6 (block) uniwersalnie
             config_str = f'--psm 6 "{CONFIG_FILE_PATH}"'
             text = pytesseract.image_to_string(image, lang=OCR_LANGUAGE, config=config_str)
         else:

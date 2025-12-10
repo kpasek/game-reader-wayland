@@ -31,7 +31,15 @@ DEFAULT_PRESET_CONTENT = {
     "rerun_threshold": 50,
     "text_alignment": "Center",
     "save_logs": False,
-    "min_line_length": 3
+    "min_line_length": 3,
+    "empty_image_threshold": 0.15,
+    "ocr_density_threshold": 0.015,
+    "audio_speed_inc_1": 1.20,
+    "audio_speed_inc_2": 1.30,
+    "match_score_short": 90,
+    "match_score_long": 75,
+    "match_len_diff_ratio": 0.25,
+    "partial_mode_min_len": 25
 }
 
 
@@ -108,6 +116,11 @@ class ConfigManager:
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
+
+            # Uzupełnij brakujące klucze domyślnymi wartościami (dla kompatybilności wstecznej)
+            for k, v in DEFAULT_PRESET_CONTENT.items():
+                if k not in data:
+                    data[k] = v
 
             base_dir = os.path.dirname(os.path.abspath(path))
             for key in ['audio_dir', 'text_file_path', 'names_file_path']:

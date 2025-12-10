@@ -1,5 +1,5 @@
 import re
-from typing import List, Optional, Tuple, Dict
+from typing import List, Optional, Tuple, Dict, Any
 from app.text_processing import clean_text, smart_remove_name
 
 try:
@@ -16,11 +16,6 @@ SubtitleEntry = Tuple[str, str, int, int]
 def precompute_subtitles(raw_lines: List[str], min_length: int = 0) -> Tuple[List[SubtitleEntry], Dict[str, int]]:
     """
     Przetwarza listę napisów na format gotowy do szybkiego wyszukiwania.
-    Tworzy również mapę skrótów (hash map) dla idealnych dopasowań.
-
-    :param raw_lines: Lista surowych linii z pliku tekstowego.
-    :param min_length: Minimalna długość linii (bez znaków specjalnych), aby była brana pod uwagę.
-    :return: Krotka (lista_przetworzona, mapa_idealnych_dopasowan).
     """
     processed = []
     exact_map = {}
@@ -46,23 +41,16 @@ def precompute_subtitles(raw_lines: List[str], min_length: int = 0) -> Tuple[Lis
 def find_best_match(ocr_text: str,
                     precomputed_data: Tuple[List[SubtitleEntry], Dict[str, int]],
                     mode: str,
-                    last_index: int = -1) -> Optional[Tuple[int, int]]:
+                    last_index: int = -1,
+                    matcher_config: Dict[str, Any] = None) -> Optional[Tuple[int, int]]:
     """
-    Znajduje najlepsze dopasowanie tekstu z OCR w bazie napisów.
-
-    Strategia:
-    1. Sprawdzenie idealnego dopasowania (słownik).
-    2. Wyszukiwanie lokalne (w pobliżu ostatnio znalezionej linii).
-    3. Wyszukiwanie globalne (cały plik) - jeśli lokalne zawiodło.
-
-    :param ocr_text: Tekst rozpoznany przez OCR.
-    :param precomputed_data: Dane zwrócone przez precompute_subtitles.
-    :param mode: Tryb dopasowania ('Full Lines' lub 'Partial Lines').
-    :param last_index: Indeks ostatnio znalezionej linii (dla kontekstu).
-    :return: Krotka (indeks_linii, pewność_dopasowania_%) lub None.
+    Znajduje najlepsze dopasowanie tekstu z OCR w bazie napisów, używając konfiguracji.
     """
     if not ocr_text:
         return None
+
+    if matcher_config is None:
+        matcher_config = {}
 
     subtitles_list, exact_map = precomputed_data
 
@@ -95,18 +83,21 @@ def find_best_match(ocr_text: str,
 
     ocr_len = len(ocr_clean)
 
-    # Wymuś 'Full Lines' dla bardzo krótkich tekstów, aby uniknąć fałszywych dopasowań
-    effective_mode = "Full Lines" if ocr_len < 25 else mode
+    # Parametr: min długość dla trybu Partial Lines (domyślnie 25)
+    partial_min_len = matcher_config.get('partial_mode_min_len', 25)
+
+    # Wymuś 'Full Lines' dla bardzo krótkich tekstów
+    effective_mode = "Full Lines" if ocr_len < partial_min_len else mode
 
     # 1. Szukanie lokalne
-    match = _scan_list(ocr_clean, ocr_len, candidates_in_window, effective_mode)
+    match = _scan_list(ocr_clean, ocr_len, candidates_in_window, effective_mode, matcher_config)
     if match and match[1] >= 95:
         return match
 
     # 2. Szukanie globalne
-    global_match = _scan_list(ocr_clean, ocr_len, candidates_outside, effective_mode)
+    global_match = _scan_list(ocr_clean, ocr_len, candidates_outside, effective_mode, matcher_config)
 
-    # Jeśli znaleziono dopasowanie lokalne i globalne, preferuj lokalne, chyba że globalne jest znacznie pewniejsze
+    # Jeśli znaleziono dopasowanie lokalne i globalne, preferuj lokalne
     if match:
         if global_match and global_match[1] > match[1] + 5:
             return global_match
@@ -115,11 +106,17 @@ def find_best_match(ocr_text: str,
     return global_match
 
 
-def _scan_list(ocr_text: str, ocr_len: int, candidates: List[SubtitleEntry], mode: str) -> Optional[Tuple[int, int]]:
+def _scan_list(ocr_text: str, ocr_len: int, candidates: List[SubtitleEntry], mode: str, config: Dict[str, Any]) -> \
+Optional[Tuple[int, int]]:
     """Wewnętrzna funkcja iterująca po kandydatach i licząca Levenshtein ratio."""
     best_score = 0
     best_original_idx = -1
     best_len_diff = float('inf')
+
+    # Pobieranie parametrów z konfigu
+    ratio_limit = config.get('match_len_diff_ratio', 0.25)
+    score_short = config.get('match_score_short', 90)
+    score_long = config.get('match_score_long', 75)
 
     for _, sub_clean, original_idx, sub_len in candidates:
         len_diff = abs(ocr_len - sub_len)
@@ -129,9 +126,10 @@ def _scan_list(ocr_text: str, ocr_len: int, candidates: List[SubtitleEntry], mod
                 continue
             sub_clean = sub_clean[:ocr_len + 5]
         else:
-            # Jeśli różnica długości jest duża, pomijamy (optymalizacja)
-            if len_diff > max(ocr_len, sub_len) * 0.25:
+            # Optymalizacja oparta na różnicy długości (teraz konfigurowalna)
+            if len_diff > max(ocr_len, sub_len) * ratio_limit:
                 continue
+
         score = fuzz.ratio(sub_clean, ocr_text)
 
         if score > best_score:
@@ -142,13 +140,12 @@ def _scan_list(ocr_text: str, ocr_len: int, candidates: List[SubtitleEntry], mod
                 return best_original_idx, 100
 
         elif score == best_score:
-            # Przy równym wyniku wybierz ten o zbliżonej długości
             if len_diff < best_len_diff:
                 best_original_idx = original_idx
                 best_len_diff = len_diff
 
-    # Progi akceptacji
-    min_score = 90 if ocr_len < 6 else 75
+    # Progi akceptacji zależne od długości (teraz konfigurowalne)
+    min_score = score_short if ocr_len < 6 else score_long
 
     if best_score >= min_score:
         return best_original_idx, int(best_score)

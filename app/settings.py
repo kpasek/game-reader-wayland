@@ -18,7 +18,7 @@ class SettingsDialog(tk.Toplevel):
         self.transient(parent)
         self.title("Ustawienia aplikacji")
         self.settings = settings
-        self.app = app_instance  # Dostęp do zmiennych i metod LektorApp
+        self.app = app_instance
 
         # Zmienne UI (Globalne)
         self.var_gray = tk.BooleanVar(value=settings.get('ocr_grayscale', False))
@@ -26,144 +26,107 @@ class SettingsDialog(tk.Toplevel):
         self.var_hk_start = tk.StringVar(value=settings.get('hotkey_start_stop', '<ctrl>+<f5>'))
         self.var_hk_area3 = tk.StringVar(value=settings.get('hotkey_area3', '<ctrl>+<f6>'))
 
+        # Inicjalizacja nowych zmiennych presetu (jeśli app_instance ich jeszcze nie ma, choć powinny być w ConfigManager)
+        # Te zmienne są powiązane w LektorApp, ale tutaj musimy się upewnić, że są dostępne
+        # Zakładamy, że self.app ma już zdefiniowane te StringVar/DoubleVar w metodzie initialize_vars()
+        # lub dodamy je dynamicznie tutaj, jeśli brakuje.
+
+        self._ensure_app_vars()
+
         self._build_ui()
-        self.geometry("650x730")
+        self.geometry("680x780")
         self.grab_set()
+
+    def _ensure_app_vars(self):
+        """Pomocnicza funkcja do upewnienia się, że zmienne istnieją w obiekcie aplikacji."""
+        # Nowe parametry
+        if not hasattr(self.app, 'var_ocr_density'): self.app.var_ocr_density = tk.DoubleVar()
+        if not hasattr(self.app, 'var_audio_speed_1'): self.app.var_audio_speed_1 = tk.DoubleVar()
+        if not hasattr(self.app, 'var_audio_speed_2'): self.app.var_audio_speed_2 = tk.DoubleVar()
+        if not hasattr(self.app, 'var_match_score_short'): self.app.var_match_score_short = tk.IntVar()
+        if not hasattr(self.app, 'var_match_score_long'): self.app.var_match_score_long = tk.IntVar()
+        if not hasattr(self.app, 'var_match_len_diff'): self.app.var_match_len_diff = tk.DoubleVar()
+        if not hasattr(self.app, 'var_partial_min_len'): self.app.var_partial_min_len = tk.IntVar()
 
     def _build_ui(self):
         tabs = ttk.Notebook(self)
         tabs.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        # --- Karta 1: Zaawansowane (DOMYŚLNA) ---
-        tab_adv = ttk.Frame(tabs)
-        tabs.add(tab_adv, text="Zaawansowane")
+        # --- TABS ---
+        tab_ocr = ttk.Frame(tabs)
+        tab_dialogs = ttk.Frame(tabs)
+        tab_hk = ttk.Frame(tabs)
 
-        # Kontener ze scrollbarem dla zaawansowanych (gdyby okno było za małe)
-        canvas = tk.Canvas(tab_adv, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(tab_adv, orient="vertical", command=canvas.yview)
+        tabs.add(tab_ocr, text="Ustawienia OCR")
+        tabs.add(tab_dialogs, text="Ustawienia Dialogów")
+        tabs.add(tab_hk, text="Skróty klawiszowe")
+
+        # Helper do scrollowania dla obu głównych tabów
+        self._setup_scroll_frame(tab_ocr, self._fill_ocr_tab)
+        self._setup_scroll_frame(tab_dialogs, self._fill_dialogs_tab)
+
+        # Tab skrótów bez scrolla
+        self._fill_hk_tab(tab_hk)
+
+        # Przyciski
+        btn_f = ttk.Frame(self)
+        btn_f.pack(side=tk.BOTTOM, fill=tk.X, pady=10, padx=10)
+        ttk.Button(btn_f, text="Zapisz", command=self.save).pack(side=tk.RIGHT)
+        ttk.Button(btn_f, text="Anuluj", command=self.destroy).pack(side=tk.RIGHT, padx=5)
+
+    def _setup_scroll_frame(self, parent, fill_function):
+        canvas = tk.Canvas(parent, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas)
 
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-
+        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
 
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # Myszka scroll
         def _on_mousewheel(event):
             canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
-        canvas.bind_all("<MouseWheel>", _on_mousewheel)
-        self.bind("<Destroy>", lambda e: canvas.unbind_all("<MouseWheel>"))
+        # Binduj tylko gdy mysz jest nad płótnem
+        canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", _on_mousewheel))
+        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
 
-        # === ZAWARTOŚĆ ZAAWANSOWANE ===
-        pnl = scrollable_frame
+        fill_function(scrollable_frame)
 
-        # --- Konfiguracja Lektora ---
-        grp_cfg = ttk.LabelFrame(pnl, text="Konfiguracja Lektora", padding=10)
-        grp_cfg.pack(fill=tk.X, pady=10, padx=10)
+    # ================= ZAWARTOSC TABÓW =================
 
-        # Mode
-        f_mode = ttk.Frame(grp_cfg)
-        f_mode.pack(fill=tk.X, pady=5)
-        ttk.Label(f_mode, text="Tryb dopasowania:").pack(side=tk.LEFT)
-        cb_mode = ttk.Combobox(f_mode, textvariable=self.app.var_subtitle_mode, values=["Full Lines", "Partial Lines"],
-                               state="readonly")
-        cb_mode.pack(side=tk.LEFT, padx=(5, 20))
-        cb_mode.bind("<<ComboboxSelected>>",
-                     lambda e: self.app._save_preset_val("subtitle_mode", self.app.var_subtitle_mode.get()))
+    def _fill_ocr_tab(self, pnl):
+        # 1. Konfiguracja Obrazu (Filtry)
+        grp_img = ttk.LabelFrame(pnl, text="Filtry Obrazu", padding=10)
+        grp_img.pack(fill=tk.X, pady=10, padx=10)
 
-        # Skala OCR
-        f_scale = ttk.Frame(grp_cfg)
-        f_scale.pack(fill=tk.X, pady=5)
-        ttk.Label(f_scale, text="Skala OCR:").pack(side=tk.LEFT)
-        val_scale = self.app.var_ocr_scale.get()
-        lbl_scale = ttk.Label(f_scale, text=f"{val_scale:.2f}", width=5)
-        s_scale = ttk.Scale(f_scale, from_=0.1, to=1.0, variable=self.app.var_ocr_scale,
-                            command=lambda v: lbl_scale.config(text=f"{float(v):.2f}"))
-        s_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        s_scale.bind("<ButtonRelease-1>", self.app.on_manual_scale_change)
-        lbl_scale.pack(side=tk.LEFT)
+        ttk.Checkbutton(grp_img, text="Konwersja do skali szarości", variable=self.var_gray).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(grp_img, text="Podbicie kontrastu", variable=self.var_contrast).pack(anchor=tk.W, pady=2)
 
-        # Empty Threshold
-        f_empty = ttk.Frame(grp_cfg)
-        f_empty.pack(fill=tk.X, pady=5)
-        ttk.Label(f_empty, text="Czułość pustego:").pack(side=tk.LEFT)
-        val_empty = self.app.var_empty_threshold.get()
-        lbl_empty = ttk.Label(f_empty, text=f"{val_empty:.2f}")
-        s_empty = ttk.Scale(f_empty, from_=0.0, to=0.6, variable=self.app.var_empty_threshold,
-                            command=lambda v: lbl_empty.config(text=f"{float(v):.2f}"))
-        s_empty.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        s_empty.bind("<ButtonRelease-1>",
-                     lambda e: self.app._save_preset_val("empty_image_threshold",
-                                                         round(self.app.var_empty_threshold.get(), 2)))
-        lbl_empty.pack(side=tk.LEFT)
+        # 2. Parametry OCR
+        grp_ocr = ttk.LabelFrame(pnl, text="Parametry OCR", padding=10)
+        grp_ocr.pack(fill=tk.X, pady=10, padx=10)
 
-        # Interval
-        f_int = ttk.Frame(grp_cfg)
-        f_int.pack(fill=tk.X, pady=5)
-        ttk.Label(f_int, text="Skanowanie (s):").pack(side=tk.LEFT)
-        val_int = self.app.var_capture_interval.get()
-        lbl_int = ttk.Label(f_int, text=f"{val_int:.2f}s")
-        s_int = ttk.Scale(f_int, from_=0.3, to=1.0, variable=self.app.var_capture_interval,
-                          command=lambda v: lbl_int.config(text=f"{float(v):.2f}s"))
-        s_int.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        s_int.bind("<ButtonRelease-1>",
-                   lambda e: self.app._save_preset_val("capture_interval",
-                                                       round(self.app.var_capture_interval.get(), 2)))
-        f_color = ttk.Frame(grp_cfg)
-        f_color.pack(fill=tk.X, pady=5)
-        ttk.Label(f_color, text="Kolor napisów:").pack(side=tk.LEFT)
+        self._add_slider(grp_ocr, "Skala OCR:", self.app.var_ocr_scale, 0.1, 1.0, "ocr_scale_factor", fmt="{:.2f}")
+        self._add_slider(grp_ocr, "Czułość pustego (Empty Threshold):", self.app.var_empty_threshold, 0.0, 0.6,
+                         "empty_image_threshold", fmt="{:.2f}")
 
-        # Wartości: Light (Jasne na ciemnym), Dark (Ciemne na jasnym)
-        cb_color = ttk.Combobox(f_color, textvariable=self.app.var_text_color,
-                                values=["Light", "Dark"], state="readonly", width=15)
-        cb_color.pack(side=tk.LEFT, padx=5)
-        cb_color.bind("<<ComboboxSelected>>",
-                      lambda e: self.app._save_preset_val("text_color_mode", self.app.var_text_color.get()))
+        # Nowy parametr: Density Threshold
+        self._add_slider(grp_ocr, "Próg gęstości pikseli (Szum):", self.app.var_ocr_density, 0.0, 0.1,
+                         "ocr_density_threshold", fmt="{:.3f}", resolution=0.005)
 
-        # Krótka legenda dla użytkownika
-        ttk.Label(f_color, text="(Light = Jasne napisy, ciemne tło)", font=("Arial", 8, "italic"),
-                  foreground="gray").pack(side=tk.LEFT, padx=5)
+        self._add_slider(grp_ocr, "Częstotliwość skanowania (s):", self.app.var_capture_interval, 0.3, 1.0,
+                         "capture_interval", fmt="{:.2f}s")
 
-        lbl_int.pack(side=tk.LEFT)
-
-        # --- Optymalizacja ---
-        grp_opt = ttk.LabelFrame(pnl, text="Optymalizacja i Poprawki", padding=10)
+        # 3. Optymalizacja
+        grp_opt = ttk.LabelFrame(pnl, text="Optymalizacja Tekstu", padding=10)
         grp_opt.pack(fill=tk.X, pady=10, padx=10)
 
-        # Rerun
-        f_rerun = ttk.Frame(grp_opt)
-        f_rerun.pack(fill=tk.X, pady=5)
-        ttk.Label(f_rerun, text="Ponów OCR krótszych niż:").pack(side=tk.LEFT)
-        val_rerun = self.app.var_rerun_threshold.get()
-        lbl_rerun = ttk.Label(f_rerun, text=f"{int(float(val_rerun))}", width=5)
-        s_rerun = ttk.Scale(f_rerun, from_=0, to=150, variable=self.app.var_rerun_threshold,
-                            command=lambda v: lbl_rerun.config(text=f"{int(float(v))}"))
-        s_rerun.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        s_rerun.bind("<ButtonRelease-1>",
-                     lambda e: self.app._save_preset_val("rerun_threshold", self.app.var_rerun_threshold.get()))
-        lbl_rerun.pack(side=tk.LEFT)
+        self._add_slider(grp_opt, "Ponów OCR (Smart Retry) krótszych niż:", self.app.var_rerun_threshold, 0, 150,
+                         "rerun_threshold", fmt="{:.0f}", resolution=1)
 
-        # Min Line
-        f_min = ttk.Frame(grp_opt)
-        f_min.pack(fill=tk.X, pady=5)
-        ttk.Label(f_min, text="Ignoruj krótsze niż:").pack(side=tk.LEFT)
-        val_min = self.app.var_min_line_len.get()
-        lbl_min = ttk.Label(f_min, text=f"{int(float(val_min))}", width=5)
-        s_min = ttk.Scale(f_min, from_=0, to=20, variable=self.app.var_min_line_len,
-                          command=lambda v: lbl_min.config(text=f"{int(float(v))}"))
-        s_min.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        s_min.bind("<ButtonRelease-1>",
-                   lambda e: self.app._save_preset_val("min_line_length", self.app.var_min_line_len.get()))
-        lbl_min.pack(side=tk.LEFT)
-
-        # Alignment
         f_align = ttk.Frame(grp_opt)
         f_align.pack(fill=tk.X, pady=5)
         ttk.Label(f_align, text="Wyrównanie tekstu:").pack(side=tk.LEFT)
@@ -173,10 +136,58 @@ class SettingsDialog(tk.Toplevel):
         cb_align.bind("<<ComboboxSelected>>",
                       lambda e: self.app._save_preset_val("text_alignment", self.app.var_text_alignment.get()))
 
-        # --- Filtracja ---
-        grp_reg = ttk.LabelFrame(pnl, text="Filtracja tekstu", padding=5)
-        grp_reg.pack(fill=tk.X, pady=10, padx=10)
-        f_r = ttk.Frame(grp_reg)
+        f_color = ttk.Frame(grp_opt)
+        f_color.pack(fill=tk.X, pady=5)
+        ttk.Label(f_color, text="Kolor napisów:").pack(side=tk.LEFT)
+        cb_color = ttk.Combobox(f_color, textvariable=self.app.var_text_color, values=["Light", "Dark"],
+                                state="readonly", width=15)
+        cb_color.pack(side=tk.LEFT, padx=5)
+        cb_color.bind("<<ComboboxSelected>>",
+                      lambda e: self.app._save_preset_val("text_color_mode", self.app.var_text_color.get()))
+        ttk.Label(f_color, text="(Light = Jasne napisy)", font=("Arial", 8, "italic"), foreground="gray").pack(
+            side=tk.LEFT, padx=5)
+
+    def _fill_dialogs_tab(self, pnl):
+        # 1. Konfiguracja Dopasowania (Matcher)
+        grp_match = ttk.LabelFrame(pnl, text="Algorytm Dopasowania (Matcher)", padding=10)
+        grp_match.pack(fill=tk.X, pady=10, padx=10)
+
+        f_mode = ttk.Frame(grp_match)
+        f_mode.pack(fill=tk.X, pady=5)
+        ttk.Label(f_mode, text="Tryb dopasowania:").pack(side=tk.LEFT)
+        cb_mode = ttk.Combobox(f_mode, textvariable=self.app.var_subtitle_mode, values=["Full Lines", "Partial Lines"],
+                               state="readonly")
+        cb_mode.pack(side=tk.LEFT, padx=(5, 20))
+        cb_mode.bind("<<ComboboxSelected>>",
+                     lambda e: self.app._save_preset_val("subtitle_mode", self.app.var_subtitle_mode.get()))
+
+        # Nowe parametry Matchera
+        self._add_slider(grp_match, "Min Score (Krótkie):", self.app.var_match_score_short, 50, 100,
+                         "match_score_short", fmt="{:.0f}", resolution=5)
+        self._add_slider(grp_match, "Min Score (Długie):", self.app.var_match_score_long, 50, 100, "match_score_long",
+                         fmt="{:.0f}", resolution=5)
+        self._add_slider(grp_match, "Max różnica długości (Ratio):", self.app.var_match_len_diff, 0.0, 1.0,
+                         "match_len_diff_ratio", fmt="{:.2f}", resolution=0.05)
+        self._add_slider(grp_match, "Min długość dla Partial Mode (znaki):", self.app.var_partial_min_len, 0, 50,
+                         "partial_mode_min_len", fmt="{:.0f}", resolution=1)
+
+        self._add_slider(grp_match, "Ignoruj linie krótsze niż:", self.app.var_min_line_len, 0, 20, "min_line_length",
+                         fmt="{:.0f}", resolution=1)
+
+        # 2. Audio Speedup
+        grp_audio = ttk.LabelFrame(pnl, text="Odtwarzanie Audio (Kolejkowanie)", padding=10)
+        grp_audio.pack(fill=tk.X, pady=10, padx=10)
+
+        self._add_slider(grp_audio, "Przyspieszenie (Kolejka > 0):", self.app.var_audio_speed_1, 1.0, 1.5,
+                         "audio_speed_inc_1", fmt="{:.2f}")
+        self._add_slider(grp_audio, "Przyspieszenie (Kolejka > 1):", self.app.var_audio_speed_2, 1.0, 1.5,
+                         "audio_speed_inc_2", fmt="{:.2f}")
+
+        # 3. Filtracja i Logi
+        grp_flt = ttk.LabelFrame(pnl, text="Filtracja i Inne", padding=10)
+        grp_flt.pack(fill=tk.X, pady=10, padx=10)
+
+        f_r = ttk.Frame(grp_flt)
         f_r.pack(fill=tk.X)
         ttk.Label(f_r, text="Regex:").pack(side=tk.LEFT)
         cb_regex = ttk.Combobox(f_r, textvariable=self.app.var_regex_mode, values=list(self.app.regex_map.keys()),
@@ -184,61 +195,65 @@ class SettingsDialog(tk.Toplevel):
         cb_regex.pack(side=tk.LEFT, padx=5)
         cb_regex.bind("<<ComboboxSelected>>", self.app.on_regex_changed)
 
-        # Entry dla Regex (stan kontrolowany przez callback w LektorApp, ale tutaj musimy go odświeżyć)
         ent_regex = ttk.Entry(f_r, textvariable=self.app.var_custom_regex)
         ent_regex.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        # Hack: aktualizujemy stan widgetu lokalnie
         mode = self.app.var_regex_mode.get()
         ent_regex.config(state="normal" if mode == "Własny (Regex)" else "disabled")
-        # Musimy podmienić referencję w app, żeby on_regex_changed działał na tym widgecie?
-        # app.ent_regex w lektor.py odnosi się do widgetu w oknie głównym (który został usunięty).
-        # Rozwiązanie: Nadpiszmy self.app.ent_regex na ten lokalny, dopóki okno jest otwarte.
-        self.app.ent_regex = ent_regex
+        self.app.ent_regex = ent_regex  # Hack referencyjny
+        ent_regex.bind("<FocusOut>", lambda e: self.app.config_mgr.update_setting('last_custom_regex',
+                                                                                  self.app.var_custom_regex.get()))
 
-        ent_regex.bind("<FocusOut>",
-                       lambda e: self.app.config_mgr.update_setting('last_custom_regex',
-                                                                    self.app.var_custom_regex.get()))
-        ttk.Checkbutton(grp_reg, text="Usuwaj imiona (Smart)", variable=self.app.var_auto_names,
+        ttk.Checkbutton(grp_flt, text="Usuwaj imiona (Smart)", variable=self.app.var_auto_names,
                         command=lambda: self.app._save_preset_val("auto_remove_names",
-                                                                  self.app.var_auto_names.get())).pack(
-            anchor=tk.W)
-
-        # Checkbox logi
-        ttk.Checkbutton(pnl, text="Zapisuj logi do pliku", variable=self.app.var_save_logs,
+                                                                  self.app.var_auto_names.get())).pack(anchor=tk.W,
+                                                                                                       pady=2)
+        ttk.Checkbutton(grp_flt, text="Zapisuj logi do pliku", variable=self.app.var_save_logs,
                         command=lambda: self.app._save_preset_val("save_logs", self.app.var_save_logs.get())).pack(
-            anchor=tk.W, padx=10, pady=5)
+            anchor=tk.W, pady=2)
 
-        # --- Karta 2: Obraz (Globalne) ---
-        tab_img = ttk.Frame(tabs)
-        tabs.add(tab_img, text="OCR i Obraz")
-
-        lf_ocr = ttk.LabelFrame(tab_img, text="Filtry obrazu", padding=10)
-        lf_ocr.pack(fill=tk.X, pady=10, padx=5)
-
-        ttk.Checkbutton(lf_ocr, text="Konwersja do skali szarości", variable=self.var_gray).pack(anchor=tk.W, pady=5)
-        ttk.Checkbutton(lf_ocr, text="Podbicie kontrastu (Dla ciemnych gier)", variable=self.var_contrast).pack(
-            anchor=tk.W, pady=5)
-
-        # --- Karta 3: Skróty (Globalne) ---
-        tab_hk = ttk.Frame(tabs)
-        tabs.add(tab_hk, text="Skróty klawiszowe")
-
-        lf_hk = ttk.LabelFrame(tab_hk, text="Definicja skrótów (format pynput)", padding=10)
-        lf_hk.pack(fill=tk.X, pady=10, padx=5)
-
+    def _fill_hk_tab(self, pnl):
+        lf_hk = ttk.LabelFrame(pnl, text="Definicja skrótów (format pynput)", padding=10)
+        lf_hk.pack(fill=tk.X, pady=10, padx=10)
         ttk.Label(lf_hk, text="Start / Stop:").pack(anchor=tk.W)
         ttk.Entry(lf_hk, textvariable=self.var_hk_start).pack(fill=tk.X, pady=(0, 10))
-
         ttk.Label(lf_hk, text="Obszar 3 (Czasowy):").pack(anchor=tk.W)
         ttk.Entry(lf_hk, textvariable=self.var_hk_area3).pack(fill=tk.X, pady=(0, 10))
-
         ttk.Label(lf_hk, text="Przykłady: <ctrl>+<f5>, <alt>+x, <f9>", foreground="gray").pack(anchor=tk.W)
 
-        # Przyciski
-        btn_f = ttk.Frame(self)
-        btn_f.pack(side=tk.BOTTOM, fill=tk.X, pady=10, padx=10)
-        ttk.Button(btn_f, text="Zapisz", command=self.save).pack(side=tk.RIGHT)
-        ttk.Button(btn_f, text="Anuluj", command=self.destroy).pack(side=tk.RIGHT, padx=5)
+    def _add_slider(self, parent, label, variable, from_, to, config_key, fmt="{:.2f}", resolution=None):
+        f = ttk.Frame(parent)
+        f.pack(fill=tk.X, pady=5)
+        ttk.Label(f, text=label).pack(side=tk.LEFT)
+
+        val_lbl = ttk.Label(f, text=fmt.format(variable.get()), width=6)
+
+        # Jeśli resolution nie podane, zgadnij na podstawie typu zmiennej
+        if resolution is None:
+            resolution = 1 if isinstance(variable, tk.IntVar) else 0.1
+
+        scale = ttk.Scale(f, from_=from_, to=to, variable=variable,
+                          command=lambda v: val_lbl.config(text=fmt.format(float(v))))
+
+        # Opcjonalnie podmieniamy callback, żeby zaokrąglał wynik przy zapisie
+        def on_release(event):
+            val = variable.get()
+            # Jeśli to int, rzutujemy na int przy zapisie
+            if isinstance(variable, tk.IntVar):
+                val = int(round(val))
+            else:
+                val = float(val)
+                # Drobne zaokrąglenie floatów
+                if resolution >= 0.01:
+                    val = round(val, 3)
+
+            variable.set(val)  # Aktualizuj zmienną w UI
+            val_lbl.config(text=fmt.format(val))  # Aktualizuj label
+            self.app._save_preset_val(config_key, val)
+
+        scale.bind("<ButtonRelease-1>", on_release)
+
+        scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        val_lbl.pack(side=tk.LEFT)
 
     def save(self):
         # Zapisz ustawienia globalne

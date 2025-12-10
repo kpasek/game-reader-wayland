@@ -81,52 +81,56 @@ class HelpWindow(tk.Toplevel):
             ("• Przykład: ", 'bold'),
             ("Dla ekranu 4K (3840x2160) ustaw 0.3 - 0.4. Dla FullHD (1920x1080) ustaw 0.9 - 1.0.\n", 'normal'),
 
-            ("2. Czułość pustego obrazu (Threshold)\n", 'h2'),
+            ("2. Czułość pustego obrazu (Empty Threshold)\n", 'h2'),
             ("Zapobiega uruchamianiu OCR na pustych/czarnych klatkach, sprawdzając zróżnicowanie kolorów.\n", 'normal'),
             ("• Przykład: ", 'bold'),
-            ("Ustawienie 0.15 ignoruje czarne ekrany ładowania. Ustawienie 0.0 wyłącza tę funkcję (analizuje wszystko).\n",
+            ("Ustawienie 0.15 ignoruje czarne ekrany ładowania. Ustawienie 0.0 wyłącza tę funkcję.\n",
              'normal'),
 
-            ("3. Skanowanie (Interval)\n", 'h2'),
+            ("3. Próg gęstości pikseli (Density Threshold)\n", 'h2'),
+            ("Filtruje obrazy zawierające szum (np. deszcz, ziarno), które mają za mało 'czarnych pikseli' (tekstu), aby warto było je czytać.\n", 'normal'),
+            ("• Przykład: ", 'bold'),
+            ("Domyślnie 0.015. Zwiększ (np. do 0.03), jeśli OCR próbuje czytać tło gry jako tekst.\n", 'normal'),
+
+            ("4. Skanowanie (Interval)\n", 'h2'),
             ("Czas w sekundach między kolejnymi zrzutami ekranu.\n", 'normal'),
             ("• Przykład: ", 'bold'),
-            ("0.5s to standard. Jeśli gra ma bardzo szybkie dialogi, zmniejsz do 0.3s. Jeśli chcesz oszczędzić procesor, zwiększ do 1.0s.\n",
+            ("0.5s to standard. Jeśli gra ma bardzo szybkie dialogi, zmniejsz do 0.3s.\n",
              'normal'),
 
-            ("4. Tryb dopasowania (Subtitle Mode)\n", 'h2'),
+            ("OPTYMALIZACJA I DOPASOWANIE\n", 'h1'),
+
+            ("5. Tryb dopasowania (Subtitle Mode)\n", 'h2'),
             ("• Full Lines: ", 'bold'),
-            ("Wymaga, aby OCR rozpoznał całą linię (z małą tolerancją błędów).\n", 'normal'),
+            ("Wymaga, aby OCR rozpoznał całą linię.\n", 'normal'),
             ("• Partial Lines: ", 'bold'),
             ("Wystarczy, że rozpoznany tekst zawiera się w linii napisów. Przydatne, gdy OCR ucina końcówki długich zdań.\n",
              'normal'),
 
-            ("OPTYMALIZACJA (Dla krótkich tekstów)\n", 'h1'),
-
-            ("5. Popraw krótkie (Rerun Threshold)\n", 'h2'),
-            ("Jeśli OCR wykryje tekst krótszy niż X znaków, aplikacja spróbuje 'inteligentnie' wyciąć sam napis z tła, powiększyć go i odczytać ponownie. To drastycznie poprawia skuteczność przy krótkich dialogach (np. 'Tak.', 'Nie.').\n",
-             'normal'),
-            ("• Przykład: ", 'bold'),
-            ("Ustaw na 50-70. Teksty krótsze niż 70 znaków będą skanowane dwukrotnie (z precyzyjnym wycięciem).\n",
+            ("6. Popraw krótkie (Rerun Threshold)\n", 'h2'),
+            ("Jeśli OCR wykryje tekst krótszy niż X znaków, aplikacja spróbuje 'inteligentnie' wyciąć sam napis z tła i odczytać ponownie. Drastycznie poprawia to skuteczność przy krótkich dialogach.\n",
              'normal'),
 
-            ("6. Wyrównanie tekstu (Alignment)\n", 'h2'),
-            ("Podpowiedź dla funkcji 'Popraw krótkie', gdzie spodziewać się tekstu na wycinku.\n", 'normal'),
-            ("• Przykład: ", 'bold'),
-            ("Dla większości gier 'Center'. Jeśli napisy są przyklejone do lewej krawędzi ekranu, wybierz 'Left'.\n",
-             'normal'),
+            ("7. Progi Dopasowania (Match Scores)\n", 'h2'),
+            ("Minimalny procent zgodności tekstu z OCR względem linii w pliku.\n", 'normal'),
+            ("• Krótkie/Długie: ", 'bold'),
+            ("Krótkie słowa (<6 znaków) wymagają wyższej precyzji (np. 90%), długie zdania wybaczają więcej błędów OCR (np. 75%).\n", 'normal'),
 
-            ("7. Ignoruj dialogi krótsze niż (Min Line Length)\n", 'h2'),
-            ("Filtruje bardzo krótkie 'śmieci' z pliku napisów, które mogłyby zostać błędnie dopasowane do szumu OCR.\n",
-             'normal'),
-            ("• Przykład: ", 'bold'),
-            ("Ustawienie 3 zignoruje wiersze typu 'Hm', 'Aha', ale przepuści 'Tak'.\n", 'normal'),
+            ("8. Tolerancja długości (Length Ratio)\n", 'h2'),
+            ("Maksymalna dopuszczalna różnica długości między tekstem OCR a dopasowywaną linią. Wartość 0.25 oznacza tolerancję 25%.\n", 'normal'),
+
+            ("9. Automatyczny Tryb Częściowy (Partial Min Len)\n", 'h2'),
+            ("Jeśli tekst jest dłuższy niż X znaków (domyślnie 25), system lokalnie włączy tryb 'Partial Lines', nawet jeśli globalnie ustawiony jest 'Full Lines'. Pomaga to przy długich zdaniach uciętych przez OCR.\n", 'normal'),
+
+            ("AUDIO (KOLEJKOWANIE)\n", 'h1'),
+
+            ("10. Dynamiczne Przyspieszanie\n", 'h2'),
+            ("Gdy lektor nie nadąża czytać i w kolejce zbierają się nagrania, system automatycznie zwiększa prędkość odtwarzania kolejnych plików (np. o 20% lub 30%), aby zredukować opóźnienie (lag).\n", 'normal'),
 
             ("FILTRACJA\n", 'h1'),
 
-            ("8. Regex i Imiona\n", 'h2'),
+            ("11. Regex i Imiona\n", 'h2'),
             ("Pozwala usuwać imiona postaci z początku linii, aby OCR porównywał tylko dialog.\n", 'normal'),
-            ("• Standard: ", 'bold'), ("Usuwa 'Geralt: ', 'Vesemir: '.\n", 'normal'),
-            ("• Nawiasy: ", 'bold'), ("Usuwa '[Geralt] '.\n", 'normal'),
         ]
 
         for item in content:
@@ -137,7 +141,6 @@ class HelpWindow(tk.Toplevel):
                 txt.insert(tk.END, item[0])  # Fallback
 
         txt.config(state=tk.DISABLED)
-
 
 class LektorApp:
     def __init__(self, root: tk.Tk, autostart_preset: Optional[str], game_cmd: list):
