@@ -47,7 +47,7 @@ stop_event = threading.Event()
 audio_queue = queue.Queue()
 log_queue = queue.Queue()
 
-APP_VERSION = "v0.9.0"
+APP_VERSION = "v0.9.4"
 STANDARD_WIDTH = 3840
 STANDARD_HEIGHT = 2160
 
@@ -170,14 +170,39 @@ class LektorApp:
     def _start_hotkey_listener(self):
         hk_start = self.config_mgr.get('hotkey_start_stop', '<ctrl>+<f5>')
         hk_area3 = self.config_mgr.get('hotkey_area3', '<ctrl>+<f6>')
+
+        # --- NOWE SKRÓTY DLA OBSZARÓW ---
+        hk_set_1 = '<alt>+1'
+        hk_set_2 = '<alt>+2'
+        hk_set_3 = '<alt>+3'
+
+        hk_clr_1 = '<alt>+<shift>+1'
+        hk_clr_2 = '<alt>+<shift>+2'
+        hk_clr_3 = '<alt>+<shift>+3'
+
         if hasattr(self, 'hotkey_listener') and self.hotkey_listener:
             self.hotkey_listener.stop()
-        hotkeys = {hk_start: self._on_hotkey_start_stop, hk_area3: self._on_hotkey_area3}
+
+        hotkeys = {
+            hk_start: self._on_hotkey_start_stop,
+            hk_area3: self._on_hotkey_area3,
+
+            # Ustawianie obszarów
+            hk_set_1: lambda: self._on_hotkey_set_area(0),
+            hk_set_2: lambda: self._on_hotkey_set_area(1),
+            hk_set_3: lambda: self._on_hotkey_set_area(2),
+
+            # Usuwanie obszarów
+            hk_clr_1: lambda: self._on_hotkey_clear_area(0),
+            hk_clr_2: lambda: self._on_hotkey_clear_area(1),
+            hk_clr_3: lambda: self._on_hotkey_clear_area(2),
+        }
+
         try:
             self.hotkey_listener = keyboard.GlobalHotKeys(hotkeys)
             self.hotkey_listener.start()
-        except:
-            pass
+        except Exception as e:
+            print(f"Ostrzeżenie: Nie udało się zarejestrować skrótów globalnych: {e}")
 
     def _restart_hotkeys(self):
         if HAS_PYNPUT: self._start_hotkey_listener()
@@ -187,6 +212,14 @@ class LektorApp:
 
     def _on_hotkey_area3(self):
         self.root.after(0, self._trigger_area3_hotkey)
+
+    def _on_hotkey_set_area(self, idx):
+        # Przekieruj do głównego wątku UI
+        self.root.after(0, lambda: self.set_area(idx))
+
+    def _on_hotkey_clear_area(self, idx):
+        # Przekieruj do głównego wątku UI
+        self.root.after(0, lambda: self.clear_area(idx))
 
     def _toggle_start_stop_hotkey(self):
         if self.is_running:
@@ -359,7 +392,6 @@ class LektorApp:
         self.var_text_alignment.set(data.get("text_alignment", "Center"))
         self.var_save_logs.set(data.get("save_logs", False))
 
-        # --- Loading New Parameters ---
         self.var_ocr_density.set(data.get("ocr_density_threshold", 0.015))
         self.var_match_score_short.set(data.get("match_score_short", 90))
         self.var_match_score_long.set(data.get("match_score_long", 75))
