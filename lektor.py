@@ -7,7 +7,7 @@ import subprocess
 import time
 import argparse
 import platform
-from typing import Optional, Dict
+from typing import Optional
 
 try:
     import tkinter as tk
@@ -40,6 +40,7 @@ from app.log import LogWindow
 from app.settings import SettingsDialog
 from app.area_selector import AreaSelector
 from app.capture import capture_fullscreen
+from app.help import HelpWindow
 
 # Global events/queues
 stop_event = threading.Event()
@@ -51,102 +52,11 @@ STANDARD_WIDTH = 3840
 STANDARD_HEIGHT = 2160
 
 
-class HelpWindow(tk.Toplevel):
-    def __init__(self, parent):
-        super().__init__(parent)
-        self.title("Pomoc i Instrukcja")
-        self.geometry("700x750")
-        default_font = font.nametofont("TkDefaultFont")
-        base_font_family = default_font.actual()["family"]
-        txt = scrolledtext.ScrolledText(self, wrap=tk.WORD, padx=15, pady=15, font=(base_font_family, 10))
-        txt.pack(fill=tk.BOTH, expand=True)
-
-        # Konfiguracja tagów formatowania tekstu
-        txt.tag_config('h1', font=(base_font_family, 13, 'bold'), spacing1=20, spacing3=10, foreground="#222222")
-        txt.tag_config('h2', font=(base_font_family, 11, 'bold'), spacing1=10, spacing3=5)
-        txt.tag_config('bold', font=(base_font_family, 10, 'bold'))
-        txt.tag_config('normal', spacing3=2)
-        txt.tag_config('italic', font=(base_font_family, 10, 'italic'))
-
-        content = [
-            ("JAK TO DZIAŁA?\n", 'h1'),
-            ("Aplikacja wykonuje cykliczne zrzuty zdefiniowanego obszaru ekranu, przetwarza je przez OCR (rozpoznawanie tekstu) i porównuje z załadowanym plikiem napisów. Gdy znajdzie dopasowanie, odtwarza przypisany plik audio.\n",
-             'normal'),
-
-            ("PARAMETRY KONFIGURACJI\n", 'h1'),
-
-            ("1. Skala OCR (0.1 - 1.0)\n", 'h2'),
-            ("Określa, jak bardzo obraz jest skalowany przed odczytem. OCR (Tesseract) działa najlepiej, gdy litery mają określoną wysokość w pikselach.\n",
-             'normal'),
-            ("• Przykład: ", 'bold'),
-            ("Dla ekranu 4K (3840x2160) ustaw 0.3 - 0.4. Dla FullHD (1920x1080) ustaw 0.9 - 1.0.\n", 'normal'),
-
-            ("2. Czułość pustego obrazu (Empty Threshold)\n", 'h2'),
-            ("Zapobiega uruchamianiu OCR na pustych/czarnych klatkach, sprawdzając zróżnicowanie kolorów.\n", 'normal'),
-            ("• Przykład: ", 'bold'),
-            ("Ustawienie 0.15 ignoruje czarne ekrany ładowania. Ustawienie 0.0 wyłącza tę funkcję.\n",
-             'normal'),
-
-            ("3. Próg gęstości pikseli (Density Threshold)\n", 'h2'),
-            ("Filtruje obrazy zawierające szum (np. deszcz, ziarno), które mają za mało 'czarnych pikseli' (tekstu), aby warto było je czytać.\n", 'normal'),
-            ("• Przykład: ", 'bold'),
-            ("Domyślnie 0.015. Zwiększ (np. do 0.03), jeśli OCR próbuje czytać tło gry jako tekst.\n", 'normal'),
-
-            ("4. Skanowanie (Interval)\n", 'h2'),
-            ("Czas w sekundach między kolejnymi zrzutami ekranu.\n", 'normal'),
-            ("• Przykład: ", 'bold'),
-            ("0.5s to standard. Jeśli gra ma bardzo szybkie dialogi, zmniejsz do 0.3s.\n",
-             'normal'),
-
-            ("OPTYMALIZACJA I DOPASOWANIE\n", 'h1'),
-
-            ("5. Tryb dopasowania (Subtitle Mode)\n", 'h2'),
-            ("• Full Lines: ", 'bold'),
-            ("Wymaga, aby OCR rozpoznał całą linię.\n", 'normal'),
-            ("• Partial Lines: ", 'bold'),
-            ("Wystarczy, że rozpoznany tekst zawiera się w linii napisów. Przydatne, gdy OCR ucina końcówki długich zdań.\n",
-             'normal'),
-
-            ("6. Popraw krótkie (Rerun Threshold)\n", 'h2'),
-            ("Jeśli OCR wykryje tekst krótszy niż X znaków, aplikacja spróbuje 'inteligentnie' wyciąć sam napis z tła i odczytać ponownie. Drastycznie poprawia to skuteczność przy krótkich dialogach.\n",
-             'normal'),
-
-            ("7. Progi Dopasowania (Match Scores)\n", 'h2'),
-            ("Minimalny procent zgodności tekstu z OCR względem linii w pliku.\n", 'normal'),
-            ("• Krótkie/Długie: ", 'bold'),
-            ("Krótkie słowa (<6 znaków) wymagają wyższej precyzji (np. 90%), długie zdania wybaczają więcej błędów OCR (np. 75%).\n", 'normal'),
-
-            ("8. Tolerancja długości (Length Ratio)\n", 'h2'),
-            ("Maksymalna dopuszczalna różnica długości między tekstem OCR a dopasowywaną linią. Wartość 0.25 oznacza tolerancję 25%.\n", 'normal'),
-
-            ("9. Automatyczny Tryb Częściowy (Partial Min Len)\n", 'h2'),
-            ("Jeśli tekst jest dłuższy niż X znaków (domyślnie 25), system lokalnie włączy tryb 'Partial Lines', nawet jeśli globalnie ustawiony jest 'Full Lines'. Pomaga to przy długich zdaniach uciętych przez OCR.\n", 'normal'),
-
-            ("AUDIO (KOLEJKOWANIE)\n", 'h1'),
-
-            ("10. Dynamiczne Przyspieszanie\n", 'h2'),
-            ("Gdy lektor nie nadąża czytać i w kolejce zbierają się nagrania, system automatycznie zwiększa prędkość odtwarzania kolejnych plików (np. o 20% lub 30%), aby zredukować opóźnienie (lag).\n", 'normal'),
-
-            ("FILTRACJA\n", 'h1'),
-
-            ("11. Regex i Imiona\n", 'h2'),
-            ("Pozwala usuwać imiona postaci z początku linii, aby OCR porównywał tylko dialog.\n", 'normal'),
-        ]
-
-        for item in content:
-            if len(item) == 2:
-                text, tag = item
-                txt.insert(tk.END, text, tag)
-            else:
-                txt.insert(tk.END, item[0])  # Fallback
-
-        txt.config(state=tk.DISABLED)
-
 class LektorApp:
     def __init__(self, root: tk.Tk, autostart_preset: Optional[str], game_cmd: list):
         self.root = root
         self.root.title(f"Lektor {APP_VERSION}")
-        self.root.geometry("750x350")
+        self.root.geometry("485x350")
 
         self.config_mgr = ConfigManager()
         self.game_cmd = game_cmd
@@ -177,6 +87,14 @@ class LektorApp:
         self.var_min_line_len = tk.IntVar(value=0)
         self.var_text_alignment = tk.StringVar(value="Center")
         self.var_save_logs = tk.BooleanVar(value=False)
+
+        self.var_ocr_density = tk.DoubleVar(value=0.015)
+        self.var_match_score_short = tk.IntVar(value=90)
+        self.var_match_score_long = tk.IntVar(value=75)
+        self.var_match_len_diff = tk.DoubleVar(value=0.25)
+        self.var_partial_min_len = tk.IntVar(value=25)
+        self.var_audio_speed_1 = tk.DoubleVar(value=1.20)
+        self.var_audio_speed_2 = tk.DoubleVar(value=1.30)
 
         # Regex
         self.var_regex_mode = tk.StringVar()
@@ -328,8 +246,9 @@ class LektorApp:
             self.config_mgr.update_setting('last_resolution_key', self.var_resolution.get()),
             self._update_scale_for_resolution(self.var_resolution.get())
         ])
-        ttk.Button(f_res, text="Auto Detect", command=self.auto_detect_resolution).pack(side=tk.LEFT, padx=5)
-
+        ttk.Button(f_res, text="Dopasuj rozdzielczość", command=self.auto_detect_resolution).pack(side=tk.LEFT, padx=5)
+        self.btn_settings = ttk.Button(f_res, text="⚙ Ustawienia", command=self.open_settings)
+        self.btn_settings.pack(side=tk.LEFT, padx=5)
         # --- AUDIO ---
         grp_aud = ttk.LabelFrame(panel, text="Kontrola Audio", padding=10)
         grp_aud.pack(fill=tk.X, pady=10)
@@ -365,9 +284,6 @@ class LektorApp:
         self.btn_start.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         self.btn_stop = ttk.Button(frm_btn, text=f"STOP ({hk_start})", command=self.stop_reading, state="disabled")
         self.btn_stop.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-
-        self.btn_settings = ttk.Button(frm_btn, text="⚙ Ustawienia", command=self.open_settings)
-        self.btn_settings.pack(side=tk.LEFT, padx=5)
 
         ttk.Label(self.root, text=f"Wersja: {APP_VERSION}", font=("Arial", 8)).pack(side=tk.BOTTOM, anchor=tk.E, padx=5)
 
@@ -434,23 +350,23 @@ class LektorApp:
         self.var_subtitle_mode.set(data.get("subtitle_mode", "Full Lines"))
 
         self.var_ocr_scale.set(data.get("ocr_scale_factor", 1.0))
-        # Label scale usunięty
-
         self.var_empty_threshold.set(data.get("empty_image_threshold", 0.15))
-        # Label empty usunięty
-
         self.var_capture_interval.set(data.get("capture_interval", 0.5))
-        # Label int usunięty
-
         self.var_rerun_threshold.set(data.get("rerun_threshold", 50))
-        # Label rerun usunięty
-
         self.var_min_line_len.set(data.get("min_line_length", 0))
 
         self.var_text_color.set(data.get("text_color_mode", "Light"))
-
         self.var_text_alignment.set(data.get("text_alignment", "Center"))
         self.var_save_logs.set(data.get("save_logs", False))
+
+        # --- Loading New Parameters ---
+        self.var_ocr_density.set(data.get("ocr_density_threshold", 0.015))
+        self.var_match_score_short.set(data.get("match_score_short", 90))
+        self.var_match_score_long.set(data.get("match_score_long", 75))
+        self.var_match_len_diff.set(data.get("match_len_diff_ratio", 0.25))
+        self.var_partial_min_len.set(data.get("partial_mode_min_len", 25))
+        self.var_audio_speed_1.set(data.get("audio_speed_inc_1", 1.20))
+        self.var_audio_speed_2.set(data.get("audio_speed_inc_2", 1.30))
 
         if "regex_mode_name" in data:
             self.var_regex_mode.set(data["regex_mode_name"])

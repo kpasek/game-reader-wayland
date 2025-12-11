@@ -9,9 +9,9 @@ DEFAULT_CONFIG = {
     'last_regex': r"",
     'ocr_grayscale': False,
     'ocr_contrast': False,
-    'last_resolution_key': 'Niestandardowa',
-    'hotkey_start_stop': '<ctrl>+<f5>',
-    'hotkey_area3': '<ctrl>+<f6>'
+    'last_resolution_key': '1920x1080',
+    'hotkey_start_stop': '<f2>',
+    'hotkey_area3': '<f3>'
 }
 
 DEFAULT_PRESET_CONTENT = {
@@ -32,14 +32,13 @@ DEFAULT_PRESET_CONTENT = {
     "text_alignment": "Center",
     "save_logs": False,
     "min_line_length": 3,
-    "empty_image_threshold": 0.15,
-    "ocr_density_threshold": 0.015,
-    "audio_speed_inc_1": 1.20,
-    "audio_speed_inc_2": 1.30,
+    "ocr_density_threshold": 0.03,
     "match_score_short": 90,
     "match_score_long": 75,
-    "match_len_diff_ratio": 0.25,
-    "partial_mode_min_len": 25
+    "match_len_diff_ratio": 0.30,
+    "partial_mode_min_len": 25,
+    "audio_speed_inc_1": 1.20,
+    "audio_speed_inc_2": 1.30
 }
 
 
@@ -117,7 +116,7 @@ class ConfigManager:
             with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
 
-            # Uzupełnij brakujące klucze domyślnymi wartościami (dla kompatybilności wstecznej)
+            # Uzupełnianie brakujących kluczy domyślnymi
             for k, v in DEFAULT_PRESET_CONTENT.items():
                 if k not in data:
                     data[k] = v

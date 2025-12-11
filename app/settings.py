@@ -23,18 +23,13 @@ class SettingsDialog(tk.Toplevel):
         # Zmienne UI (Globalne)
         self.var_gray = tk.BooleanVar(value=settings.get('ocr_grayscale', False))
         self.var_contrast = tk.BooleanVar(value=settings.get('ocr_contrast', False))
-        self.var_hk_start = tk.StringVar(value=settings.get('hotkey_start_stop', '<ctrl>+<f5>'))
-        self.var_hk_area3 = tk.StringVar(value=settings.get('hotkey_area3', '<ctrl>+<f6>'))
-
-        # Inicjalizacja nowych zmiennych presetu (jeśli app_instance ich jeszcze nie ma, choć powinny być w ConfigManager)
-        # Te zmienne są powiązane w LektorApp, ale tutaj musimy się upewnić, że są dostępne
-        # Zakładamy, że self.app ma już zdefiniowane te StringVar/DoubleVar w metodzie initialize_vars()
-        # lub dodamy je dynamicznie tutaj, jeśli brakuje.
+        self.var_hk_start = tk.StringVar(value=settings.get('hotkey_start_stop', '<f2>'))
+        self.var_hk_area3 = tk.StringVar(value=settings.get('hotkey_area3', '<f3>'))
 
         self._ensure_app_vars()
 
         self._build_ui()
-        self.geometry("680x780")
+        self.geometry("450x600")
         self.grab_set()
 
     def _ensure_app_vars(self):
