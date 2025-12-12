@@ -56,7 +56,7 @@ class LektorApp:
     def __init__(self, root: tk.Tk, autostart_preset: Optional[str], game_cmd: list):
         self.root = root
         self.root.title(f"Lektor {APP_VERSION}")
-        self.root.geometry("485x350")
+        self.root.geometry("690x350")
 
         self.config_mgr = ConfigManager()
         self.game_cmd = game_cmd

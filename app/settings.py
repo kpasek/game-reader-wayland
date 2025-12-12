@@ -29,7 +29,7 @@ class SettingsDialog(tk.Toplevel):
         self._ensure_app_vars()
 
         self._build_ui()
-        self.geometry("450x600")
+        self.geometry("600x700")
         self.grab_set()
 
     def _ensure_app_vars(self):
