@@ -590,7 +590,7 @@ def main():
     args = parser.parse_args()
     cmd = args.game_command
     if cmd and cmd[0] == '--': cmd.pop(0)
-    root = tk.Tk()
+    root = tk.Tk(className='Lektor')
     LektorApp(root, args.preset, cmd)
     root.mainloop()
 
