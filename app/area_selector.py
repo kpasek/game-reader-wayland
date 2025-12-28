@@ -63,7 +63,7 @@ class AreaSelector(tk.Toplevel):
         self.start_x = event.x
         self.start_y = event.y
         self.rect_id = self.cv.create_rectangle(self.start_x, self.start_y, self.start_x, self.start_y, outline='red',
-                                                width=3)
+                                                width=2)
 
     def on_drag(self, event):
         self.cv.coords(self.rect_id, self.start_x, self.start_y, event.x, event.y)

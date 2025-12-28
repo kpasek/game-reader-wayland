@@ -83,10 +83,8 @@ def find_best_match(ocr_text: str,
 
     ocr_len = len(ocr_clean)
 
-    # Parametr: min długość dla trybu Partial Lines (domyślnie 25)
     partial_min_len = matcher_config.get('partial_mode_min_len', 25)
 
-    # Wymuś 'Full Lines' dla bardzo krótkich tekstów
     effective_mode = "Full Lines" if ocr_len < partial_min_len else mode
 
     # 1. Szukanie lokalne

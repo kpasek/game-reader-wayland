@@ -8,7 +8,7 @@ from typing import Optional, Tuple
 try:
     import pytesseract
     from pytesseract import Output
-    from PIL import Image, ImageOps, ImageEnhance, ImageStat
+    from PIL import Image, ImageOps, ImageEnhance, ImageStat, ImageFilter
 except ImportError:
     print("Brak biblioteki Pillow lub pytesseract.", file=sys.stderr)
     sys.exit(1)
@@ -40,32 +40,65 @@ if platform.system() == "Windows":
 
 def preprocess_image(image: Image.Image, scale: float = 1.0,
                      invert_colors: bool = False,
-                     density_threshold: float = 0.015) -> Tuple[Image.Image, bool]:
+                     density_threshold: float = 0.015,
+                     brightness_threshold: int = 200) -> Tuple[Image.Image, bool, Optional[Tuple[int, int, int, int]]]:
     """
-    Zwraca krotkę: (przetworzony_obraz, czy_zawiera_tresc).
-    Jeśli czy_zawiera_tresc == False, należy pominąć OCR.
-
-    :param density_threshold: Minimalne zagęszczenie czarnych pikseli, aby uznać obraz za zawierający treść.
+    Zwraca krotkę: (przetworzony_obraz, czy_zawiera_tresc, bbox).
+    bbox to krotka (left, top, right, bottom) względem przeskalowanego obrazka.
     """
     try:
-        # 1. Skalowanie
+        # Konwersja do skali szarości
+        image = ImageOps.grayscale(image)
+
+        # dla czarnych napisów należy odwrócić kolory, aby dało się wyszukać obszar z napisami
+        if not invert_colors:
+            image = ImageOps.invert(image)
+
+        # Wykrywanie obszaru napisów
+        crop_box = None
+        try:
+            mask = image.point(lambda x: 255 if x > brightness_threshold else 0, '1')
+            mask = mask.filter(ImageFilter.MaxFilter(5))
+
+            bbox = mask.getbbox()
+
+            if bbox:
+                padding = 4  # Margines
+                left, upper, right, lower = bbox
+                width, height = image.size
+
+                left = max(0, left - padding)
+                upper = max(0, upper - padding)
+                right = min(width, right + padding)
+                lower = min(height, lower + padding)
+
+                crop_box = (left, upper, right, lower)
+
+                # Jeśli wykryty obszar jest podejrzanie mały (np. szum 1x1px), ignorujemy crop
+                if (right - left) > 10 and (lower - upper) > 10:
+                    image = image.crop(crop_box)
+                else:
+                    crop_box = (0, 0, image.width, image.height)
+            else:
+                return image, False, (0, 0, image.width, image.height)
+
+        except Exception as e:
+            print(f"Błąd przycinania (mask): {e}")
+            crop_box = (0, 0, image.width, image.height)
+
+        # Skalowanie
         if abs(scale - 1.0) > 0.05:
             new_w = int(image.width * scale)
             new_h = int(image.height * scale)
             image = image.resize((new_w, new_h), Image.BICUBIC)
 
-        # 2. Konwersja do skali szarości
-        image = ImageOps.grayscale(image)
+        image = ImageOps.invert(image)
 
-        # 3. Inwersja kolorów (zależna od ustawień)
-        if invert_colors:
-            image = ImageOps.invert(image)
-
-        # 4. Binaryzacja (Thresholding)
+        # 5. Binaryzacja pod OCR
         thresh = 160
         image = image.point(lambda x: 0 if x < thresh else 255, '1')
 
-        # 5. OPTYMALIZACJA: Pixel Density Check
+        # 6. Sprawdzenie gęstości pikseli
         colors = image.getcolors()
         black_pixels = 0
         if colors:
@@ -75,18 +108,26 @@ def preprocess_image(image: Image.Image, scale: float = 1.0,
                     break
 
         total_pixels = image.width * image.height
+        if total_pixels == 0:
+            return image, False, None
+
         density = black_pixels / total_pixels
 
-        # Użycie parametru z ustawień
-        if density < density_threshold or black_pixels < 80:
-            return image, False
+        is_cropped = (crop_box[2] - crop_box[0]) < (new_w * 0.9) if 'new_w' in locals() else False
 
-        return image, True
+        min_pixels = 30 if is_cropped else 80
+
+        if density < density_threshold and black_pixels < min_pixels:
+            # Jeśli gęstość jest mała I mało jest pikseli w ogóle -> odrzuć
+            # Ale jeśli mamy dużo czarnych pikseli (duży tekst), a gęstość niska (bo dużo tła zostało) -> przepuść
+            if black_pixels < min_pixels:
+                return image, False, None
+
+        return image, True, crop_box
 
     except Exception as e:
         print(f"Błąd preprocessingu: {e}", file=sys.stderr)
-        return image, True
-
+        return image, True, (0, 0, image.width, image.height)
 
 def is_image_empty(image: Image.Image, threshold: float) -> bool:
     try:

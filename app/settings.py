@@ -21,8 +21,7 @@ class SettingsDialog(tk.Toplevel):
         self.app = app_instance
 
         # Zmienne UI (Globalne)
-        self.var_gray = tk.BooleanVar(value=settings.get('ocr_grayscale', False))
-        self.var_contrast = tk.BooleanVar(value=settings.get('ocr_contrast', False))
+        self.var_brightness_threshold = tk.IntVar(value=settings.get('brightness_threshold', 150))
         self.var_hk_start = tk.StringVar(value=settings.get('hotkey_start_stop', '<f2>'))
         self.var_hk_area3 = tk.StringVar(value=settings.get('hotkey_area3', '<f3>'))
 
@@ -36,8 +35,7 @@ class SettingsDialog(tk.Toplevel):
         """Pomocnicza funkcja do upewnienia się, że zmienne istnieją w obiekcie aplikacji."""
         # Nowe parametry
         if not hasattr(self.app, 'var_ocr_density'): self.app.var_ocr_density = tk.DoubleVar()
-        if not hasattr(self.app, 'var_audio_speed_1'): self.app.var_audio_speed_1 = tk.DoubleVar()
-        if not hasattr(self.app, 'var_audio_speed_2'): self.app.var_audio_speed_2 = tk.DoubleVar()
+        if not hasattr(self.app, 'var_audio_speed_1'): self.app.var_audio_speed = tk.DoubleVar()
         if not hasattr(self.app, 'var_match_score_short'): self.app.var_match_score_short = tk.IntVar()
         if not hasattr(self.app, 'var_match_score_long'): self.app.var_match_score_long = tk.IntVar()
         if not hasattr(self.app, 'var_match_len_diff'): self.app.var_match_len_diff = tk.DoubleVar()
@@ -97,9 +95,6 @@ class SettingsDialog(tk.Toplevel):
         grp_img = ttk.LabelFrame(pnl, text="Filtry Obrazu", padding=10)
         grp_img.pack(fill=tk.X, pady=10, padx=10)
 
-        ttk.Checkbutton(grp_img, text="Konwersja do skali szarości", variable=self.var_gray).pack(anchor=tk.W, pady=2)
-        ttk.Checkbutton(grp_img, text="Podbicie kontrastu", variable=self.var_contrast).pack(anchor=tk.W, pady=2)
-
         # 2. Parametry OCR
         grp_ocr = ttk.LabelFrame(pnl, text="Parametry OCR", padding=10)
         grp_ocr.pack(fill=tk.X, pady=10, padx=10)
@@ -114,13 +109,15 @@ class SettingsDialog(tk.Toplevel):
 
         self._add_slider(grp_ocr, "Częstotliwość skanowania (s):", self.app.var_capture_interval, 0.3, 1.0,
                          "capture_interval", fmt="{:.2f}s")
+        self._add_slider(grp_ocr, "Czułość jasności (Wykrywanie napisów):", self.app.var_brightness_threshold, 0, 255,
+                         "brightness_threshold")
+        ttk.Checkbutton(grp_ocr, text="DEBUG: Pokaż obszar wykrytych napisów", variable=self.app.var_show_debug,
+                        command=lambda: self.app._save_preset_val("show_debug", self.app.var_save_logs.get())).pack(
+            anchor=tk.W, pady=2)
 
         # 3. Optymalizacja
         grp_opt = ttk.LabelFrame(pnl, text="Optymalizacja Tekstu", padding=10)
         grp_opt.pack(fill=tk.X, pady=10, padx=10)
-
-        self._add_slider(grp_opt, "Ponów OCR (Smart Retry) krótszych niż:", self.app.var_rerun_threshold, 0, 150,
-                         "rerun_threshold", fmt="{:.0f}", resolution=1)
 
         f_align = ttk.Frame(grp_opt)
         f_align.pack(fill=tk.X, pady=5)
@@ -173,10 +170,8 @@ class SettingsDialog(tk.Toplevel):
         grp_audio = ttk.LabelFrame(pnl, text="Odtwarzanie Audio (Kolejkowanie)", padding=10)
         grp_audio.pack(fill=tk.X, pady=10, padx=10)
 
-        self._add_slider(grp_audio, "Przyspieszenie (Kolejka > 0):", self.app.var_audio_speed_1, 1.0, 1.5,
-                         "audio_speed_inc_1", fmt="{:.2f}")
-        self._add_slider(grp_audio, "Przyspieszenie (Kolejka > 1):", self.app.var_audio_speed_2, 1.0, 1.5,
-                         "audio_speed_inc_2", fmt="{:.2f}")
+        self._add_slider(grp_audio, "Przyspieszenie (Kolejka > 0):", self.app.var_audio_speed, 1.0, 1.7,
+                         "audio_speed_inc", fmt="{:.2f}")
 
         # 3. Filtracja i Logi
         grp_flt = ttk.LabelFrame(pnl, text="Filtracja i Inne", padding=10)
@@ -252,8 +247,6 @@ class SettingsDialog(tk.Toplevel):
 
     def save(self):
         # Zapisz ustawienia globalne
-        self.settings['ocr_grayscale'] = self.var_gray.get()
-        self.settings['ocr_contrast'] = self.var_contrast.get()
         self.settings['hotkey_start_stop'] = self.var_hk_start.get()
         self.settings['hotkey_area3'] = self.var_hk_area3.get()
         self.destroy()

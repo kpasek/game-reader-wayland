@@ -7,8 +7,6 @@ APP_CONFIG_FILE = 'app_config.json'
 DEFAULT_CONFIG = {
     'recent_presets': [],
     'last_regex': r"",
-    'ocr_grayscale': False,
-    'ocr_contrast': False,
     'last_resolution_key': '1920x1080',
     'hotkey_start_stop': '<f2>',
     'hotkey_area3': '<f3>'
@@ -28,7 +26,6 @@ DEFAULT_PRESET_CONTENT = {
     "audio_volume": 1.0,
     "audio_ext": ".mp3",
     "auto_remove_names": True,
-    "rerun_threshold": 50,
     "text_alignment": "Center",
     "save_logs": False,
     "min_line_length": 3,
@@ -37,8 +34,7 @@ DEFAULT_PRESET_CONTENT = {
     "match_score_long": 75,
     "match_len_diff_ratio": 0.30,
     "partial_mode_min_len": 25,
-    "audio_speed_inc_1": 1.20,
-    "audio_speed_inc_2": 1.30
+    "audio_speed_inc": 1.20
 }
 
 

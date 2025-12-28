@@ -26,7 +26,6 @@ def _determine_backend() -> str:
         return 'mss'
     if system == 'linux':
         session_type = os.environ.get('XDG_SESSION_TYPE', '').lower()
-        # Na Wayland MSS wymaga specjalnych uprawnień, bezpieczniej użyć fallbacku
         if 'wayland' in session_type:
             return 'pyscreenshot'
         return 'mss'

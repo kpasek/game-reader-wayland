@@ -16,7 +16,6 @@ except ImportError:
     print("Błąd: Brak biblioteki tkinter.", file=sys.stderr)
     sys.exit(1)
 
-# --- FIX WINDOWS 11 DPI SCALING ---
 if platform.system() == "Windows":
     try:
         import ctypes
@@ -25,7 +24,6 @@ if platform.system() == "Windows":
     except Exception:
         pass
 
-# --- PYNPUT HOTKEYS ---
 try:
     from pynput import keyboard
 
@@ -46,8 +44,9 @@ from app.help import HelpWindow
 stop_event = threading.Event()
 audio_queue = queue.Queue()
 log_queue = queue.Queue()
+debug_queue = queue.Queue()
 
-APP_VERSION = "v0.9.4"
+APP_VERSION = "v0.9.5"
 STANDARD_WIDTH = 3840
 STANDARD_HEIGHT = 2160
 
@@ -56,7 +55,7 @@ class LektorApp:
     def __init__(self, root: tk.Tk, autostart_preset: Optional[str], game_cmd: list):
         self.root = root
         self.root.title(f"Lektor {APP_VERSION}")
-        self.root.geometry("690x350")
+        self.root.geometry("720x350")
 
         self.config_mgr = ConfigManager()
         self.game_cmd = game_cmd
@@ -78,23 +77,23 @@ class LektorApp:
         self.var_subtitle_mode = tk.StringVar(value="Full Lines")
         self.var_text_color = tk.StringVar(value="Light")
         self.var_ocr_scale = tk.DoubleVar(value=1.0)
+        self.var_brightness_threshold = tk.IntVar(value=200)
         self.var_empty_threshold = tk.DoubleVar(value=0.15)
         self.var_capture_interval = tk.DoubleVar(value=0.5)
         self.var_auto_names = tk.BooleanVar(value=True)
 
         # Opcje optymalizacji
-        self.var_rerun_threshold = tk.IntVar(value=50)
         self.var_min_line_len = tk.IntVar(value=0)
         self.var_text_alignment = tk.StringVar(value="Center")
         self.var_save_logs = tk.BooleanVar(value=False)
+        self.var_show_debug = tk.BooleanVar(value=False)
 
         self.var_ocr_density = tk.DoubleVar(value=0.015)
         self.var_match_score_short = tk.IntVar(value=90)
         self.var_match_score_long = tk.IntVar(value=75)
         self.var_match_len_diff = tk.DoubleVar(value=0.25)
         self.var_partial_min_len = tk.IntVar(value=25)
-        self.var_audio_speed_1 = tk.DoubleVar(value=1.20)
-        self.var_audio_speed_2 = tk.DoubleVar(value=1.30)
+        self.var_audio_speed = tk.DoubleVar(value=1.20)
 
         # Regex
         self.var_regex_mode = tk.StringVar()
@@ -122,6 +121,7 @@ class LektorApp:
         self._init_gui()
         self._load_initial_state(autostart_preset)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        self._check_debug_queue()
 
         if HAS_PYNPUT:
             self._start_hotkey_listener()
@@ -385,7 +385,6 @@ class LektorApp:
         self.var_ocr_scale.set(data.get("ocr_scale_factor", 1.0))
         self.var_empty_threshold.set(data.get("empty_image_threshold", 0.15))
         self.var_capture_interval.set(data.get("capture_interval", 0.5))
-        self.var_rerun_threshold.set(data.get("rerun_threshold", 50))
         self.var_min_line_len.set(data.get("min_line_length", 0))
 
         self.var_text_color.set(data.get("text_color_mode", "Light"))
@@ -397,8 +396,7 @@ class LektorApp:
         self.var_match_score_long.set(data.get("match_score_long", 75))
         self.var_match_len_diff.set(data.get("match_len_diff_ratio", 0.25))
         self.var_partial_min_len.set(data.get("partial_mode_min_len", 25))
-        self.var_audio_speed_1.set(data.get("audio_speed_inc_1", 1.20))
-        self.var_audio_speed_2.set(data.get("audio_speed_inc_2", 1.30))
+        self.var_audio_speed.set(data.get("audio_speed_inc", 1.20))
 
         if "regex_mode_name" in data:
             self.var_regex_mode.set(data["regex_mode_name"])
@@ -536,7 +534,8 @@ class LektorApp:
                                           volume_callback=lambda: self.var_volume.get())
         self.reader_thread = ReaderThread(path, pattern, self.config_mgr.settings, stop_event, audio_queue,
                                           target_resolution=target_res, log_queue=log_queue,
-                                          auto_remove_names=self.var_auto_names.get())
+                                          auto_remove_names=self.var_auto_names.get(), debug_queue=debug_queue
+                                          )
         self.player_thread.start()
         self.reader_thread.start()
         self.is_running = True
@@ -581,6 +580,40 @@ class LektorApp:
         if self.game_process: self.game_process.terminate()
         if hasattr(self, 'hotkey_listener') and self.hotkey_listener: self.hotkey_listener.stop()
         self.root.destroy()
+
+    def _check_debug_queue(self):
+        """Sprawdza czy są nowe ramki do narysowania."""
+        try:
+            while True:
+                msg_type, data = debug_queue.get_nowait()
+                if msg_type == 'overlay':
+                    x, y, w, h = data
+                    self._show_debug_overlay(x, y, w, h)
+        except queue.Empty:
+            pass
+        finally:
+            self.root.after(50, self._check_debug_queue)
+
+    def _show_debug_overlay(self, x, y, w, h):
+        """Rysuje czerwony prostokąt na ekranie na 0.5s."""
+        if not self.var_show_debug.get():
+            return
+        top = tk.Toplevel(self.root)
+
+        top.overrideredirect(True)
+
+        w = max(1, w)
+        h = max(1, h)
+        top.geometry(f"{w}x{h}+{x}+{y}")
+        top.configure(bg='white')
+
+        try:
+            top.attributes('-alpha', 0.1)
+            top.attributes('-topmost', True)
+        except Exception:
+            pass
+
+        top.after(300, top.destroy)
 
 
 def main():

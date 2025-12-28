@@ -55,7 +55,8 @@ class ReaderThread(threading.Thread):
                  stop_event: threading.Event, audio_queue,
                  target_resolution: Optional[Tuple[int, int]],
                  log_queue=None,
-                 auto_remove_names: bool = True):
+                 auto_remove_names: bool = True,
+                 debug_queue: Optional[queue.Queue] = None, brightness_threshold: int = 200):
         super().__init__(daemon=True)
         self.config_path = config_path
         self.regex_template = regex_template
@@ -63,8 +64,10 @@ class ReaderThread(threading.Thread):
         self.stop_event = stop_event
         self.audio_queue = audio_queue
         self.log_queue = log_queue
+        self.debug_queue = debug_queue
         self.target_resolution = target_resolution
         self.auto_remove_names = auto_remove_names
+        self.brightness_threshold = brightness_threshold
 
         self.recent_match_indices = deque(maxlen=10)
         self.last_ocr_texts = deque(maxlen=5)
@@ -77,23 +80,19 @@ class ReaderThread(threading.Thread):
         self.ocr_scale = 1.0
         self.empty_threshold = 0.15
         self.ocr_density_threshold = 0.015
-        self.rerun_threshold = 50
         self.text_alignment = "Center"
         self.save_logs = False
         self.subtitle_mode = 'Full Lines'
 
-        # Nowe parametry Matchera
         self.matcher_config = {}
-        # Nowe parametry Audio
-        self.audio_speed_inc_1 = 1.2
-        self.audio_speed_inc_2 = 1.3
+        self.audio_speed_inc = 1.2
 
         text_color_mode = app_settings.get('text_color_mode', 'Light')
         self.invert_colors = (text_color_mode == 'Light')
 
-        self.ocr_grayscale = app_settings.get('ocr_grayscale', False)
-        self.ocr_contrast = app_settings.get('ocr_contrast', False)
         self.ocr_binarize = True
+
+        self.current_unified_area = {'left': 0, 'top': 0, 'width': 0, 'height': 0}
 
     def trigger_area_3(self, duration: float = 2.0):
         self.area3_expiry_time = time.time() + duration
@@ -148,17 +147,6 @@ class ReaderThread(threading.Thread):
         except Exception:
             return None
 
-    def _smart_retry_ocr(self, image: Image.Image) -> str:
-        bounds = self._get_fast_text_bounds(image)
-        if not bounds: return ""
-        l, t, r, b = bounds
-        if (r - l) > image.width * 0.92 and (b - t) > image.height * 0.92:
-            return ""
-        crop = image.crop((l, t, r, b))
-        crop = crop.resize((crop.width * 2, crop.height * 2), Image.BICUBIC)
-        # Przekazujemy również density_threshold (ewentualnie 0.0, by uniknąć odrzucenia fragmentu)
-        return recognize_text(crop, self.combined_regex, self.auto_remove_names, empty_threshold=0.0)
-
     def _images_are_similar(self, img1: Image.Image, img2: Image.Image) -> bool:
         if img1 is None or img2 is None: return False
         if img1.size != img2.size: return False
@@ -174,14 +162,12 @@ class ReaderThread(threading.Thread):
         self.ocr_scale = preset.get('ocr_scale_factor', 1.0)
         self.empty_threshold = preset.get('empty_image_threshold', 0.15)
         self.ocr_density_threshold = preset.get('ocr_density_threshold', 0.015)
-        self.rerun_threshold = preset.get('rerun_threshold', 50)
         self.text_alignment = preset.get('text_alignment', "Center")
         self.save_logs = preset.get('save_logs', False)
         self.subtitle_mode = preset.get('subtitle_mode', 'Full Lines')
         interval = preset.get('capture_interval', 0.5)
 
-        self.audio_speed_inc_1 = preset.get('audio_speed_inc_1', 1.20)
-        self.audio_speed_inc_2 = preset.get('audio_speed_inc_2', 1.30)
+        self.audio_speed_inc = preset.get('audio_speed_inc', 1.20)
 
         # Konfiguracja dla matchera
         self.matcher_config = {
@@ -206,6 +192,13 @@ class ReaderThread(threading.Thread):
         max_r = max(m['left'] + m['width'] for m in monitors)
         max_b = max(m['top'] + m['height'] for m in monitors)
         unified_area = {'left': min_l, 'top': min_t, 'width': max_r - min_l, 'height': max_b - min_t}
+
+        self.current_unified_area = {
+            'left': min_l,
+            'top': min_t,
+            'width': max_r - min_l,
+            'height': max_b - min_t
+        }
 
         queue_size = 2
         self.img_queue = queue.Queue(maxsize=queue_size)
@@ -253,21 +246,25 @@ class ReaderThread(threading.Thread):
                 t_pre_start = time.perf_counter()
 
                 # Przekazanie parametru density_threshold
-                processed, has_content = preprocess_image(crop, self.ocr_scale, self.invert_colors,
-                                                          self.ocr_density_threshold)
+                processed, has_content, crop_bbox = preprocess_image(crop, self.ocr_scale, self.invert_colors,
+                                                          self.ocr_density_threshold, self.brightness_threshold)
 
                 if not has_content:
                     continue
 
                 t_pre = (time.perf_counter() - t_pre_start) * 1000
 
+                if has_content and crop_bbox and self.debug_queue:
+                    # crop_bbox jest względem full_img (czyli unified_area)
+                    # Musimy dodać offset unified_area, aby uzyskać współrzędne ekranowe
+                    abs_x = self.current_unified_area['left'] + crop_bbox[0]
+                    abs_y = self.current_unified_area['top'] + crop_bbox[1]
+                    abs_w = crop_bbox[2] - crop_bbox[0]
+                    abs_h = crop_bbox[3] - crop_bbox[1]
+                    self.debug_queue.put(('overlay', (abs_x, abs_y, abs_w, abs_h)))
+
                 t_ocr_start = time.perf_counter()
                 text = recognize_text(processed, self.combined_regex, self.auto_remove_names, self.empty_threshold)
-
-                if 0 < len(text) < self.rerun_threshold:
-                    retry_text = self._smart_retry_ocr(processed)
-                    if len(retry_text) > len(text):
-                        text = retry_text
 
                 t_ocr = (time.perf_counter() - t_ocr_start) * 1000
 
@@ -316,14 +313,11 @@ class ReaderThread(threading.Thread):
 
                         audio_path = os.path.join(audio_dir, f"output1 ({idx_match + 1}){audio_ext}")
 
-                        # --- Zaktualizowana logika przyspieszania ---
                         q_size = self.audio_queue.qsize()
                         speed_multiplier = 1.0
 
-                        if q_size == 1:
-                            speed_multiplier = self.audio_speed_inc_1
-                        elif q_size > 1:
-                            speed_multiplier = self.audio_speed_inc_2
+                        if q_size > 0:
+                            speed_multiplier = self.audio_speed_inc
 
                         self.audio_queue.put((audio_path, speed_multiplier))
 

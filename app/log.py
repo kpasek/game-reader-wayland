@@ -10,7 +10,7 @@ class LogWindow(tk.Toplevel):
         self.geometry("1000x600")
         self.log_queue = log_queue
         self.is_open = True
-        self.max_lines = 2000  # LIMIT LINII
+        self.max_lines = 2000
 
         # Obszar tekstowy
         self.text_area = scrolledtext.ScrolledText(self, state='disabled')
