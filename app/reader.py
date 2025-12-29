@@ -247,7 +247,7 @@ class ReaderThread(threading.Thread):
 
                 # Przekazanie parametru density_threshold
                 processed, has_content, crop_bbox = preprocess_image(crop, self.ocr_scale, self.invert_colors,
-                                                          self.ocr_density_threshold, self.brightness_threshold)
+                                                          self.ocr_density_threshold, self.brightness_threshold, self.text_alignment)
 
                 if not has_content:
                     continue

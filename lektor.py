@@ -232,9 +232,6 @@ class LektorApp:
 
     def _init_gui(self):
         menubar = tk.Menu(self.root)
-        file_menu = tk.Menu(menubar, tearoff=0)
-        file_menu.add_command(label="Wyjdź", command=self.on_close)
-        menubar.add_cascade(label="Plik", menu=file_menu)
 
         preset_menu = tk.Menu(menubar, tearoff=0)
         preset_menu.add_command(label="Wybierz katalog...", command=self.browse_lector_folder)
@@ -279,7 +276,7 @@ class LektorApp:
             self.config_mgr.update_setting('last_resolution_key', self.var_resolution.get()),
             self._update_scale_for_resolution(self.var_resolution.get())
         ])
-        ttk.Button(f_res, text="Dopasuj rozdzielczość", command=self.auto_detect_resolution).pack(side=tk.LEFT, padx=5)
+        ttk.Button(f_res, text="Dopasuj rozdz.", command=self.auto_detect_resolution).pack(side=tk.LEFT, padx=5)
         self.btn_settings = ttk.Button(f_res, text="⚙ Ustawienia", command=self.open_settings)
         self.btn_settings.pack(side=tk.LEFT, padx=5)
         # --- AUDIO ---
@@ -309,7 +306,7 @@ class LektorApp:
         grp_aud.columnconfigure(1, weight=1)
 
         # --- STEROWANIE ---
-        hk_start = self.config_mgr.get('hotkey_start_stop', 'Ctrl+F5')
+        hk_start = self.config_mgr.get('hotkey_start_stop', 'F2')
         frm_btn = ttk.Frame(panel)
         frm_btn.pack(side=tk.BOTTOM, fill=tk.X, pady=10)
 
@@ -390,6 +387,7 @@ class LektorApp:
         self.var_text_color.set(data.get("text_color_mode", "Light"))
         self.var_text_alignment.set(data.get("text_alignment", "Center"))
         self.var_save_logs.set(data.get("save_logs", False))
+        self.var_brightness_threshold.set(data.get("brightness_threshold", 200))
 
         self.var_ocr_density.set(data.get("ocr_density_threshold", 0.015))
         self.var_match_score_short.set(data.get("match_score_short", 90))

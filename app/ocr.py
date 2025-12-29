@@ -38,13 +38,66 @@ if platform.system() == "Windows":
             os.environ['TESSDATA_PREFIX'] = path_tessdata
 
 
+def check_alignment(bbox: Tuple[int, int, int, int], width: int, align_mode: str) -> bool:
+    """
+    Sprawdza czy bbox (obszar tekstu) pasuje do zadanego wyrównania poziomego.
+    Implementuje logikę 'słupa' o szerokości np. 20%.
+    """
+    if not align_mode or align_mode in ["Brak", "Any"]:
+        return True
+
+    left, top, right, bottom = bbox
+
+    c_min = 0
+    c_max = width
+
+    if align_mode == "Center":
+        col_w = width * 0.20  # 20% szerokości
+        center = width / 2
+        c_min = center - (col_w / 2)
+        c_max = center + (col_w / 2)
+    elif align_mode == "Left":
+        c_min = 0
+        c_max = width * 0.35
+    elif align_mode == "Right":
+        c_min = width * 0.65
+        c_max = width
+    else:
+        return True
+
+    # --- Logika Walidacji ---
+
+    # 1. Czy zawiera się całkowicie w kolumnie?
+    if left >= c_min and right <= c_max:
+        return True
+
+    # 2. Czy wychodzi poza lewą i prawą jednocześnie? (Jest szerszy niż kolumna i ją zakrywa)
+    if left < c_min and right > c_max:
+        return True
+
+    # 3. Czy pokrywa się w przynajmniej 80%?
+    intersect_left = max(left, c_min)
+    intersect_right = min(right, c_max)
+
+    if intersect_right > intersect_left:
+        overlap = intersect_right - intersect_left
+        text_width = right - left
+
+        if text_width > 0:
+            coverage = overlap / text_width
+            if coverage >= 0.80:
+                return True
+
+    return False
+
+
 def preprocess_image(image: Image.Image, scale: float = 1.0,
                      invert_colors: bool = False,
                      density_threshold: float = 0.015,
-                     brightness_threshold: int = 200) -> Tuple[Image.Image, bool, Optional[Tuple[int, int, int, int]]]:
+                     brightness_threshold: int = 200,
+                     align_mode: str = "Center") -> Tuple[Image.Image, bool, Optional[Tuple[int, int, int, int]]]:
     """
     Zwraca krotkę: (przetworzony_obraz, czy_zawiera_tresc, bbox).
-    bbox to krotka (left, top, right, bottom) względem przeskalowanego obrazka.
     """
     try:
         # Konwersja do skali szarości
@@ -57,13 +110,19 @@ def preprocess_image(image: Image.Image, scale: float = 1.0,
         # Wykrywanie obszaru napisów
         crop_box = None
         try:
+            # Progowanie jasności
             mask = image.point(lambda x: 255 if x > brightness_threshold else 0, '1')
+
+            # Dylatacja (łączenie liter)
             mask = mask.filter(ImageFilter.MaxFilter(5))
 
             bbox = mask.getbbox()
 
             if bbox:
-                padding = 4  # Margines
+                if not check_alignment(bbox, image.width, align_mode):
+                    return image, False, None
+
+                padding = 4
                 left, upper, right, lower = bbox
                 width, height = image.size
 
@@ -74,7 +133,7 @@ def preprocess_image(image: Image.Image, scale: float = 1.0,
 
                 crop_box = (left, upper, right, lower)
 
-                # Jeśli wykryty obszar jest podejrzanie mały (np. szum 1x1px), ignorujemy crop
+                # Warunek minimalnego sensownego rozmiaru
                 if (right - left) > 10 and (lower - upper) > 10:
                     image = image.crop(crop_box)
                 else:
@@ -113,13 +172,10 @@ def preprocess_image(image: Image.Image, scale: float = 1.0,
 
         density = black_pixels / total_pixels
 
-        is_cropped = (crop_box[2] - crop_box[0]) < (new_w * 0.9) if 'new_w' in locals() else False
-
+        is_cropped = (crop_box[2] - crop_box[0]) < (image.width * 0.9) if 'new_w' in locals() else False
         min_pixels = 30 if is_cropped else 80
 
         if density < density_threshold and black_pixels < min_pixels:
-            # Jeśli gęstość jest mała I mało jest pikseli w ogóle -> odrzuć
-            # Ale jeśli mamy dużo czarnych pikseli (duży tekst), a gęstość niska (bo dużo tła zostało) -> przepuść
             if black_pixels < min_pixels:
                 return image, False, None
 
@@ -141,8 +197,6 @@ def is_image_empty(image: Image.Image, threshold: float) -> bool:
     except Exception:
         return False
 
-
-# ... (reszta funkcji get_text_bounds i recognize_text bez zmian) ...
 def get_text_bounds(image: Image.Image) -> Optional[Tuple[int, int, int, int]]:
     """
     Używa pytesseract.image_to_data, aby znaleźć bounding box wokół faktycznego tekstu.
@@ -181,7 +235,6 @@ def recognize_text(image: Image.Image, regex_pattern: str = "",
         if is_image_empty(image, empty_threshold):
             return ""
 
-    # 2. Wykonanie OCR
     try:
         if HAS_CONFIG_FILE:
             config_str = f'--psm 6 "{CONFIG_FILE_PATH}"'
@@ -202,5 +255,6 @@ def recognize_text(image: Image.Image, regex_pattern: str = "",
             text = smart_remove_name(text)
 
         return text
-    except Exception:
+    except Exception as e:
+        print(f"OCR Error: {e}", file=sys.stderr)
         return ""
