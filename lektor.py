@@ -580,7 +580,7 @@ class LektorApp:
         self.root.destroy()
 
     def _check_debug_queue(self):
-        """Sprawdza czy są nowe ramki do narysowania."""
+        """Sprawdza, czy są nowe ramki do narysowania."""
         try:
             while True:
                 msg_type, data = debug_queue.get_nowait()
