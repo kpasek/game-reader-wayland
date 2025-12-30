@@ -77,7 +77,7 @@ def capture_region(region: Dict[str, int]) -> Optional[Image.Image]:
         else:
             # ImageGrab przyjmuje bbox (x1, y1, x2, y2)
             bbox = (left, top, left + width, top + height)
-            return ImageGrab.grab(bbox, backend='shutil_subprocess') # Force backend safe for threads often
+            return ImageGrab.grab(bbox) # Force backend safe for threads often
     except Exception as e:
         print(f"BŁĄD (capture_region - {SCREENSHOT_BACKEND}): {e}", file=sys.stderr)
         return None
