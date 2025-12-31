@@ -16,6 +16,13 @@ class PlayerThread(threading.Thread):
         self.volume_callback = volume_callback
         self.current_process = None
 
+        self.ffplay_cmd = os.path.abspath(os.path.join("lib", "ffplay"))
+        if platform.system() == "Linux":
+            # Sprawdzenie czy w głównym katalogu znajduje się plik ffplay
+            local_ffplay = os.path.abspath("ffplay")
+            if os.path.exists(local_ffplay):
+                self.ffplay_cmd = local_ffplay
+
     def _get_startup_info(self):
         """
         Zwraca strukturę STARTUPINFO dla Windows, aby ukryć okno terminala
@@ -62,7 +69,7 @@ class PlayerThread(threading.Thread):
             filter_complex = f"atempo={final_speed:.2f},volume={base_volume:.2f},alimiter=limit=0.95"
 
             cmd = [
-                'ffplay',
+                self.ffplay_cmd,
                 '-nodisp',
                 '-autoexit',
                 '-af', filter_complex,

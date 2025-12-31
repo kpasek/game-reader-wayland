@@ -5,7 +5,7 @@ APP_NAME="lektor"
 ENTRY_FILE="lektor.py"
 BUILD_DIR="build_deck"
 
-source .venv_deck/bin/activate
+source .venv/bin/activate
 
 echo "🚀 Buduję aplikację $APP_NAME (OneFile) - wersja Generic/Zen2"
 
@@ -14,10 +14,10 @@ rm -rf "$BUILD_DIR" dist __pycache__ *.build *.dist *.onefile-build *.onefile-di
 rm -rf "$HOME/.cache/Nuitka"
 
 # FLAGA 1: Architektura.
-# Wymuszamy x86-64-v3 (obsługiwane przez Steam Deck).
+# Wymuszamy x86-64-v2 (obsługiwane przez Steam Deck).
 # -mtune=generic zapobiega optymalizacjom pod Twój Zen 4.
-export CFLAGS="-march=x86-64-v3 -mtune=generic"
-export CXXFLAGS="-march=x86-64-v3 -mtune=generic"
+export CFLAGS="-march=x86-64-v2 -mtune=generic"
+export CXXFLAGS="-march=x86-64-v2 -mtune=generic"
 
 # FLAGA 2: Linker
 # -rdynamic naprawia błąd "undefined symbol: PyList_New"
