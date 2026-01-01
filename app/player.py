@@ -16,10 +16,10 @@ class PlayerThread(threading.Thread):
         self.volume_callback = volume_callback
         self.current_process = None
 
-        self.ffplay_cmd = os.path.abspath(os.path.join("lib", "ffplay"))
+        self.ffplay_cmd = "ffplay"
         if platform.system() == "Linux":
             # Sprawdzenie czy w głównym katalogu znajduje się plik ffplay
-            local_ffplay = os.path.abspath("ffplay")
+            local_ffplay = os.path.abspath(os.path.join("lib", "ffplay"))
             if os.path.exists(local_ffplay):
                 self.ffplay_cmd = local_ffplay
 
