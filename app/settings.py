@@ -35,7 +35,7 @@ class SettingsDialog(tk.Toplevel):
         """Pomocnicza funkcja do upewnienia się, że zmienne istnieją w obiekcie aplikacji."""
         # Nowe parametry
         if not hasattr(self.app, 'var_ocr_density'): self.app.var_ocr_density = tk.DoubleVar()
-        if not hasattr(self.app, 'var_audio_speed_1'): self.app.var_audio_speed = tk.DoubleVar()
+        if not hasattr(self.app, 'var_audio_speed'): self.app.var_audio_speed = tk.DoubleVar()
         if not hasattr(self.app, 'var_match_score_short'): self.app.var_match_score_short = tk.IntVar()
         if not hasattr(self.app, 'var_match_score_long'): self.app.var_match_score_long = tk.IntVar()
         if not hasattr(self.app, 'var_match_len_diff'): self.app.var_match_len_diff = tk.DoubleVar()
@@ -122,7 +122,7 @@ class SettingsDialog(tk.Toplevel):
         f_align = ttk.Frame(grp_opt)
         f_align.pack(fill=tk.X, pady=5)
         ttk.Label(f_align, text="Wyrównanie tekstu:").pack(side=tk.LEFT)
-        cb_align = ttk.Combobox(f_align, textvariable=self.app.var_text_alignment, values=["Left", "Center", "Right"],
+        cb_align = ttk.Combobox(f_align, textvariable=self.app.var_text_alignment, values=["None","Left", "Center", "Right"],
                                 state="readonly", width=15)
         cb_align.pack(side=tk.LEFT, padx=5)
         cb_align.bind("<<ComboboxSelected>>",

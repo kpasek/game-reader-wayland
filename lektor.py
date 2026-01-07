@@ -442,7 +442,6 @@ class LektorApp:
             new = filedialog.askopenfilename(initialdir=base, filetypes=[("Text", "*.txt")])
         if new:
             self._save_preset_val(key, new)
-            messagebox.showinfo("Sukces", "Zaktualizowano ścieżkę.")
 
     def _scale_rect(self, rect, sx, sy):
         return {'left': int(rect['left'] * sx), 'top': int(rect['top'] * sy), 'width': int(rect['width'] * sx),

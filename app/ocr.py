@@ -46,39 +46,32 @@ def check_alignment(bbox: Tuple[int, int, int, int], width: int, align_mode: str
     Sprawdza czy bbox (obszar tekstu) pasuje do zadanego wyrównania poziomego.
     Implementuje logikę 'słupa' o szerokości np. 20%.
     """
-    if not align_mode or align_mode in ["Brak", "Any"]:
+    if not align_mode or align_mode not in ["Center", "Left", "Right"]:
         return True
 
     left, top, right, bottom = bbox
 
-    c_min = 0
-    c_max = width
-
     if align_mode == "Center":
-        col_w = width * 0.20  # 20% szerokości
+        col_w = width * 0.15
         center = width / 2
         c_min = center - (col_w / 2)
         c_max = center + (col_w / 2)
     elif align_mode == "Left":
         c_min = 0
-        c_max = width * 0.35
+        c_max = width * 0.3
     elif align_mode == "Right":
-        c_min = width * 0.65
+        c_min = width * 0.07
         c_max = width
     else:
         return True
 
     # --- Logika Walidacji ---
-
-    # 1. Czy zawiera się całkowicie w kolumnie?
     if left >= c_min and right <= c_max:
         return True
 
-    # 2. Czy wychodzi poza lewą i prawą jednocześnie? (Jest szerszy niż kolumna i ją zakrywa)
     if left < c_min and right > c_max:
         return True
 
-    # 3. Czy pokrywa się w przynajmniej 80%?
     intersect_left = max(left, c_min)
     intersect_right = min(right, c_max)
 
@@ -88,7 +81,7 @@ def check_alignment(bbox: Tuple[int, int, int, int], width: int, align_mode: str
 
         if text_width > 0:
             coverage = overlap / text_width
-            if coverage >= 0.80:
+            if coverage >= 0.8:
                 return True
 
     return False
