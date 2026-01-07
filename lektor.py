@@ -592,25 +592,62 @@ class LektorApp:
             self.root.after(50, self._check_debug_queue)
 
     def _show_debug_overlay(self, x, y, w, h):
-        """Rysuje czerwony prostokąt na ekranie na 0.5s."""
+        """
+        Rysuje ramkę składającą się z 4 osobnych okien (pasków).
+        Jest to konieczne na Linux/Wayland, gdzie 'transparentcolor' nie działa.
+        """
         if not self.var_show_debug.get():
             return
-        top = tk.Toplevel(self.root)
 
-        top.overrideredirect(True)
+        thickness = 3
+        color = 'red'
+        duration = 200  # Czas wyświetlania (ms)
 
-        w = max(1, w)
-        h = max(1, h)
-        top.geometry(f"{w}x{h}+{x}+{y}")
-        top.configure(bg='white')
+        # Zabezpieczenie przed ujemnymi/zerowymi wymiarami
+        w = max(thickness * 2, w)
+        h = max(thickness * 2, h)
 
-        try:
-            top.attributes('-alpha', 0.1)
-            top.attributes('-topmost', True)
-        except Exception:
-            pass
+        windows = []
 
-        top.after(300, top.destroy)
+        def create_strip(geometry_str):
+            """Tworzy pojedynczy pasek ramki."""
+            top = tk.Toplevel(self.root)
+            top.overrideredirect(True)  # Brak belek systemowych
+            top.geometry(geometry_str)
+            top.configure(bg=color)
+            try:
+                top.attributes('-topmost', True)
+            except Exception:
+                pass
+            return top
+
+        # 1. Pasek górny
+        windows.append(create_strip(f"{w}x{thickness}+{x}+{y}"))
+
+        # 2. Pasek dolny
+        windows.append(create_strip(f"{w}x{thickness}+{x}+{y + h - thickness}"))
+
+        # 3. Pasek lewy (bez rogów, żeby nie nakładać się na górny/dolny)
+        h_inner = h - (2 * thickness)
+        if h_inner > 0:
+            windows.append(create_strip(f"{thickness}x{h_inner}+{x}+{y + thickness}"))
+
+        # 4. Pasek prawy
+        if h_inner > 0:
+            windows.append(create_strip(f"{thickness}x{h_inner}+{x + w - thickness}+{y + thickness}"))
+
+        # Funkcja zamykająca wszystkie paski naraz
+        def close_overlay():
+            for win in windows:
+                try:
+                    win.destroy()
+                except Exception:
+                    pass
+
+        # Zamknij po określonym czasie
+        # Używamy self.root.after, aby odwołać się do głównej pętli,
+        # bo 'windows[0]' może już nie istnieć w momencie wywołania.
+        self.root.after(duration, close_overlay)
 
 
 def main():

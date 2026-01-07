@@ -254,15 +254,6 @@ class ReaderThread(threading.Thread):
 
                 t_pre = (time.perf_counter() - t_pre_start) * 1000
 
-                if has_content and crop_bbox and self.debug_queue:
-                    # crop_bbox jest względem full_img (czyli unified_area)
-                    # Musimy dodać offset unified_area, aby uzyskać współrzędne ekranowe
-                    abs_x = self.current_unified_area['left'] + crop_bbox[0]
-                    abs_y = self.current_unified_area['top'] + crop_bbox[1]
-                    abs_w = crop_bbox[2] - crop_bbox[0]
-                    abs_h = crop_bbox[3] - crop_bbox[1]
-                    self.debug_queue.put(('overlay', (abs_x, abs_y, abs_w, abs_h)))
-
                 t_ocr_start = time.perf_counter()
                 text = recognize_text(processed, self.combined_regex, self.auto_remove_names, self.empty_threshold)
 
@@ -273,6 +264,14 @@ class ReaderThread(threading.Thread):
 
                 if len(text) < 2 or text in self.last_ocr_texts:
                     continue
+
+                if has_content and crop_bbox and self.debug_queue:
+                    abs_x = self.current_unified_area['left'] + crop_bbox[0]
+                    abs_y = self.current_unified_area['top'] + crop_bbox[1]
+                    abs_w = crop_bbox[2] - crop_bbox[0]
+                    abs_h = crop_bbox[3] - crop_bbox[1]
+                    self.debug_queue.put(('overlay', (abs_x, abs_y, abs_w, abs_h)))
+
                 self.last_ocr_texts.append(text)
 
                 t_match_start = time.perf_counter()

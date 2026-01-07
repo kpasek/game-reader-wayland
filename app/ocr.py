@@ -109,8 +109,7 @@ def preprocess_image(image: Image.Image, scale: float = 1.0,
             # Progowanie jasności
             mask = image.point(lambda x: 255 if x > brightness_threshold else 0, '1')
 
-            # Dylatacja (łączenie liter)
-            mask = mask.filter(ImageFilter.MaxFilter(5))
+            mask = mask.filter(ImageFilter.MaxFilter(3))
 
             bbox = mask.getbbox()
 
