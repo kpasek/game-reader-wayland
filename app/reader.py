@@ -88,7 +88,7 @@ class ReaderThread(threading.Thread):
         self.audio_speed_inc = 1.2
 
         text_color_mode = app_settings.get('text_color_mode', 'Light')
-        self.invert_colors = (text_color_mode == 'Light')
+        self.text_color = text_color_mode
 
         self.ocr_binarize = True
 
@@ -246,8 +246,8 @@ class ReaderThread(threading.Thread):
                 t_pre_start = time.perf_counter()
 
                 # Przekazanie parametru density_threshold
-                processed, has_content, crop_bbox = preprocess_image(crop, self.ocr_scale, self.invert_colors,
-                                                          self.ocr_density_threshold, self.brightness_threshold, self.text_alignment)
+                processed, has_content, crop_bbox = preprocess_image(crop, self.ocr_scale, self.text_color,
+                                                                     self.ocr_density_threshold, self.brightness_threshold, self.text_alignment)
 
                 if not has_content:
                     continue

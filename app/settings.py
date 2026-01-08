@@ -131,7 +131,7 @@ class SettingsDialog(tk.Toplevel):
         f_color = ttk.Frame(grp_opt)
         f_color.pack(fill=tk.X, pady=5)
         ttk.Label(f_color, text="Kolor napisów:").pack(side=tk.LEFT)
-        cb_color = ttk.Combobox(f_color, textvariable=self.app.var_text_color, values=["Light", "Dark"],
+        cb_color = ttk.Combobox(f_color, textvariable=self.app.var_text_color, values=["Light", "Dark", "Mixed"],
                                 state="readonly", width=15)
         cb_color.pack(side=tk.LEFT, padx=5)
         cb_color.bind("<<ComboboxSelected>>",

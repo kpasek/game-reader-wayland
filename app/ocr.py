@@ -88,7 +88,7 @@ def check_alignment(bbox: Tuple[int, int, int, int], width: int, align_mode: str
 
 
 def preprocess_image(image: Image.Image, scale: float = 1.0,
-                     invert_colors: bool = False,
+                     text_color: str = "Mixed",
                      density_threshold: float = 0.015,
                      brightness_threshold: int = 200,
                      align_mode: str = "Center") -> Tuple[Image.Image, bool, Optional[Tuple[int, int, int, int]]]:
@@ -96,11 +96,12 @@ def preprocess_image(image: Image.Image, scale: float = 1.0,
     Zwraca krotkę: (przetworzony_obraz, czy_zawiera_tresc, bbox).
     """
     try:
-        # Konwersja do skali szarości
-        image = ImageOps.grayscale(image)
+        if text_color != "Mixed":
+            # Konwersja do skali szarości
+            image = ImageOps.grayscale(image)
 
         # dla czarnych napisów należy odwrócić kolory, aby dało się wyszukać obszar z napisami
-        if not invert_colors:
+        if text_color == "Dark":
             image = ImageOps.invert(image)
 
         # Wykrywanie obszaru napisów
@@ -146,33 +147,33 @@ def preprocess_image(image: Image.Image, scale: float = 1.0,
             new_h = int(image.height * scale)
             image = image.resize((new_w, new_h), Image.BICUBIC)
 
-        image = ImageOps.invert(image)
 
-        # 5. Binaryzacja pod OCR
-        thresh = 160
-        image = image.point(lambda x: 0 if x < thresh else 255, '1')
+        if text_color != "Mixed":
+            image = ImageOps.invert(image)
+            # 5. Binaryzacja pod OCR
+            thresh = 160
+            image = image.point(lambda x: 0 if x < thresh else 255, '1')
 
-        # 6. Sprawdzenie gęstości pikseli
-        colors = image.getcolors()
-        black_pixels = 0
-        if colors:
-            for count, value in colors:
-                if value == 0:
-                    black_pixels = count
-                    break
+            # 6. Sprawdzenie gęstości pikseli
+            colors = image.getcolors()
+            black_pixels = 0
+            if colors:
+                for count, value in colors:
+                    if value == 0:
+                        black_pixels = count
+                        break
 
-        total_pixels = image.width * image.height
-        if total_pixels == 0:
-            return image, False, None
-
-        density = black_pixels / total_pixels
-
-        is_cropped = (crop_box[2] - crop_box[0]) < (image.width * 0.9) if 'new_w' in locals() else False
-        min_pixels = 30 if is_cropped else 80
-
-        if density < density_threshold and black_pixels < min_pixels:
-            if black_pixels < min_pixels:
+            total_pixels = image.width * image.height
+            if total_pixels == 0:
                 return image, False, None
+
+            is_cropped = (crop_box[2] - crop_box[0]) < (image.width * 0.9) if 'new_w' in locals() else False
+            min_pixels = 30 if is_cropped else 80
+
+            density = black_pixels / total_pixels
+            if density < density_threshold and black_pixels < min_pixels:
+                if black_pixels < min_pixels:
+                    return image, False, None
 
         return image, True, crop_box
 
