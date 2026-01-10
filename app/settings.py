@@ -111,6 +111,10 @@ class SettingsDialog(tk.Toplevel):
                          "capture_interval", fmt="{:.2f}s")
         self._add_slider(grp_ocr, "Czułość jasności (Wykrywanie napisów):", self.app.var_brightness_threshold, 0, 255,
                          "brightness_threshold")
+        self._add_slider(grp_ocr, "Próg podobieństwa w %", self.app.var_similarity, 0, 20,
+                         "similarity")
+        self._add_slider(grp_ocr, "Podbicie kontrastu", self.app.var_contrast, -1, 2,
+                         "contrast")
         ttk.Checkbutton(grp_ocr, text="DEBUG: Pokaż obszar wykrytych napisów", variable=self.app.var_show_debug,
                         command=lambda: self.app._save_preset_val("show_debug", self.app.var_save_logs.get())).pack(
             anchor=tk.W, pady=2)

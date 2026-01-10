@@ -1,44 +1,48 @@
 #!/usr/bin/env bash
 set -e
 
+# -------------------------
+# Konfiguracja builda Nuitka
+# -------------------------
+
 APP_NAME="lektor"
 ENTRY_FILE="lektor.py"
 BUILD_DIR="build_deck"
 
-source .venv/bin/activate
+# Opcjonalnie: aktywuj wirtualne środowisko, jeśli masz
+source .venv-deck/bin/activate
 
-echo "🚀 Buduję aplikację $APP_NAME (OneFile) - wersja Generic/Zen2"
+echo "🚀 Buduję aplikację $APP_NAME przy użyciu Nuitka..."
 
-# Czyszczenie
+# Wyczyść poprzednie buildy
 rm -rf "$BUILD_DIR" dist __pycache__ *.build *.dist *.onefile-build *.onefile-dist || true
-rm -rf "$HOME/.cache/Nuitka"
 
-# FLAGA 1: Architektura.
-# Wymuszamy x86-64-v2 (obsługiwane przez Steam Deck).
-# -mtune=generic zapobiega optymalizacjom pod Twój Zen 4.
-export CFLAGS="-march=x86-64-v2 -mtune=generic"
-export CXXFLAGS="-march=x86-64-v2 -mtune=generic"
-
-# FLAGA 2: Linker
-# -rdynamic naprawia błąd "undefined symbol: PyList_New"
-export LDFLAGS="-rdynamic"
-
+# -------------------------
+# Kompilacja
+# -------------------------
 python -m nuitka \
+  --standalone \
   --onefile \
   --follow-imports \
   --enable-plugin=tk-inter \
   --enable-plugin=pylint-warnings \
+  --remove-output \
   --output-dir="$BUILD_DIR" \
-  --static-libpython=yes \
+  --clang \
   --show-progress \
   --show-memory \
   --assume-yes-for-downloads \
   --lto=no \
   --jobs=$(nproc) \
   --include-package=thefuzz \
-  --include-package=PIL \
-  --include-package=pyscreenshot \
   "$ENTRY_FILE" \
   -o "$APP_NAME"
 
-echo "✅ Gotowe! Plik znajduje się w katalogu $BUILD_DIR"
+# -------------------------
+# Wynik
+# -------------------------
+echo ""
+echo "✅ Kompilacja zakończona!"
+echo "Plik wynikowy: $BUILD_DIR/$APP_NAME"
+echo ""
+ls -lh "$BUILD_DIR/$APP_NAME"

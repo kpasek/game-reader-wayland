@@ -1,9 +1,10 @@
 import sys
-import re
 import os
 import platform
 import tempfile
 from typing import Optional, Tuple
+
+from app.config_manager import ConfigManager
 
 try:
     import pytesseract
@@ -87,15 +88,25 @@ def check_alignment(bbox: Tuple[int, int, int, int], width: int, align_mode: str
     return False
 
 
-def preprocess_image(image: Image.Image, scale: float = 1.0,
-                     text_color: str = "Mixed",
-                     density_threshold: float = 0.015,
-                     brightness_threshold: int = 200,
-                     align_mode: str = "Center") -> Tuple[Image.Image, bool, Optional[Tuple[int, int, int, int]]]:
+def preprocess_image(image: Image.Image, config_manager: ConfigManager) -> Tuple[Image.Image, bool, Optional[Tuple[int, int, int, int]]]:
     """
     Zwraca krotkę: (przetworzony_obraz, czy_zawiera_tresc, bbox).
     """
     try:
+        preset = config_manager.load_preset()
+        text_color = preset.get('text_color_mode', 'Light')
+        brightness_threshold = preset.get("brightness_threshold", 200)
+        align_mode = preset.get('text_alignment', "Center")
+        scale = preset.get("ocr_scale_factor", 0.5)
+        density_threshold = preset.get("ocr_density_threshold", 0.005)
+        contrast = preset.get("contract", 0)
+
+        if contrast != 0:
+            contrast += 1
+
+            enhancer = ImageEnhance.Contrast(image)
+            image = enhancer.enhance(contrast)
+
         if text_color != "Mixed":
             # Konwersja do skali szarości
             image = ImageOps.grayscale(image)
@@ -140,7 +151,6 @@ def preprocess_image(image: Image.Image, scale: float = 1.0,
         except Exception as e:
             print(f"Błąd przycinania (mask): {e}")
             crop_box = (0, 0, image.width, image.height)
-
         # Skalowanie
         if abs(scale - 1.0) > 0.05:
             new_w = int(image.width * scale)
@@ -221,11 +231,12 @@ def get_text_bounds(image: Image.Image) -> Optional[Tuple[int, int, int, int]]:
         return None
 
 
-def recognize_text(image: Image.Image, regex_pattern: str = "",
-                   auto_remove_names: bool = True, empty_threshold: float = 0.15) -> str:
+def recognize_text(image: Image.Image, config_manager: ConfigManager) -> str:
     """
     Główna funkcja OCR.
     """
+    preset = config_manager.load_preset()
+    empty_threshold = float(preset.get('empty_image_threshold'))
     # 1. Optymalizacja: Pomiń puste klatki
     if empty_threshold > 0.001:
         if is_image_empty(image, empty_threshold):
@@ -241,12 +252,7 @@ def recognize_text(image: Image.Image, regex_pattern: str = "",
         if not text: return ""
 
         text = text.strip().replace('\n', ' ')
-        if regex_pattern:
-            try:
-                text = re.sub(regex_pattern, "", text).strip()
-            except:
-                pass
-
+        auto_remove_names = preset.get('auto_remove_names')
         if auto_remove_names:
             text = smart_remove_name(text)
 

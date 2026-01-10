@@ -41,7 +41,9 @@ DEFAULT_PRESET_CONTENT = {
 class ConfigManager:
     """Zarządza ładowaniem i zapisywaniem głównej konfiguracji aplikacji oraz presetów."""
 
-    def __init__(self):
+    def __init__(self, preset_path: Optional[str] = None):
+        self.preset_cache = None
+        self.preset_path = preset_path
         self.settings = DEFAULT_CONFIG.copy()
         self.load_app_config()
 
@@ -104,8 +106,13 @@ class ConfigManager:
         except ValueError:
             return path
 
-    @classmethod
-    def load_preset(cls, path: str) -> Dict[str, Any]:
+    def load_preset(self, path: Optional[str] = None) -> Dict[str, Any]:
+        if self.preset_cache is not None:
+            return self.preset_cache
+        if not path:
+            path = self.preset_path
+        else:
+            self.preset_path = path
         if not os.path.exists(path):
             return {}
         try:
@@ -120,24 +127,24 @@ class ConfigManager:
             base_dir = os.path.dirname(os.path.abspath(path))
             for key in ['audio_dir', 'text_file_path', 'names_file_path']:
                 if key in data and isinstance(data[key], str):
-                    data[key] = cls._to_absolute(base_dir, data[key])
-
+                    data[key] = self._to_absolute(base_dir, data[key])
+            self.preset_cache = data
             return data
         except Exception:
             return {}
 
-    @classmethod
-    def save_preset(cls, path: str, data: Dict[str, Any]):
+    def save_preset(self, path: str, data: Dict[str, Any]):
         try:
             save_data = data.copy()
             base_dir = os.path.dirname(os.path.abspath(path))
 
             for key in ['audio_dir', 'text_file_path', 'names_file_path']:
                 if key in save_data and isinstance(save_data[key], str):
-                    save_data[key] = cls._to_relative(base_dir, save_data[key])
+                    save_data[key] = self._to_relative(base_dir, save_data[key])
 
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(save_data, f, indent=4)
+            self.preset_cache = data
         except Exception as e:
             print(f"Błąd zapisu presetu {path}: {e}")
 

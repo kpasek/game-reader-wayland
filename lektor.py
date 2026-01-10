@@ -78,6 +78,8 @@ class LektorApp:
         self.var_text_color = tk.StringVar(value="Light")
         self.var_ocr_scale = tk.DoubleVar(value=1.0)
         self.var_brightness_threshold = tk.IntVar(value=200)
+        self.var_similarity = tk.DoubleVar(value=5.0)
+        self.var_contrast = tk.DoubleVar(value=5.0)
         self.var_empty_threshold = tk.DoubleVar(value=0.15)
         self.var_capture_interval = tk.DoubleVar(value=0.5)
         self.var_auto_names = tk.BooleanVar(value=True)
@@ -246,14 +248,13 @@ class LektorApp:
         preset_menu.add_separator()
         preset_menu.add_command(label="Zmień folder audio", command=lambda: self.change_path('audio_dir'))
         preset_menu.add_command(label="Zmień plik napisów", command=lambda: self.change_path('text_file_path'))
-        preset_menu.add_command(label="Zmień plik imion", command=lambda: self.change_path('names_file_path'))
         menubar.add_cascade(label="Lektor", menu=preset_menu)
 
-        tools_menu = tk.Menu(menubar, tearoff=0)
-        tools_menu.add_command(label="Podgląd logów", command=self.show_logs)
-        menubar.add_cascade(label="Narzędzia", menu=tools_menu)
+        # tools_menu = tk.Menu(menubar, tearoff=0)
+        # menubar.add_cascade(label="Narzędzia", menu=tools_menu)
 
         help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu.add_command(label="Podgląd logów", command=self.show_logs)
         help_menu.add_command(label="Instrukcja", command=self.show_help)
         menubar.add_cascade(label="Pomoc", menu=help_menu)
         self.root.config(menu=menubar)
@@ -388,6 +389,8 @@ class LektorApp:
         self.var_text_alignment.set(data.get("text_alignment", "Center"))
         self.var_save_logs.set(data.get("save_logs", False))
         self.var_brightness_threshold.set(data.get("brightness_threshold", 200))
+        self.var_similarity.set(data.get("similarity", 5.0))
+        self.var_contrast.set(data.get("contrast", 0))
 
         self.var_ocr_density.set(data.get("ocr_density_threshold", 0.015))
         self.var_match_score_short.set(data.get("match_score_short", 90))
@@ -529,9 +532,8 @@ class LektorApp:
         self.player_thread = PlayerThread(stop_event, audio_queue,
                                           base_speed_callback=lambda: self.var_speed.get(),
                                           volume_callback=lambda: self.var_volume.get())
-        self.reader_thread = ReaderThread(path, pattern, self.config_mgr.settings, stop_event, audio_queue,
-                                          target_resolution=target_res, log_queue=log_queue,
-                                          auto_remove_names=self.var_auto_names.get(), debug_queue=debug_queue
+        self.reader_thread = ReaderThread(config_manager=self.config_mgr, stop_event=stop_event, audio_queue=audio_queue,
+                                          target_resolution=target_res, log_queue=log_queue, debug_queue=debug_queue
                                           )
         self.player_thread.start()
         self.reader_thread.start()
