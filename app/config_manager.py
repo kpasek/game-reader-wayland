@@ -15,7 +15,6 @@ DEFAULT_CONFIG = {
 DEFAULT_PRESET_CONTENT = {
     "audio_dir": "audio",
     "text_file_path": "subtitles.txt",
-    "names_file_path": "names.txt",
     "monitor": [],
     "resolution": "1920x1080",
     "subtitle_mode": "Full Lines",
@@ -125,7 +124,7 @@ class ConfigManager:
                     data[k] = v
 
             base_dir = os.path.dirname(os.path.abspath(path))
-            for key in ['audio_dir', 'text_file_path', 'names_file_path']:
+            for key in ['audio_dir', 'text_file_path']:
                 if key in data and isinstance(data[key], str):
                     data[key] = self._to_absolute(base_dir, data[key])
             self.preset_cache = data
@@ -138,7 +137,7 @@ class ConfigManager:
             save_data = data.copy()
             base_dir = os.path.dirname(os.path.abspath(path))
 
-            for key in ['audio_dir', 'text_file_path', 'names_file_path']:
+            for key in ['audio_dir', 'text_file_path']:
                 if key in save_data and isinstance(save_data[key], str):
                     save_data[key] = self._to_relative(base_dir, save_data[key])
 

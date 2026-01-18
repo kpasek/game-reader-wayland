@@ -280,6 +280,8 @@ class LektorApp:
         ttk.Button(f_res, text="Dopasuj rozdz.", command=self.auto_detect_resolution).pack(side=tk.LEFT, padx=5)
         self.btn_settings = ttk.Button(f_res, text="⚙ Ustawienia", command=self.open_settings)
         self.btn_settings.pack(side=tk.LEFT, padx=5)
+        self.btn_area_1 = ttk.Button(f_res, text="Ustaw obszar 1", command=lambda: self._on_hotkey_set_area(0))
+        self.btn_area_1.pack(side=tk.LEFT, padx=5)
         # --- AUDIO ---
         grp_aud = ttk.LabelFrame(panel, text="Kontrola Audio", padding=10)
         grp_aud.pack(fill=tk.X, pady=10)
@@ -359,6 +361,33 @@ class LektorApp:
         path = self.var_preset_full_path.get()
         if not path or not os.path.exists(path): return
         data = self.config_mgr.load_preset(path)
+
+        base_dir = os.path.dirname(path)
+        modified = False
+
+        if not data.get("text_file_path"):
+            try:
+                for f in sorted(os.listdir(base_dir)):
+                    if f.lower().endswith(".txt"):
+                        data["text_file_path"] = os.path.join(base_dir, f)
+                        modified = True
+                        break
+            except Exception:
+                pass
+
+        if not data.get("audio_dir"):
+            try:
+                for f in sorted(os.listdir(base_dir)):
+                    full_p = os.path.join(base_dir, f)
+                    if os.path.isdir(full_p):
+                        data["audio_dir"] = full_p
+                        modified = True
+                        break
+            except Exception:
+                pass
+
+        if modified:
+            self.config_mgr.save_preset(path, data)
 
         self.var_speed.set(data.get("audio_speed", 1.0))
         self.lbl_spd.config(text=f"{self.var_speed.get():.2f}x")
