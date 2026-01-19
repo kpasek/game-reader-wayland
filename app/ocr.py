@@ -236,7 +236,7 @@ def recognize_text(image: Image.Image, config_manager: ConfigManager) -> str:
     Główna funkcja OCR.
     """
     preset = config_manager.load_preset()
-    empty_threshold = float(preset.get('empty_image_threshold'))
+    empty_threshold = float(preset.get('empty_image_threshold', 0))
     # 1. Optymalizacja: Pomiń puste klatki
     if empty_threshold > 0.001:
         if is_image_empty(image, empty_threshold):

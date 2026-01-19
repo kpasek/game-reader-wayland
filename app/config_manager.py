@@ -153,6 +153,6 @@ class ConfigManager:
             return []
         try:
             with open(path, 'r', encoding='utf-8') as f:
-                return [line.strip() for line in f if line.strip()]
+                return [line.strip() for line in f]
         except Exception:
             return []
