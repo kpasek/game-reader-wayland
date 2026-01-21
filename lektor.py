@@ -248,6 +248,8 @@ class LektorApp:
         preset_menu.add_separator()
         preset_menu.add_command(label="Zmień folder audio", command=lambda: self.change_path('audio_dir'))
         preset_menu.add_command(label="Zmień plik napisów", command=lambda: self.change_path('text_file_path'))
+        preset_menu.add_command(label="Importuj preset (Game Reader)", command=self.import_preset_dialog)
+
         menubar.add_cascade(label="Lektor", menu=preset_menu)
 
         # tools_menu = tk.Menu(menubar, tearoff=0)
@@ -679,6 +681,26 @@ class LektorApp:
         # Używamy self.root.after, aby odwołać się do głównej pętli,
         # bo 'windows[0]' może już nie istnieć w momencie wywołania.
         self.root.after(duration, close_overlay)
+
+    def import_preset_dialog(self):
+        current_path = self.var_preset_full_path.get()
+        if not current_path or not os.path.exists(current_path):
+            messagebox.showerror("Błąd", "Najpierw wybierz lub utwórz aktywny preset Lektora.")
+            return
+
+        file_path = filedialog.askopenfilename(
+            title="Wybierz plik ustawień (Game Reader)",
+            filetypes=[("Pliki JSON", "*.json"), ("Wszystkie pliki", "*.*")]
+        )
+        if not file_path:
+            return
+
+        if self.config_mgr.import_gr_preset(file_path, current_path):
+            messagebox.showinfo("Sukces", "Zaimportowano obszar i przeskalowano do 4K.")
+            # Odśwież UI wczytując ponownie preset
+            self.on_preset_selected_from_combo()
+        else:
+            messagebox.showerror("Błąd", "Nie udało się zaimportować ustawień. Sprawdź plik.")
 
 
 def main():

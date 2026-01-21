@@ -46,6 +46,63 @@ class ConfigManager:
         self.settings = DEFAULT_CONFIG.copy()
         self.load_app_config()
 
+    def import_gr_preset(self, import_path: str, target_preset_path: str) -> bool:
+        """
+        Importuje ustawienia (głównie obszar) z pliku konfiguracyjnego wersji Windows.
+        Przeskalowuje obszar z rozdzielczości źródłowej na 4K (3840x2160).
+        """
+        if not os.path.exists(import_path) or not target_preset_path:
+            return False
+
+        try:
+            with open(import_path, 'r', encoding='utf-8') as f:
+                win_data = json.load(f)
+
+            # 1. Pobierz rozdzielczość źródłową (np. "2560x1440")
+            res_str = win_data.get("resolution", "1920x1080")
+            if "x" not in res_str:
+                res_str = "1920x1080"
+
+            src_w, src_h = map(int, res_str.lower().split('x'))
+
+            # 2. Ustal rozdzielczość docelową (Lektor Wayland używa 4K jako bazy)
+            tgt_w, tgt_h = 3840, 2160
+
+            scale_x = tgt_w / src_w
+            scale_y = tgt_h / src_h
+
+            # 3. Pobierz i przelicz obszar monitora
+            win_monitor = win_data.get("monitor", {})
+            # Format Windows to zazwyczaj dict, Lektor Wayland to lista dictów
+            if not win_monitor or not isinstance(win_monitor, dict):
+                print("Brak poprawnego pola 'monitor' w pliku importu.")
+                return False
+
+            new_monitor = {
+                "left": int(win_monitor.get("left", 0) * scale_x),
+                "top": int(win_monitor.get("top", 0) * scale_y),
+                "width": int(win_monitor.get("width", 0) * scale_x),
+                "height": int(win_monitor.get("height", 0) * scale_y)
+            }
+
+            # 4. Aktualizuj obecny preset
+            current_data = self.load_preset(target_preset_path)
+
+            # Nadpisz obszary - ustawiamy jako pierwszy i jedyny obszar
+            current_data["monitor"] = [new_monitor]
+
+            # Opcjonalnie: Importuj inne ustawienia jeśli pasują, np. minimalna długość linii
+            if "min_line_len" in win_data:
+                current_data["min_line_length"] = win_data.get(
+                    "min_line_len")  # Różnica w nazwie klucza (length vs len)
+
+            self.save_preset(target_preset_path, current_data)
+            return True
+
+        except Exception as e:
+            print(f"Błąd importu presetu Windows: {e}")
+            return False
+
     def load_app_config(self):
         try:
             if os.path.exists(APP_CONFIG_FILE):
