@@ -46,7 +46,7 @@ audio_queue = queue.Queue()
 log_queue = queue.Queue()
 debug_queue = queue.Queue()
 
-APP_VERSION = "v0.9.5"
+APP_VERSION = "v0.9.6"
 STANDARD_WIDTH = 3840
 STANDARD_HEIGHT = 2160
 
@@ -237,20 +237,21 @@ class LektorApp:
 
         preset_menu = tk.Menu(menubar, tearoff=0)
         preset_menu.add_command(label="Wybierz katalog...", command=self.browse_lector_folder)
-        area_menu = tk.Menu(preset_menu, tearoff=0)
-        for i in range(3):
-            sub = tk.Menu(area_menu, tearoff=0)
-            suf = " (CZASOWY)" if i == 2 else ""
-            sub.add_command(label=f"Definiuj Obszar {i + 1}{suf}", command=lambda x=i: self.set_area(x))
-            sub.add_command(label=f"Wyczyść Obszar {i + 1}", command=lambda x=i: self.clear_area(x))
-            area_menu.add_cascade(label=f"Obszar {i + 1}{suf}", menu=sub)
-        preset_menu.add_cascade(label="Obszary ekranu", menu=area_menu)
         preset_menu.add_separator()
         preset_menu.add_command(label="Zmień folder audio", command=lambda: self.change_path('audio_dir'))
         preset_menu.add_command(label="Zmień plik napisów", command=lambda: self.change_path('text_file_path'))
         preset_menu.add_command(label="Importuj preset (Game Reader)", command=self.import_preset_dialog)
-
         menubar.add_cascade(label="Lektor", menu=preset_menu)
+
+        main_area_menu = tk.Menu(menubar, tearoff=0)
+
+        area_menu = tk.Menu(main_area_menu, tearoff=0)
+        for i in range(3):
+            suf = " (CZASOWY)" if i == 2 else ""
+            main_area_menu.add_command(label=f"Definiuj Obszar {i + 1}{suf}", command=lambda x=i: self.set_area(x))
+            main_area_menu.add_command(label=f"Wyczyść Obszar {i + 1}", command=lambda x=i: self.clear_area(x))
+
+        menubar.add_cascade(label="Obszary", menu=main_area_menu)
 
         # tools_menu = tk.Menu(menubar, tearoff=0)
         # menubar.add_cascade(label="Narzędzia", menu=tools_menu)

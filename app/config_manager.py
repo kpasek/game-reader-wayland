@@ -1,8 +1,9 @@
 import json
 import os
 from typing import Dict, Any, List, Optional
+from pathlib import Path
 
-APP_CONFIG_FILE = 'app_config.json'
+APP_CONFIG_FILE = Path.home() / '.config' / 'app_config.json'
 
 DEFAULT_CONFIG = {
     'recent_presets': [],
@@ -163,6 +164,10 @@ class ConfigManager:
             return path
 
     def load_preset(self, path: Optional[str] = None) -> Dict[str, Any]:
+        if path and path != self.preset_path:
+            self.preset_cache = None
+            self.preset_path = path
+
         if self.preset_cache is not None:
             return self.preset_cache
         if not path:

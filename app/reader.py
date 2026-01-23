@@ -70,9 +70,10 @@ class ReaderThread(threading.Thread):
         self.recent_match_indices = deque(maxlen=3)
         self.last_ocr_texts = deque(maxlen=5)
         self.last_matched_idx = -1
-        self.area3_expiry_time = 0.0
         self.img_queue = None
         self.last_monitor_crops: Dict[int, Image.Image] = {}
+
+        self.area3_triggered = False
 
         self.ocr_scale = 1.0
         self.empty_threshold = 0.15
@@ -91,13 +92,17 @@ class ReaderThread(threading.Thread):
 
         self.current_unified_area = {'left': 0, 'top': 0, 'width': 0, 'height': 0}
 
-    def trigger_area_3(self, duration: float = 2.0):
-        self.area3_expiry_time = time.time() + duration
+    def trigger_area_3(self):
+        """Aktywuje jednorazowe pobranie i przetworzenie Obszaru 3."""
+        self.area3_triggered = True
+
+        self.last_monitor_crops.pop(2, None)
+
         if self.log_queue:
             self.log_queue.put({
                 "time": datetime.now().strftime('%H:%M:%S'),
                 "ocr": "SYSTEM", "match": None,
-                "line_text": f"Aktywowano Obszar 3 na {duration}s", "stats": {}
+                "line_text": "Wyzwołano jednorazowy odczyt Obszaru 3", "stats": {}
             })
 
     def _scale_monitor_areas(self, monitors: List[Dict], original_res_str: str) -> List[Dict]:
@@ -190,7 +195,7 @@ class ReaderThread(threading.Thread):
             'height': max_b - min_t
         }
 
-        queue_size = 2
+        queue_size = 6
         self.img_queue = queue.Queue(maxsize=queue_size)
         audio_dir = preset.get('audio_dir', '')
         audio_ext = preset.get('audio_ext', '.mp3')
@@ -222,8 +227,10 @@ class ReaderThread(threading.Thread):
             for idx, area in enumerate(monitors):
                 t_start_proc = time.perf_counter()
 
-                if idx == 2 and time.time() > self.area3_expiry_time:
-                    continue
+                if idx == 2:
+                    if not self.area3_triggered:
+                        continue
+                    self.area3_triggered = False
 
                 rel_x, rel_y = area['left'] - min_l, area['top'] - min_t
                 crop = full_img.crop((rel_x, rel_y, rel_x + area['width'], rel_y + area['height']))
