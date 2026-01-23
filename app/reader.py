@@ -28,23 +28,26 @@ class CaptureWorker(threading.Thread):
         while not self.stop_event.is_set():
             loop_start = time.monotonic()
 
-            t0 = time.perf_counter()
-            full_img = capture_region(self.unified_area)
-            t_cap = (time.perf_counter() - t0) * 1000
-
-            if full_img:
-                try:
-                    if self.img_queue.full():
-                        try:
-                            self.img_queue.get_nowait()
-                        except queue.Empty:
-                            pass
-                    self.img_queue.put((full_img, t_cap), block=False)
-                except queue.Full:
-                    pass
+            self.capture()
 
             elapsed = time.monotonic() - loop_start
             time.sleep(max(0.01, self.interval - elapsed))
+
+    def capture(self):
+        t0 = time.perf_counter()
+        full_img = capture_region(self.unified_area)
+        t_cap = (time.perf_counter() - t0) * 1000
+
+        if full_img:
+            try:
+                if self.img_queue.full():
+                    try:
+                        self.img_queue.get_nowait()
+                    except queue.Empty:
+                        pass
+                self.img_queue.put((full_img, t_cap), block=False)
+            except queue.Full:
+                pass
 
 
 class ReaderThread(threading.Thread):
