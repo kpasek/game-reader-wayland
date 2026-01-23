@@ -2,14 +2,14 @@ import sys
 import os
 import platform
 import tempfile
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
 from app.config_manager import ConfigManager
 
 try:
     import pytesseract
     from pytesseract import Output
-    from PIL import Image, ImageOps, ImageEnhance, ImageStat, ImageFilter
+    from PIL import Image, ImageOps, ImageEnhance, ImageStat, ImageFilter, ImageChops
 except ImportError:
     print("Brak biblioteki Pillow lub pytesseract.", file=sys.stderr)
     sys.exit(1)
@@ -100,8 +100,15 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager) -> Tuple
         scale = preset.get("ocr_scale_factor", 0.5)
         density_threshold = preset.get("ocr_density_threshold", 0.005)
         contrast = preset.get("contract", 0)
+        subtitle_colors = preset.get("subtitle_colors", [])
+        valid_colors = [c for c in subtitle_colors if c]
 
-        if contrast != 0:
+        if valid_colors:
+            tolerance = preset.get("color_tolerance", 15)
+            image = _apply_color_filter(image, valid_colors, tolerance=tolerance)
+            text_color = "Light"
+
+        if contrast != 0 and not valid_colors:
             contrast += 1
 
             enhancer = ImageEnhance.Contrast(image)
@@ -260,3 +267,45 @@ def recognize_text(image: Image.Image, config_manager: ConfigManager) -> str:
     except Exception as e:
         print(f"OCR Error: {e}", file=sys.stderr)
         return ""
+
+
+def _apply_color_filter(image: Image.Image, hex_colors: List[str], tolerance: int = 45) -> Image.Image:
+    """
+    Tworzy maskę: Białe piksele tam, gdzie kolor jest zbliżony do jednego z podanych.
+    Reszta czarna. Używa ImageChops dla wydajności.
+    """
+    if image.mode != 'RGB':
+        image = image.convert('RGB')
+
+    # Pusta czarna maska bazowa
+    final_mask = Image.new('L', image.size, 0)
+
+    # Przetwarzamy każdy zdefiniowany kolor
+    for c in hex_colors:
+        if not (isinstance(c, str) and c.startswith('#') and len(c) == 7):
+            continue
+
+        try:
+            r = int(c[1:3], 16)
+            g = int(c[3:5], 16)
+            b = int(c[5:7], 16)
+        except ValueError:
+            continue
+
+        # 1. Tworzymy obraz wypełniony szukanym kolorem
+        solid = Image.new('RGB', image.size, (r, g, b))
+
+        # 2. Obliczamy różnicę między screenshotem a kolorem wzorcowym
+        diff = ImageChops.difference(image, solid)
+
+        # 3. Spłaszczamy do skali szarości, żeby ocenić ogólną różnicę
+        diff_gray = diff.convert('L')
+
+        # 4. Progowanie z tolerancją.
+        mask = diff_gray.point(lambda x: 255 if x < tolerance else 0)
+
+        # 5. Dodajemy wynik do maski głównej (logiczne OR - sumowanie światła)
+        final_mask = ImageChops.add(final_mask, mask)
+
+    # Zwracamy wynik jako RGB (Białe napisy na czarnym tle)
+    return final_mask.convert('RGB')

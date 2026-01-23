@@ -115,6 +115,8 @@ class SettingsDialog(tk.Toplevel):
                          "similarity")
         self._add_slider(grp_ocr, "Podbicie kontrastu", self.app.var_contrast, -1, 2,
                          "contrast")
+        self._add_slider(grp_ocr, "Tolerancja koloru napisów", self.app.var_tolerance, 0, 60,
+                         "color_tolerance")
         ttk.Checkbutton(grp_ocr, text="DEBUG: Pokaż obszar wykrytych napisów", variable=self.app.var_show_debug,
                         command=lambda: self.app._save_preset_val("show_debug", self.app.var_save_logs.get())).pack(
             anchor=tk.W, pady=2)

@@ -10,7 +10,9 @@ DEFAULT_CONFIG = {
     'last_regex': r"",
     'last_resolution_key': '1920x1080',
     'hotkey_start_stop': '<f2>',
-    'hotkey_area3': '<f3>'
+    'hotkey_area3': '<f3>',
+    "subtitle_colors": [],
+    "color_tolerance": 45
 }
 
 DEFAULT_PRESET_CONTENT = {

@@ -8,6 +8,7 @@ import time
 import argparse
 import platform
 from typing import Optional
+import tkinter.font as tkfont
 
 try:
     import tkinter as tk
@@ -36,7 +37,7 @@ from app.reader import ReaderThread
 from app.player import PlayerThread
 from app.log import LogWindow
 from app.settings import SettingsDialog
-from app.area_selector import AreaSelector
+from app.area_selector import AreaSelector, ColorSelector
 from app.capture import capture_fullscreen
 from app.help import HelpWindow
 
@@ -46,7 +47,7 @@ audio_queue = queue.Queue()
 log_queue = queue.Queue()
 debug_queue = queue.Queue()
 
-APP_VERSION = "v0.9.6"
+APP_VERSION = "v0.9.8"
 STANDARD_WIDTH = 3840
 STANDARD_HEIGHT = 2160
 
@@ -55,7 +56,7 @@ class LektorApp:
     def __init__(self, root: tk.Tk, autostart_preset: Optional[str], game_cmd: list):
         self.root = root
         self.root.title(f"Lektor {APP_VERSION}")
-        self.root.geometry("720x350")
+        self.root.geometry("800x400")
 
         self.config_mgr = ConfigManager()
         self.game_cmd = game_cmd
@@ -80,6 +81,7 @@ class LektorApp:
         self.var_brightness_threshold = tk.IntVar(value=200)
         self.var_similarity = tk.DoubleVar(value=5.0)
         self.var_contrast = tk.DoubleVar(value=5.0)
+        self.var_tolerance = tk.IntVar(value=15)
         self.var_empty_threshold = tk.DoubleVar(value=0.15)
         self.var_capture_interval = tk.DoubleVar(value=0.5)
         self.var_auto_names = tk.BooleanVar(value=True)
@@ -244,14 +246,17 @@ class LektorApp:
         menubar.add_cascade(label="Lektor", menu=preset_menu)
 
         main_area_menu = tk.Menu(menubar, tearoff=0)
-
-        area_menu = tk.Menu(main_area_menu, tearoff=0)
         for i in range(3):
             suf = " (CZASOWY)" if i == 2 else ""
             main_area_menu.add_command(label=f"Definiuj Obszar {i + 1}{suf}", command=lambda x=i: self.set_area(x))
             main_area_menu.add_command(label=f"Wyczyść Obszar {i + 1}", command=lambda x=i: self.clear_area(x))
 
         menubar.add_cascade(label="Obszary", menu=main_area_menu)
+
+        subtitle_menu = tk.Menu(menubar, tearoff=0)
+        subtitle_menu.add_command(label="Dodaj kolor napisów", command=self.add_subtitle_color)
+        subtitle_menu.add_command(label="Wyczyść kolory napisów", command=self.clear_subtitle_colors)
+        menubar.add_cascade(label="Napisy", menu=subtitle_menu)
 
         # tools_menu = tk.Menu(menubar, tearoff=0)
         # menubar.add_cascade(label="Narzędzia", menu=tools_menu)
@@ -321,7 +326,17 @@ class LektorApp:
         self.btn_stop = ttk.Button(frm_btn, text=f"STOP ({hk_start})", command=self.stop_reading, state="disabled")
         self.btn_stop.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
-        ttk.Label(self.root, text=f"Wersja: {APP_VERSION}", font=("Arial", 8)).pack(side=tk.BOTTOM, anchor=tk.E, padx=5)
+        ttk.Label(self.root, text=f"Wersja: {APP_VERSION}", font=("Arial", 8)) \
+            .pack(side=tk.BOTTOM, anchor=tk.E, padx=5)
+
+        if hasattr(self, 'lbl_status'):
+            self.lbl_status.pack(side=tk.BOTTOM, fill=tk.X, anchor=tk.W, padx=5)
+
+        self.color_strip = tk.Canvas(self.root, height=30, bg="#f0f0f0", highlightthickness=0)
+        self.color_strip.pack(side=tk.BOTTOM, fill=tk.X, padx=5, pady=2)
+
+        # Wywołaj odświeżenie paska na starcie
+        self.root.after(100, self.refresh_color_strip)
 
     def auto_detect_resolution(self):
         w = self.root.winfo_screenwidth()
@@ -423,6 +438,7 @@ class LektorApp:
         self.var_brightness_threshold.set(data.get("brightness_threshold", 200))
         self.var_similarity.set(data.get("similarity", 5.0))
         self.var_contrast.set(data.get("contrast", 0))
+        self.var_tolerance.set(data.get("color_tolerance", 15))
 
         self.var_ocr_density.set(data.get("ocr_density_threshold", 0.015))
         self.var_match_score_short.set(data.get("match_score_short", 90))
@@ -435,6 +451,8 @@ class LektorApp:
             self.var_regex_mode.set(data["regex_mode_name"])
             if data["regex_mode_name"] == "Własny (Regex)": self.var_custom_regex.set(data.get("regex_pattern", ""))
             self.on_regex_changed()
+
+        self.refresh_color_strip()
 
     def on_regex_changed(self, event=None):
         mode = self.var_regex_mode.get()
@@ -703,6 +721,89 @@ class LektorApp:
         else:
             messagebox.showerror("Błąd", "Nie udało się zaimportować ustawień. Sprawdź plik.")
 
+    def refresh_color_strip(self):
+        """Rysuje kwadraty z wybranymi kolorami na pasku, bezpiecznie obliczając pozycję."""
+        self.color_strip.delete("all")
+
+        path = self.var_preset_full_path.get()
+        if not path or not os.path.exists(path):
+            return
+
+        data = self.config_mgr.load_preset(path)
+        colors = data.get("subtitle_colors", [])
+
+        # Ustawienia czcionki
+        fnt = tkfont.Font(family="Arial", size=9)
+        label_text = "Kolory napisów:"
+
+        # Oblicz szerokość tekstu w pikselach + margines 10px
+        text_width = fnt.measure(label_text)
+        x_offset = text_width + 15
+
+        # Rysujemy tekst
+        self.color_strip.create_text(5, 15, text=label_text, anchor=tk.W, fill="black", font=fnt)
+
+        y_pos = 9  # Pionowa pozycja kwadratów
+        size = 14  # Rozmiar kwadratu
+
+        if not colors:
+            self.color_strip.create_text(x_offset, 15, text="(brak - domyślny tryb)", anchor=tk.W, fill="gray",
+                                         font=fnt)
+            return
+
+        for color in colors:
+            try:
+                self.color_strip.create_rectangle(x_offset, y_pos, x_offset + size, y_pos + size,
+                                                  fill=color, outline="#555555")
+                x_offset += size + 5
+            except:
+                pass
+
+    def add_subtitle_color(self):
+        """Dodaje nowy kolor do listy."""
+        self.root.iconify()
+        self.root.update()
+        time.sleep(0.3)
+
+        try:
+            full_img = capture_fullscreen()
+            if not full_img:
+                self.root.deiconify()
+                return
+
+            selector = ColorSelector(self.root, full_img)
+            self.root.wait_window(selector)
+
+            if selector.selected_color:
+                path = self.var_preset_full_path.get()
+                if path and os.path.exists(path):
+                    data = self.config_mgr.load_preset(path)
+
+                    if "subtitle_colors" not in data or not isinstance(data["subtitle_colors"], list):
+                        data["subtitle_colors"] = []
+
+                    # Dodajemy nowy kolor
+                    data["subtitle_colors"].append(selector.selected_color)
+
+                    self.config_mgr.save_preset(path, data)
+                    print(f"Dodano kolor: {selector.selected_color}")
+
+                    # Odśwież pasek
+                    self.refresh_color_strip()
+        except Exception as e:
+            messagebox.showerror("Błąd", str(e))
+        finally:
+            self.root.deiconify()
+
+    def clear_subtitle_colors(self):
+        """Czyści listę kolorów."""
+        path = self.var_preset_full_path.get()
+        if path and os.path.exists(path):
+            if messagebox.askyesno("Potwierdzenie", "Czy na pewno usunąć wszystkie zapisane kolory napisów?"):
+                data = self.config_mgr.load_preset(path)
+                data["subtitle_colors"] = []
+                self.config_mgr.save_preset(path, data)
+                self.refresh_color_strip()
 
 def main():
     parser = argparse.ArgumentParser()
