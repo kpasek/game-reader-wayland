@@ -195,7 +195,7 @@ class ReaderThread(threading.Thread):
             'height': max_b - min_t
         }
 
-        queue_size = 6
+        queue_size = 4
         self.img_queue = queue.Queue(maxsize=queue_size)
         audio_dir = preset.get('audio_dir', '')
         audio_ext = preset.get('audio_ext', '.mp3')

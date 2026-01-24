@@ -8,7 +8,6 @@ import time
 import argparse
 import platform
 from typing import Optional
-import tkinter.font as tkfont
 
 try:
     import tkinter as tk
@@ -47,7 +46,7 @@ audio_queue = queue.Queue()
 log_queue = queue.Queue()
 debug_queue = queue.Queue()
 
-APP_VERSION = "v0.9.8"
+APP_VERSION = "v0.9.9"
 STANDARD_WIDTH = 3840
 STANDARD_HEIGHT = 2160
 
@@ -56,7 +55,7 @@ class LektorApp:
     def __init__(self, root: tk.Tk, autostart_preset: Optional[str], game_cmd: list):
         self.root = root
         self.root.title(f"Lektor {APP_VERSION}")
-        self.root.geometry("800x400")
+        self.root.geometry("800x440")
 
         self.config_mgr = ConfigManager()
         self.game_cmd = game_cmd
@@ -253,14 +252,6 @@ class LektorApp:
 
         menubar.add_cascade(label="Obszary", menu=main_area_menu)
 
-        subtitle_menu = tk.Menu(menubar, tearoff=0)
-        subtitle_menu.add_command(label="Dodaj kolor napisów", command=self.add_subtitle_color)
-        subtitle_menu.add_command(label="Wyczyść kolory napisów", command=self.clear_subtitle_colors)
-        menubar.add_cascade(label="Napisy", menu=subtitle_menu)
-
-        # tools_menu = tk.Menu(menubar, tearoff=0)
-        # menubar.add_cascade(label="Narzędzia", menu=tools_menu)
-
         help_menu = tk.Menu(menubar, tearoff=0)
         help_menu.add_command(label="Podgląd logów", command=self.show_logs)
         help_menu.add_command(label="Instrukcja", command=self.show_help)
@@ -290,6 +281,22 @@ class LektorApp:
         self.btn_settings.pack(side=tk.LEFT, padx=5)
         self.btn_area_1 = ttk.Button(f_res, text="Ustaw obszar 1", command=lambda: self._on_hotkey_set_area(0))
         self.btn_area_1.pack(side=tk.LEFT, padx=5)
+
+        # Kolory napisów
+        grp_sub = ttk.LabelFrame(panel, text="Kolory napisów", padding=10)
+        grp_sub.pack(fill=tk.X, pady=(5, 5))  # Padding żeby oddzielić od reszty
+
+        # Przycisk po lewej
+        self.btn_pick_color = ttk.Button(grp_sub, text="Wybierz kolor", command=self.add_subtitle_color)
+        self.btn_pick_color.pack(side=tk.LEFT, padx=(0, 10))
+
+        # Canvas (lista kolorów) po prawej
+        # highlightthickness=0 usuwa brzydką ramkę wokół canvasu
+        self.color_canvas = tk.Canvas(grp_sub, height=24, bg="#f0f0f0", highlightthickness=0)
+        self.color_canvas.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        # Bindowanie kliknięcia w kolor
+        self.color_canvas.bind("<Button-1>", self.on_color_click)
+
         # --- AUDIO ---
         grp_aud = ttk.LabelFrame(panel, text="Kontrola Audio", padding=10)
         grp_aud.pack(fill=tk.X, pady=10)
@@ -329,14 +336,7 @@ class LektorApp:
         ttk.Label(self.root, text=f"Wersja: {APP_VERSION}", font=("Arial", 8)) \
             .pack(side=tk.BOTTOM, anchor=tk.E, padx=5)
 
-        if hasattr(self, 'lbl_status'):
-            self.lbl_status.pack(side=tk.BOTTOM, fill=tk.X, anchor=tk.W, padx=5)
-
-        self.color_strip = tk.Canvas(self.root, height=30, bg="#f0f0f0", highlightthickness=0)
-        self.color_strip.pack(side=tk.BOTTOM, fill=tk.X, padx=5, pady=2)
-
-        # Wywołaj odświeżenie paska na starcie
-        self.root.after(100, self.refresh_color_strip)
+        self.root.after(200, self.refresh_color_canvas)
 
     def auto_detect_resolution(self):
         w = self.root.winfo_screenwidth()
@@ -452,7 +452,7 @@ class LektorApp:
             if data["regex_mode_name"] == "Własny (Regex)": self.var_custom_regex.set(data.get("regex_pattern", ""))
             self.on_regex_changed()
 
-        self.refresh_color_strip()
+        self.refresh_color_canvas()
 
     def on_regex_changed(self, event=None):
         mode = self.var_regex_mode.get()
@@ -721,9 +721,11 @@ class LektorApp:
         else:
             messagebox.showerror("Błąd", "Nie udało się zaimportować ustawień. Sprawdź plik.")
 
-    def refresh_color_strip(self):
-        """Rysuje kwadraty z wybranymi kolorami na pasku, bezpiecznie obliczając pozycję."""
-        self.color_strip.delete("all")
+    def refresh_color_canvas(self):
+        """Rysuje listę kolorów na nowym Canvasie."""
+        if not hasattr(self, 'color_canvas'): return
+
+        self.color_canvas.delete("all")
 
         path = self.var_preset_full_path.get()
         if not path or not os.path.exists(path):
@@ -732,29 +734,23 @@ class LektorApp:
         data = self.config_mgr.load_preset(path)
         colors = data.get("subtitle_colors", [])
 
-        # Ustawienia czcionki
-        fnt = tkfont.Font(family="Arial", size=9)
-        label_text = "Kolory napisów:"
-
-        # Oblicz szerokość tekstu w pikselach + margines 10px
-        text_width = fnt.measure(label_text)
-        x_offset = text_width + 15
-
-        # Rysujemy tekst
-        self.color_strip.create_text(5, 15, text=label_text, anchor=tk.W, fill="black", font=fnt)
-
-        y_pos = 9  # Pionowa pozycja kwadratów
-        size = 14  # Rozmiar kwadratu
+        x_offset = 2
+        y_pos = 2
+        size = 20  # Trochę większe kwadraty niż wcześniej
 
         if not colors:
-            self.color_strip.create_text(x_offset, 15, text="(brak - domyślny tryb)", anchor=tk.W, fill="gray",
-                                         font=fnt)
+            self.color_canvas.create_text(5, 12, text="(brak filtrów - domyślny tryb)", anchor=tk.W, fill="gray")
             return
 
-        for color in colors:
+        for i, color in enumerate(colors):
             try:
-                self.color_strip.create_rectangle(x_offset, y_pos, x_offset + size, y_pos + size,
-                                                  fill=color, outline="#555555")
+                # Rysujemy kwadrat
+                # Tag 'color_IDX' pozwoli nam zidentyfikować, który kwadrat kliknięto
+                tag_name = f"color_{i}"
+                self.color_canvas.create_rectangle(
+                    x_offset, y_pos, x_offset + size, y_pos + size,
+                    fill=color, outline="#555555", tags=(tag_name, "clickable")
+                )
                 x_offset += size + 5
             except:
                 pass
@@ -789,21 +785,42 @@ class LektorApp:
                     print(f"Dodano kolor: {selector.selected_color}")
 
                     # Odśwież pasek
-                    self.refresh_color_strip()
+                    self.refresh_color_canvas()
         except Exception as e:
             messagebox.showerror("Błąd", str(e))
         finally:
             self.root.deiconify()
 
-    def clear_subtitle_colors(self):
-        """Czyści listę kolorów."""
+    def on_color_click(self, event):
+        """Obsługa kliknięcia w kolor na canvasie (usuwanie)."""
+        # Znajdź element pod kursorem
+        item_id = self.color_canvas.find_closest(event.x, event.y)
+        tags = self.color_canvas.gettags(item_id)
+
+        # Sprawdź czy kliknięto w kolor (szukamy tagu 'color_X')
+        for tag in tags:
+            if tag.startswith("color_"):
+                try:
+                    idx = int(tag.split("_")[1])
+                    self.delete_subtitle_color(idx)
+                    return
+                except ValueError:
+                    pass
+
+    def delete_subtitle_color(self, idx):
         path = self.var_preset_full_path.get()
-        if path and os.path.exists(path):
-            if messagebox.askyesno("Potwierdzenie", "Czy na pewno usunąć wszystkie zapisane kolory napisów?"):
-                data = self.config_mgr.load_preset(path)
-                data["subtitle_colors"] = []
+        if not path or not os.path.exists(path): return
+
+        data = self.config_mgr.load_preset(path)
+        colors = data.get("subtitle_colors", [])
+
+        if idx < len(colors):
+            color_to_remove = colors[idx]
+            if messagebox.askyesno("Usuwanie koloru", f"Czy usunąć kolor {color_to_remove}?"):
+                del colors[idx]
+                data["subtitle_colors"] = colors
                 self.config_mgr.save_preset(path, data)
-                self.refresh_color_strip()
+                self.refresh_color_canvas()
 
 def main():
     parser = argparse.ArgumentParser()
