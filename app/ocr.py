@@ -106,6 +106,8 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager) -> Tuple
         if valid_colors:
             tolerance = preset.get("color_tolerance", 10)
             image = remove_background(image, valid_colors, tolerance=tolerance)
+            if preset.get('show_debug', False):
+                image.save("debug_img.png")
             text_color = "Light"
 
         if contrast != 0 and not valid_colors:

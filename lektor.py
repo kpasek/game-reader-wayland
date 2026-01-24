@@ -46,7 +46,7 @@ audio_queue = queue.Queue()
 log_queue = queue.Queue()
 debug_queue = queue.Queue()
 
-APP_VERSION = "v1.0.0"
+APP_VERSION = "v1.0.1"
 STANDARD_WIDTH = 3840
 STANDARD_HEIGHT = 2160
 
@@ -435,6 +435,7 @@ class LektorApp:
         self.var_text_color.set(data.get("text_color_mode", "Light"))
         self.var_text_alignment.set(data.get("text_alignment", "Center"))
         self.var_save_logs.set(data.get("save_logs", False))
+        self.var_show_debug.set(data.get("show_debug", False))
         self.var_brightness_threshold.set(data.get("brightness_threshold", 200))
         self.var_similarity.set(data.get("similarity", 5.0))
         self.var_contrast.set(data.get("contrast", 0))
