@@ -104,8 +104,8 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager) -> Tuple
         valid_colors = [c for c in subtitle_colors if c]
 
         if valid_colors:
-            tolerance = preset.get("color_tolerance", 15)
-            image = _apply_color_filter(image, valid_colors, tolerance=tolerance)
+            tolerance = preset.get("color_tolerance", 10)
+            image = remove_background(image, valid_colors, tolerance=tolerance)
             text_color = "Light"
 
         if contrast != 0 and not valid_colors:
@@ -269,7 +269,7 @@ def recognize_text(image: Image.Image, config_manager: ConfigManager) -> str:
         return ""
 
 
-def _apply_color_filter(image: Image.Image, hex_colors: List[str], tolerance: int = 45) -> Image.Image:
+def remove_background(image: Image.Image, hex_colors: List[str], tolerance: int = 10) -> Image.Image:
     """
     Tworzy maskę: Białe piksele tam, gdzie kolor jest zbliżony do jednego z podanych.
     Reszta czarna. Używa ImageChops dla wydajności.

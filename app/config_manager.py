@@ -12,7 +12,7 @@ DEFAULT_CONFIG = {
     'hotkey_start_stop': '<f2>',
     'hotkey_area3': '<f3>',
     "subtitle_colors": [],
-    "color_tolerance": 45
+    "color_tolerance": 10
 }
 
 DEFAULT_PRESET_CONTENT = {
