@@ -153,7 +153,7 @@ class SettingsDialog(tk.Toplevel):
         f_mode = ttk.Frame(grp_match)
         f_mode.pack(fill=tk.X, pady=5)
         ttk.Label(f_mode, text="Tryb dopasowania:").pack(side=tk.LEFT)
-        cb_mode = ttk.Combobox(f_mode, textvariable=self.app.var_subtitle_mode, values=["Full Lines", "Partial Lines"],
+        cb_mode = ttk.Combobox(f_mode, textvariable=self.app.var_subtitle_mode, values=["Full Lines", "Start of Line" ,"Partial Lines"],
                                state="readonly")
         cb_mode.pack(side=tk.LEFT, padx=(5, 20))
         cb_mode.bind("<<ComboboxSelected>>",
@@ -166,7 +166,7 @@ class SettingsDialog(tk.Toplevel):
                          fmt="{:.0f}", resolution=5)
         self._add_slider(grp_match, "Max różnica długości (Ratio):", self.app.var_match_len_diff, 0.0, 1.0,
                          "match_len_diff_ratio", fmt="{:.2f}", resolution=0.05)
-        self._add_slider(grp_match, "Min długość dla Partial Mode (znaki):", self.app.var_partial_min_len, 0, 50,
+        self._add_slider(grp_match, "Min długość dla dopasowania częściowego:", self.app.var_partial_min_len, 0, 50,
                          "partial_mode_min_len", fmt="{:.0f}", resolution=1)
 
         self._add_slider(grp_match, "Ignoruj linie krótsze niż:", self.app.var_min_line_len, 0, 20, "min_line_length",

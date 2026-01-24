@@ -46,7 +46,7 @@ audio_queue = queue.Queue()
 log_queue = queue.Queue()
 debug_queue = queue.Queue()
 
-APP_VERSION = "v0.9.9"
+APP_VERSION = "v1.0.0"
 STANDARD_WIDTH = 3840
 STANDARD_HEIGHT = 2160
 

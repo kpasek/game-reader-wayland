@@ -266,8 +266,9 @@ class ReaderThread(threading.Thread):
                     continue
 
                 if has_content and crop_bbox and self.debug_queue:
-                    abs_x = self.current_unified_area['left'] + crop_bbox[0]
-                    abs_y = self.current_unified_area['top'] + crop_bbox[1]
+                    abs_x = area['left'] + crop_bbox[0]
+                    abs_y = area['top'] + crop_bbox[1]
+
                     abs_w = crop_bbox[2] - crop_bbox[0]
                     abs_h = crop_bbox[3] - crop_bbox[1]
                     self.debug_queue.put(('overlay', (abs_x, abs_y, abs_w, abs_h)))

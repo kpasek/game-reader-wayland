@@ -89,7 +89,7 @@ def find_best_match(ocr_text: str,
 
     # 1. Szukanie lokalne
     match = _scan_list(ocr_clean, ocr_len, candidates_in_window, effective_mode, matcher_config)
-    if match and match[1] >= 95:
+    if match and match[1] >= 100:
         return match
 
     # 2. Szukanie globalne
@@ -119,16 +119,30 @@ Optional[Tuple[int, int]]:
     for _, sub_clean, original_idx, sub_len in candidates:
         len_diff = abs(ocr_len - sub_len)
 
-        if mode == "Partial Lines":
+        if mode == "Start of Line":
             if sub_len < ocr_len - 5:
                 continue
-            sub_clean = sub_clean[:ocr_len + 5]
+
+            sub_truncated = sub_clean[:ocr_len + 5]
+            score = fuzz.ratio(sub_truncated, ocr_text)
+
+        elif mode == "Partial Lines":
+            if sub_len < ocr_len - 2:  # Minimalna walidacja długości
+                continue
+
+            sub_truncated = sub_clean[:ocr_len + 5]
+            score_start = fuzz.ratio(sub_truncated, ocr_text)
+            score_anywhere = fuzz.partial_ratio(ocr_text, sub_clean)
+
+            if score_anywhere > score_start:
+                score = score_anywhere - 5
+            else:
+                score = score_start
         else:
-            # Optymalizacja oparta na różnicy długości (teraz konfigurowalna)
             if len_diff > max(ocr_len, sub_len) * ratio_limit:
                 continue
 
-        score = fuzz.ratio(sub_clean, ocr_text)
+            score = fuzz.ratio(sub_clean, ocr_text)
 
         if score > best_score:
             best_score = score

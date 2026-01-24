@@ -90,8 +90,8 @@ class HelpWindow(tk.Toplevel):
             ("3. Maksymalna różnica długości\n", 'h2'),
             ("Maksymalna dopuszczalna różnica długości między tekstem OCR a dopasowywaną linią. Wartość 0.25 oznacza tolerancję 25%.\n", 'normal'),
 
-            ("4. Min długość dla Partial Mode\n", 'h2'),
-            ("Jeśli tekst jest dłuższy niż X znaków (domyślnie 25), system jednorazowo wyłączy tryb 'Partial Lines'.\n", 'normal'),
+            ("4. Min długość dla Partial Mode i Start of Line\n", 'h2'),
+            ("Jeśli tekst jest dłuższy niż X znaków (domyślnie 25), system jednorazowo wyłączy tryb 'Partial Lines' lub 'Start of Line'.\n", 'normal'),
 
             ("4. Ignoruj krótsze niż\n", 'h2'),
             ("Ignoruje odczytany text ORC krótszy niż X znaków. Pomaga w eliminowaniu szumu OCR.\n", 'normal'),
