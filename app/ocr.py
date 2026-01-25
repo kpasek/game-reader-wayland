@@ -101,11 +101,15 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager) -> Tuple
         density_threshold = preset.get("ocr_density_threshold", 0.005)
         contrast = preset.get("contract", 0)
         subtitle_colors = preset.get("subtitle_colors", [])
+        thickening = preset.get("text_thickening", [])
         valid_colors = [c for c in subtitle_colors if c]
 
         if valid_colors:
             tolerance = preset.get("color_tolerance", 10)
             image = remove_background(image, valid_colors, tolerance=tolerance)
+            if thickening > 0:
+                filter_size = (thickening * 2) + 1
+                image = image.filter(ImageFilter.MaxFilter(filter_size))
             if preset.get('show_debug', False):
                 image.save("debug_img.png")
             text_color = "Light"

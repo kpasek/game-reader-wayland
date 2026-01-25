@@ -11,8 +11,6 @@ DEFAULT_CONFIG = {
     'last_resolution_key': '1920x1080',
     'hotkey_start_stop': '<f2>',
     'hotkey_area3': '<f3>',
-    "subtitle_colors": [],
-    "color_tolerance": 10
 }
 
 DEFAULT_PRESET_CONTENT = {
@@ -36,7 +34,10 @@ DEFAULT_PRESET_CONTENT = {
     "match_score_long": 75,
     "match_len_diff_ratio": 0.30,
     "partial_mode_min_len": 25,
-    "audio_speed_inc": 1.20
+    "audio_speed_inc": 1.20,
+    "text_thickening": 0,
+    "subtitle_colors": [],
+    "color_tolerance": 10
 }
 
 

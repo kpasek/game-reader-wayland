@@ -46,7 +46,7 @@ audio_queue = queue.Queue()
 log_queue = queue.Queue()
 debug_queue = queue.Queue()
 
-APP_VERSION = "v1.0.2"
+APP_VERSION = "v1.0.3"
 STANDARD_WIDTH = 3840
 STANDARD_HEIGHT = 2160
 
@@ -81,6 +81,7 @@ class LektorApp:
         self.var_similarity = tk.DoubleVar(value=5.0)
         self.var_contrast = tk.DoubleVar(value=5.0)
         self.var_tolerance = tk.IntVar(value=10)
+        self.var_text_thickening = tk.IntVar(value=0)
         self.var_empty_threshold = tk.DoubleVar(value=0.15)
         self.var_capture_interval = tk.DoubleVar(value=0.5)
         self.var_auto_names = tk.BooleanVar(value=True)
@@ -442,6 +443,7 @@ class LektorApp:
         self.var_similarity.set(data.get("similarity", 5.0))
         self.var_contrast.set(data.get("contrast", 0))
         self.var_tolerance.set(data.get("color_tolerance", 10))
+        self.var_text_thickening.set(data.get("text_thickening", 10))
 
         self.var_ocr_density.set(data.get("ocr_density_threshold", 0.015))
         self.var_match_score_short.set(data.get("match_score_short", 90))
