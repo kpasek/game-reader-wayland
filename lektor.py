@@ -46,7 +46,7 @@ audio_queue = queue.Queue()
 log_queue = queue.Queue()
 debug_queue = queue.Queue()
 
-APP_VERSION = "v1.0.1"
+APP_VERSION = "v1.0.2"
 STANDARD_WIDTH = 3840
 STANDARD_HEIGHT = 2160
 
@@ -287,6 +287,8 @@ class LektorApp:
         grp_sub.pack(fill=tk.X, pady=(5, 5))  # Padding żeby oddzielić od reszty
 
         # Przycisk po lewej
+        self.btn_pick_color = ttk.Button(grp_sub, text="Dodaj biały", command=self.add_white_subtitle_color)
+        self.btn_pick_color.pack(side=tk.LEFT, padx=(0, 10))
         self.btn_pick_color = ttk.Button(grp_sub, text="Wybierz kolor", command=self.add_subtitle_color)
         self.btn_pick_color.pack(side=tk.LEFT, padx=(0, 10))
 
@@ -807,6 +809,23 @@ class LektorApp:
                     return
                 except ValueError:
                     pass
+
+    def add_white_subtitle_color(self):
+        """Obsługa dodania białego koloru napisów"""
+        data = self.config_mgr.load_preset()
+        path = self.var_preset_full_path.get()
+
+        if "subtitle_colors" not in data or not isinstance(data["subtitle_colors"], list):
+            data["subtitle_colors"] = []
+
+        # Dodajemy nowy kolor
+        data["subtitle_colors"].append('#ffffff')
+
+        self.config_mgr.save_preset(path, data)
+        print(f"Dodano biały kolor")
+
+        # Odśwież pasek
+        self.refresh_color_canvas()
 
     def delete_subtitle_color(self, idx):
         path = self.var_preset_full_path.get()
