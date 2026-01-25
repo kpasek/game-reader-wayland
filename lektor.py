@@ -46,7 +46,7 @@ audio_queue = queue.Queue()
 log_queue = queue.Queue()
 debug_queue = queue.Queue()
 
-APP_VERSION = "v1.0.3"
+APP_VERSION = "v1.2.0"
 STANDARD_WIDTH = 3840
 STANDARD_HEIGHT = 2160
 
@@ -88,7 +88,7 @@ class LektorApp:
 
         # Opcje optymalizacji
         self.var_min_line_len = tk.IntVar(value=0)
-        self.var_text_alignment = tk.StringVar(value="Center")
+        self.var_text_alignment = tk.StringVar(value="None")
         self.var_save_logs = tk.BooleanVar(value=False)
         self.var_show_debug = tk.BooleanVar(value=False)
 
@@ -431,12 +431,11 @@ class LektorApp:
         self.var_subtitle_mode.set(data.get("subtitle_mode", "Full Lines"))
 
         self.var_ocr_scale.set(data.get("ocr_scale_factor", 1.0))
-        self.var_empty_threshold.set(data.get("empty_image_threshold", 0.15))
         self.var_capture_interval.set(data.get("capture_interval", 0.5))
         self.var_min_line_len.set(data.get("min_line_length", 0))
 
         self.var_text_color.set(data.get("text_color_mode", "Light"))
-        self.var_text_alignment.set(data.get("text_alignment", "Center"))
+        self.var_text_alignment.set(data.get("text_alignment", "None"))
         self.var_save_logs.set(data.get("save_logs", False))
         self.var_show_debug.set(data.get("show_debug", False))
         self.var_brightness_threshold.set(data.get("brightness_threshold", 200))
@@ -445,7 +444,6 @@ class LektorApp:
         self.var_tolerance.set(data.get("color_tolerance", 10))
         self.var_text_thickening.set(data.get("text_thickening", 10))
 
-        self.var_ocr_density.set(data.get("ocr_density_threshold", 0.015))
         self.var_match_score_short.set(data.get("match_score_short", 90))
         self.var_match_score_long.set(data.get("match_score_long", 75))
         self.var_match_len_diff.set(data.get("match_len_diff_ratio", 0.25))

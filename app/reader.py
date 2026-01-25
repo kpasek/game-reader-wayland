@@ -77,8 +77,7 @@ class ReaderThread(threading.Thread):
 
         self.ocr_scale = 1.0
         self.empty_threshold = 0.15
-        self.ocr_density_threshold = 0.015
-        self.text_alignment = "Center"
+        self.text_alignment = "None"
         self.save_logs = False
         self.subtitle_mode = 'Full Lines'
 
@@ -155,9 +154,7 @@ class ReaderThread(threading.Thread):
 
         # Ładowanie parametrów
         self.ocr_scale = preset.get('ocr_scale_factor', 1.0)
-        self.empty_threshold = preset.get('empty_image_threshold', 0.15)
-        self.ocr_density_threshold = preset.get('ocr_density_threshold', 0.015)
-        self.text_alignment = preset.get('text_alignment', "Center")
+        self.text_alignment = preset.get('text_alignment', "None")
         self.save_logs = preset.get('save_logs', False)
         self.subtitle_mode = preset.get('subtitle_mode', 'Full Lines')
         interval = preset.get('capture_interval', 0.5)

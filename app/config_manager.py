@@ -29,7 +29,6 @@ DEFAULT_PRESET_CONTENT = {
     "text_alignment": "Center",
     "save_logs": False,
     "min_line_length": 3,
-    "ocr_density_threshold": 0.03,
     "match_score_short": 90,
     "match_score_long": 75,
     "match_len_diff_ratio": 0.30,

@@ -156,8 +156,18 @@ Optional[Tuple[int, int]]:
                 best_original_idx = original_idx
                 best_len_diff = len_diff
 
-    # Progi akceptacji zależne od długości (teraz konfigurowalne)
-    min_score = score_short if ocr_len < 6 else score_long
+    len_min_threshold = 6
+    len_max_threshold = 60
+
+    if ocr_len < len_min_threshold:
+        min_score = score_short
+    elif ocr_len > len_max_threshold:
+        min_score = score_long
+    else:
+        length_progress = (ocr_len - len_min_threshold) / (len_max_threshold - len_min_threshold)
+
+        score_diff = score_long - score_short
+        min_score = score_short + (length_progress * score_diff)
 
     if best_score >= min_score:
         return best_original_idx, int(best_score)

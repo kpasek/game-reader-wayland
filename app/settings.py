@@ -100,12 +100,6 @@ class SettingsDialog(tk.Toplevel):
         grp_ocr.pack(fill=tk.X, pady=10, padx=10)
 
         self._add_slider(grp_ocr, "Skala OCR:", self.app.var_ocr_scale, 0.1, 1.0, "ocr_scale_factor", fmt="{:.2f}")
-        self._add_slider(grp_ocr, "Czułość pustego (Empty Threshold):", self.app.var_empty_threshold, 0.0, 0.6,
-                         "empty_image_threshold", fmt="{:.2f}")
-
-        # Nowy parametr: Density Threshold
-        self._add_slider(grp_ocr, "Próg gęstości pikseli (Szum):", self.app.var_ocr_density, 0.0, 0.1,
-                         "ocr_density_threshold", fmt="{:.3f}", resolution=0.005)
 
         self._add_slider(grp_ocr, "Częstotliwość skanowania (s):", self.app.var_capture_interval, 0.3, 1.0,
                          "capture_interval", fmt="{:.2f}s")
@@ -118,7 +112,7 @@ class SettingsDialog(tk.Toplevel):
         self._add_slider(grp_ocr, "Tolerancja koloru napisów", self.app.var_tolerance, 1, 60,
                          "color_tolerance")
         self._add_slider(grp_ocr, "Pogrubienie napisów", self.app.var_text_thickening, 0, 3,
-                         "text_thickening")
+                         "text_thickening", resolution=1)
         ttk.Checkbutton(grp_ocr, text="DEBUG: Pokaż obszar wykrytych napisów", variable=self.app.var_show_debug,
                         command=lambda: self.app._save_preset_val("show_debug", self.app.var_show_debug.get())).pack(
             anchor=tk.W, pady=2)

@@ -53,7 +53,7 @@ def check_alignment(bbox: Tuple[int, int, int, int], width: int, align_mode: str
     left, top, right, bottom = bbox
 
     if align_mode == "Center":
-        col_w = width * 0.15
+        col_w = width * 0.3
         center = width / 2
         c_min = center - (col_w / 2)
         c_max = center + (col_w / 2)
@@ -66,7 +66,6 @@ def check_alignment(bbox: Tuple[int, int, int, int], width: int, align_mode: str
     else:
         return True
 
-    # --- Logika Walidacji ---
     if left >= c_min and right <= c_max:
         return True
 
@@ -96,9 +95,8 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager) -> Tuple
         preset = config_manager.load_preset()
         text_color = preset.get('text_color_mode', 'Light')
         brightness_threshold = preset.get("brightness_threshold", 200)
-        align_mode = preset.get('text_alignment', "Center")
+        align_mode = preset.get('text_alignment', "None")
         scale = preset.get("ocr_scale_factor", 0.5)
-        density_threshold = preset.get("ocr_density_threshold", 0.005)
         contrast = preset.get("contract", 0)
         subtitle_colors = preset.get("subtitle_colors", [])
         thickening = preset.get("text_thickening", [])
@@ -121,25 +119,20 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager) -> Tuple
             image = enhancer.enhance(contrast)
 
         if text_color != "Mixed":
-            # Konwersja do skali szarości
             image = ImageOps.grayscale(image)
 
-        # dla czarnych napisów należy odwrócić kolory, aby dało się wyszukać obszar z napisami
         if text_color == "Dark":
             image = ImageOps.invert(image)
 
-        # Wykrywanie obszaru napisów
         crop_box = None
         try:
-            # Progowanie jasności
             mask = image.point(lambda x: 255 if x > brightness_threshold else 0, '1')
-
             mask = mask.filter(ImageFilter.MaxFilter(3))
-
             bbox = mask.getbbox()
 
             if bbox:
                 if not check_alignment(bbox, image.width, align_mode):
+                    print("wrong text alignment")
                     return image, False, None
 
                 padding = 4
@@ -153,12 +146,12 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager) -> Tuple
 
                 crop_box = (left, upper, right, lower)
 
-                # Warunek minimalnego sensownego rozmiaru
                 if (right - left) > 10 and (lower - upper) > 10:
                     image = image.crop(crop_box)
                 else:
                     crop_box = (0, 0, image.width, image.height)
             else:
+                print("Nie wykryto napisów.")
                 return image, False, (0, 0, image.width, image.height)
 
         except Exception as e:
@@ -173,48 +166,19 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager) -> Tuple
 
         if text_color != "Mixed":
             image = ImageOps.invert(image)
-            # 5. Binaryzacja pod OCR
-            thresh = 160
-            image = image.point(lambda x: 0 if x < thresh else 255, '1')
-
-            # 6. Sprawdzenie gęstości pikseli
-            colors = image.getcolors()
-            black_pixels = 0
-            if colors:
-                for count, value in colors:
-                    if value == 0:
-                        black_pixels = count
-                        break
-
             total_pixels = image.width * image.height
             if total_pixels == 0:
+                print("pusty obraz")
                 return image, False, None
 
             is_cropped = (crop_box[2] - crop_box[0]) < (image.width * 0.9) if 'new_w' in locals() else False
             min_pixels = 30 if is_cropped else 80
-
-            density = black_pixels / total_pixels
-            if density < density_threshold and black_pixels < min_pixels:
-                if black_pixels < min_pixels:
-                    return image, False, None
 
         return image, True, crop_box
 
     except Exception as e:
         print(f"Błąd preprocessingu: {e}", file=sys.stderr)
         return image, True, (0, 0, image.width, image.height)
-
-def is_image_empty(image: Image.Image, threshold: float) -> bool:
-    try:
-        if image.mode != 'L' and image.mode != '1':
-            stat_img = ImageOps.grayscale(image)
-        else:
-            stat_img = image
-
-        stat = ImageStat.Stat(stat_img)
-        return stat.stddev[0] < threshold
-    except Exception:
-        return False
 
 def get_text_bounds(image: Image.Image) -> Optional[Tuple[int, int, int, int]]:
     """
@@ -249,11 +213,6 @@ def recognize_text(image: Image.Image, config_manager: ConfigManager) -> str:
     Główna funkcja OCR.
     """
     preset = config_manager.load_preset()
-    empty_threshold = float(preset.get('empty_image_threshold', 0))
-    # 1. Optymalizacja: Pomiń puste klatki
-    if empty_threshold > 0.001:
-        if is_image_empty(image, empty_threshold):
-            return ""
 
     try:
         if HAS_CONFIG_FILE:
@@ -269,6 +228,7 @@ def recognize_text(image: Image.Image, config_manager: ConfigManager) -> str:
         if auto_remove_names:
             text = smart_remove_name(text)
 
+        print(f"OCR text: {text}")
         return text
     except Exception as e:
         print(f"OCR Error: {e}", file=sys.stderr)
