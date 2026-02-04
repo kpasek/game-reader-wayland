@@ -46,7 +46,7 @@ audio_queue = queue.Queue()
 log_queue = queue.Queue()
 debug_queue = queue.Queue()
 
-APP_VERSION = "v1.2.0"
+APP_VERSION = "v1.2.1"
 STANDARD_WIDTH = 3840
 STANDARD_HEIGHT = 2160
 
@@ -55,7 +55,7 @@ class LektorApp:
     def __init__(self, root: tk.Tk, autostart_preset: Optional[str], game_cmd: list):
         self.root = root
         self.root.title(f"Lektor {APP_VERSION}")
-        self.root.geometry("800x440")
+        self.root.geometry("950x500")
 
         self.config_mgr = ConfigManager()
         self.game_cmd = game_cmd

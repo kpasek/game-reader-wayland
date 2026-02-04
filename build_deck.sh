@@ -16,7 +16,7 @@ echo "🚀 Buduję aplikację $APP_NAME przy użyciu Nuitka..."
 
 # Wyczyść poprzednie buildy
 rm -rf "$BUILD_DIR" dist __pycache__ *.build *.dist *.onefile-build *.onefile-dist || true
-
+export CCFLAGS="-march=x86-64-v2"
 # -------------------------
 # Kompilacja
 # -------------------------

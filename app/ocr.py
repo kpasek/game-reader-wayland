@@ -42,7 +42,7 @@ elif platform.system() == "Linux":
     if os.path.exists(local_tesseract_path):
         pytesseract.pytesseract.tesseract_cmd = local_tesseract_path
 
-def check_alignment(bbox: Tuple[int, int, int, int], width: int, align_mode: str) -> bool:
+def check_alignment(bbox: Tuple[int, int, int, int], width: int, align_mode: str, column_ratio: float = 0.25) -> bool:
     """
     Sprawdza czy bbox (obszar tekstu) pasuje do zadanego wyrównania poziomego.
     Implementuje logikę 'słupa' o szerokości np. 20%.
@@ -51,25 +51,24 @@ def check_alignment(bbox: Tuple[int, int, int, int], width: int, align_mode: str
         return True
 
     left, top, right, bottom = bbox
+    text_center_x = (left + right) / 2
+    text_width = right - left
 
-    if align_mode == "Center":
-        col_w = width * 0.3
-        center = width / 2
-        c_min = center - (col_w / 2)
-        c_max = center + (col_w / 2)
-    elif align_mode == "Left":
+    if align_mode == "Left":
         c_min = 0
-        c_max = width * 0.3
+        c_max = width * column_ratio
+
+    elif align_mode == "Center":
+        col_w = width * column_ratio
+        center_img = width / 2
+        c_min = center_img - (col_w / 2)
+        c_max = center_img + (col_w / 2)
+
     elif align_mode == "Right":
-        c_min = width * 0.07
+        c_min = width * (1 - column_ratio)
         c_max = width
-    else:
-        return True
 
-    if left >= c_min and right <= c_max:
-        return True
-
-    if left < c_min and right > c_max:
+    if c_min <= text_center_x <= c_max:
         return True
 
     intersect_left = max(left, c_min)
@@ -77,11 +76,17 @@ def check_alignment(bbox: Tuple[int, int, int, int], width: int, align_mode: str
 
     if intersect_right > intersect_left:
         overlap = intersect_right - intersect_left
-        text_width = right - left
+
+        if overlap >= text_width:
+            return True
+
+        zone_width = c_max - c_min
+        if overlap >= zone_width:
+            return True
 
         if text_width > 0:
             coverage = overlap / text_width
-            if coverage >= 0.8:
+            if coverage >= 0.5:
                 return True
 
     return False
