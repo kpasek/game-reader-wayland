@@ -74,7 +74,7 @@ class ReaderThread(threading.Thread):
         self.img_queue = None
         self.last_monitor_crops: Dict[int, Image.Image] = {}
 
-        self.area3_triggered = False
+        self.triggered_area_ids = set()
 
         self.ocr_scale = 1.0
         self.empty_threshold = 0.15
@@ -92,17 +92,17 @@ class ReaderThread(threading.Thread):
 
         self.current_unified_area = {'left': 0, 'top': 0, 'width': 0, 'height': 0}
 
-    def trigger_area_3(self):
-        """Aktywuje jednorazowe pobranie i przetworzenie Obszaru 3."""
-        self.area3_triggered = True
-
-        self.last_monitor_crops.pop(2, None)
-
+    def trigger_area(self, area_id: int):
+        """Aktywuje jednorazowe pobranie i przetworzenie Obszaru o danym ID."""
+        self.triggered_area_ids.add(area_id)
+        # Znajdz indeks dla cropa? IDs are unique.
+        # W run() uzywamy area['id'] do identyfikacji
+        
         if self.log_queue:
             self.log_queue.put({
                 "time": datetime.now().strftime('%H:%M:%S'),
                 "ocr": "SYSTEM", "match": None,
-                "line_text": "Wyzwołano jednorazowy odczyt Obszaru 3", "stats": {}
+                "line_text": f"Wyzwołano jednorazowy odczyt Obszaru {area_id}", "stats": {}
             })
 
     def _scale_monitor_areas(self, monitors: List[Dict], original_res_str: str) -> List[Dict]:
@@ -151,10 +151,39 @@ class ReaderThread(threading.Thread):
         min_line_len = preset.get('min_line_length', 0)
         precomputed_data = precompute_subtitles(raw_subtitles, min_line_len) if raw_subtitles else ([], {})
 
-        raw_monitors = preset.get('monitor', [])
-        if isinstance(raw_monitors, dict): raw_monitors = [raw_monitors]
-        monitors = self._scale_monitor_areas([m for m in raw_monitors if m], preset.get('resolution'))
-        if not monitors: return
+        # --- LOAD AREAS ---
+        areas_config = preset.get('areas', [])
+        monitors = [] # List of rects for unified calc
+        
+        # If old config (no 'areas'), usage fallback (should be migrated but just in case)
+        if not areas_config and preset.get('monitor'):
+             raw_monitors = preset.get('monitor', [])
+             if isinstance(raw_monitors, dict): raw_monitors = [raw_monitors]
+             # Create dummy area objects
+             for i, m in enumerate(raw_monitors):
+                 if not m: continue
+                 areas_config.append({
+                     "id": i+1,
+                     "type": "manual" if i == 2 else "continuous",
+                     "rect": m,
+                     "colors": preset.get("subtitle_colors", []) if i==0 else []
+                 })
+
+        # Scale areas
+        valid_areas = []
+        for area in areas_config:
+            r = area.get('rect')
+            if not r: continue
+            
+            # Scale rect
+            scaled_list = self._scale_monitor_areas([r], preset.get('resolution'))
+            if scaled_list:
+                area['rect'] = scaled_list[0]
+                valid_areas.append(area)
+
+        if not valid_areas: return
+        
+        monitors = [a['rect'] for a in valid_areas] # For Unified Calculation
 
         min_l = min(m['left'] for m in monitors)
         min_t = min(m['top'] for m in monitors)
@@ -198,30 +227,35 @@ class ReaderThread(threading.Thread):
                 except queue.Empty:
                     pass
 
-            for idx, area in enumerate(monitors):
+            for idx, area_obj in enumerate(valid_areas):
                 t_start_proc = time.perf_counter()
+                
+                area_id = area_obj.get('id', idx)
+                area_rect = area_obj.get('rect')
+                
+                if area_obj.get('type') == 'manual':
+                     if area_id not in self.triggered_area_ids:
+                         continue
+                     self.triggered_area_ids.remove(area_id)
+                     # Clear last crop logic for manual might needed?
+                     self.last_monitor_crops.pop(idx, None)
 
-                if idx == 2:
-                    if not self.area3_triggered:
-                        continue
-                    self.area3_triggered = False
-
-                rel_x, rel_y = area['left'] - min_l, area['top'] - min_t
-                crop = full_img.crop((rel_x, rel_y, rel_x + area['width'], rel_y + area['height']))
+                rel_x, rel_y = area_rect['left'] - min_l, area_rect['top'] - min_t
+                crop = full_img.crop((rel_x, rel_y, rel_x + area_rect['width'], rel_y + area_rect['height']))
 
                 last_crop = self.last_monitor_crops.get(idx)
                 if self._images_are_similar(crop, last_crop, similarity):
-                    print("images are similar")
+                    # print("images are similar")
                     continue
                 self.last_monitor_crops[idx] = crop.copy()
 
                 t_pre_start = time.perf_counter()
 
-                # Przekazanie parametru density_threshold
-                processed, has_content, crop_bbox = preprocess_image(crop, self.config_manager)
+                # Przekazanie parametru density_threshold + COLORS
+                processed, has_content, crop_bbox = preprocess_image(crop, self.config_manager, override_colors=area_obj.get('colors'))
 
                 if not has_content:
-                    print("images has no content")
+                    # print("images has no content")
                     continue
 
                 t_pre = (time.perf_counter() - t_pre_start) * 1000
@@ -232,16 +266,16 @@ class ReaderThread(threading.Thread):
                 t_ocr = (time.perf_counter() - t_ocr_start) * 1000
 
                 if not text:
-                    print("images has no text")
+                    # print("images has no text")
                     continue
 
                 if len(text) < 2 or text in self.last_ocr_texts:
-                    print("last ocr filter")
+                    # print("last ocr filter")
                     continue
 
                 if has_content and crop_bbox and self.debug_queue:
-                    abs_x = area['left'] + crop_bbox[0]
-                    abs_y = area['top'] + crop_bbox[1]
+                    abs_x = area_rect['left'] + crop_bbox[0]
+                    abs_y = area_rect['top'] + crop_bbox[1]
 
                     abs_w = crop_bbox[2] - crop_bbox[0]
                     abs_h = crop_bbox[3] - crop_bbox[1]
@@ -262,7 +296,7 @@ class ReaderThread(threading.Thread):
                         "time": datetime.now().strftime('%H:%M:%S.%f')[:-3],
                         "ocr": text, "match": match, "line_text": line_txt,
                         "stats": {
-                            "monitor": idx + 1,
+                            "monitor": f"#{area_id}",
                             "cap_ms": t_cap,
                             "pre_ms": t_pre,
                             "ocr_ms": t_ocr,
@@ -273,7 +307,7 @@ class ReaderThread(threading.Thread):
                     if self.save_logs:
                         with open("session_log.txt", "a", encoding='utf-8') as f:
                             match_str = f"MATCH({match[1]}%): {line_txt}" if match else "NO MATCH"
-                            log_line = (f"{log_entry['time']} | M{idx + 1} | "
+                            log_line = (f"{log_entry['time']} | A{area_id} | "
                                         f"Cap:{t_cap:.0f}ms | Pre:{t_pre:.0f}ms | OCR:{t_ocr:.0f}ms | Match:{t_match:.0f}ms | "
                                         f"'{text}' | {match_str}\n")
                             f.write(log_line)

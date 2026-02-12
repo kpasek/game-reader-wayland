@@ -37,6 +37,7 @@ from app.player import PlayerThread
 from app.log import LogWindow
 from app.settings import SettingsDialog
 from app.area_selector import AreaSelector, ColorSelector
+from app.area_manager import AreaManagerWindow
 from app.capture import capture_fullscreen
 from app.help import HelpWindow
 
@@ -171,34 +172,27 @@ class LektorApp:
 
     def _start_hotkey_listener(self):
         hk_start = self.config_mgr.get('hotkey_start_stop', '<ctrl>+<f5>')
-        hk_area3 = self.config_mgr.get('hotkey_area3', '<ctrl>+<f6>')
-
-        # --- NOWE SKRÓTY DLA OBSZARÓW ---
-        hk_set_1 = '<alt>+1'
-        hk_set_2 = '<alt>+2'
-        hk_set_3 = '<alt>+3'
-
-        hk_clr_1 = '<alt>+<shift>+1'
-        hk_clr_2 = '<alt>+<shift>+2'
-        hk_clr_3 = '<alt>+<shift>+3'
-
+        
         if hasattr(self, 'hotkey_listener') and self.hotkey_listener:
-            self.hotkey_listener.stop()
+            try:
+                self.hotkey_listener.stop()
+            except: pass
 
         hotkeys = {
             hk_start: self._on_hotkey_start_stop,
-            hk_area3: self._on_hotkey_area3,
-
-            # Ustawianie obszarów
-            hk_set_1: lambda: self._on_hotkey_set_area(0),
-            hk_set_2: lambda: self._on_hotkey_set_area(1),
-            hk_set_3: lambda: self._on_hotkey_set_area(2),
-
-            # Usuwanie obszarów
-            hk_clr_1: lambda: self._on_hotkey_clear_area(0),
-            hk_clr_2: lambda: self._on_hotkey_clear_area(1),
-            hk_clr_3: lambda: self._on_hotkey_clear_area(2),
         }
+        
+        # Load areas from current preset
+        path = self.var_preset_full_path.get()
+        if path and os.path.exists(path):
+             data = self.config_mgr.load_preset(path)
+             if data and 'areas' in data:
+                 for area in data['areas']:
+                     hk = area.get('hotkey')
+                     aid = area.get('id')
+                     if hk:
+                         # Capture aid in lambda default arg
+                         hotkeys[hk] = lambda aid=aid: self._on_hotkey_trigger_area(aid)
 
         try:
             self.hotkey_listener = keyboard.GlobalHotKeys(hotkeys)
@@ -212,16 +206,8 @@ class LektorApp:
     def _on_hotkey_start_stop(self):
         self.root.after(0, self._toggle_start_stop_hotkey)
 
-    def _on_hotkey_area3(self):
-        self.root.after(0, self._trigger_area3_hotkey)
-
-    def _on_hotkey_set_area(self, idx):
-        # Przekieruj do głównego wątku UI
-        self.root.after(0, lambda: self.set_area(idx))
-
-    def _on_hotkey_clear_area(self, idx):
-        # Przekieruj do głównego wątku UI
-        self.root.after(0, lambda: self.clear_area(idx))
+    def _on_hotkey_trigger_area(self, area_id):
+        self.root.after(0, lambda: self._trigger_reader_area(area_id))
 
     def _toggle_start_stop_hotkey(self):
         if self.is_running:
@@ -229,8 +215,9 @@ class LektorApp:
         else:
             self.start_reading()
 
-    def _trigger_area3_hotkey(self):
-        if self.is_running and self.reader_thread: self.reader_thread.trigger_area_3()
+    def _trigger_reader_area(self, area_id):
+        if self.is_running and self.reader_thread: 
+            self.reader_thread.trigger_area(area_id)
 
     def _init_gui(self):
         menubar = tk.Menu(self.root)
@@ -244,10 +231,9 @@ class LektorApp:
         menubar.add_cascade(label="Lektor", menu=preset_menu)
 
         main_area_menu = tk.Menu(menubar, tearoff=0)
-        for i in range(3):
-            suf = " (CZASOWY)" if i == 2 else ""
-            main_area_menu.add_command(label=f"Definiuj Obszar {i + 1}{suf}", command=lambda x=i: self.set_area(x))
-            main_area_menu.add_command(label=f"Wyczyść Obszar {i + 1}", command=lambda x=i: self.clear_area(x))
+        main_area_menu.add_command(label="Zarządzaj Obszarami...", command=self.open_area_manager)
+        main_area_menu.add_separator()
+        main_area_menu.add_command(label="Ustaw główny obszar (1)", command=self.set_area_1_direct)
 
         menubar.add_cascade(label="Obszary", menu=main_area_menu)
 
@@ -278,8 +264,10 @@ class LektorApp:
         ttk.Button(f_res, text="Dopasuj rozdz.", command=self.auto_detect_resolution).pack(side=tk.LEFT, padx=5)
         self.btn_settings = ttk.Button(f_res, text="⚙ Ustawienia", command=self.open_settings)
         self.btn_settings.pack(side=tk.LEFT, padx=5)
-        self.btn_area_1 = ttk.Button(f_res, text="Ustaw obszar 1", command=lambda: self._on_hotkey_set_area(0))
+        self.btn_area_1 = ttk.Button(f_res, text="Ustaw obszar 1", command=self.set_area_1_direct)
         self.btn_area_1.pack(side=tk.LEFT, padx=5)
+        self.btn_area_mgr = ttk.Button(f_res, text="Zarządzaj...", command=self.open_area_manager)
+        self.btn_area_mgr.pack(side=tk.LEFT, padx=5)
 
         # Kolory napisów
         grp_sub = ttk.LabelFrame(panel, text="Kolory napisów", padding=10)
@@ -733,11 +721,20 @@ class LektorApp:
             return
 
         data = self.config_mgr.load_preset(path)
-        colors = data.get("subtitle_colors", [])
+        areas = data.get("areas", [])
+        # Fallback to old colors if areas not migrated yet? Migration happens on load.
+        # But let's be safe and check areas[0]
+        colors = []
+        if areas:
+            # Find Area 1
+            a1 = next((a for a in areas if a.get('id') == 1), None)
+            if a1: colors = a1.get('colors', [])
+        else:
+            colors = data.get("subtitle_colors", [])
 
         x_offset = 2
         y_pos = 2
-        size = 20  # Trochę większe kwadraty niż wcześniej
+        size = 20
 
         if not colors:
             self.color_canvas.create_text(5, 12, text="(brak filtrów - domyślny tryb)", anchor=tk.W, fill="gray")
@@ -745,8 +742,6 @@ class LektorApp:
 
         for i, color in enumerate(colors):
             try:
-                # Rysujemy kwadrat
-                # Tag 'color_IDX' pozwoli nam zidentyfikować, który kwadrat kliknięto
                 tag_name = f"color_{i}"
                 self.color_canvas.create_rectangle(
                     x_offset, y_pos, x_offset + size, y_pos + size,
@@ -757,8 +752,9 @@ class LektorApp:
                 pass
 
     def add_subtitle_color(self):
-        """Dodaje nowy kolor do listy."""
-        self.root.iconify()
+        """Obsługa wyboru koloru pipetą (tylko dla Obszaru 1)."""
+        self.root.withdraw()
+        # Daj czas na zniknięcie
         self.root.update()
         time.sleep(0.3)
 
@@ -776,29 +772,30 @@ class LektorApp:
                 if path and os.path.exists(path):
                     data = self.config_mgr.load_preset(path)
 
-                    if "subtitle_colors" not in data or not isinstance(data["subtitle_colors"], list):
-                        data["subtitle_colors"] = []
+                    if 'areas' not in data:
+                        # Should have been migrated, but just in case
+                        self.config_mgr._migrate_legacy_areas(data)
+                    
+                    areas = data.get('areas', [])
+                    a1 = next((a for a in areas if a.get('id') == 1), None)
+                    
+                    if a1:
+                        if selector.selected_color not in a1['colors']:
+                            a1['colors'].append(selector.selected_color)
+                            self.config_mgr.save_preset(path, data)
+                            print(f"Dodano kolor do Obszaru 1: {selector.selected_color}")
+                            self.refresh_color_canvas()
+                    else:
+                        print("Błąd: Nie znaleziono Obszaru 1")
 
-                    # Dodajemy nowy kolor
-                    data["subtitle_colors"].append(selector.selected_color)
-
-                    self.config_mgr.save_preset(path, data)
-                    print(f"Dodano kolor: {selector.selected_color}")
-
-                    # Odśwież pasek
-                    self.refresh_color_canvas()
         except Exception as e:
             messagebox.showerror("Błąd", str(e))
         finally:
             self.root.deiconify()
 
     def on_color_click(self, event):
-        """Obsługa kliknięcia w kolor na canvasie (usuwanie)."""
-        # Znajdź element pod kursorem
         item_id = self.color_canvas.find_closest(event.x, event.y)
         tags = self.color_canvas.gettags(item_id)
-
-        # Sprawdź czy kliknięto w kolor (szukamy tagu 'color_X')
         for tag in tags:
             if tag.startswith("color_"):
                 try:
@@ -809,36 +806,105 @@ class LektorApp:
                     pass
 
     def add_white_subtitle_color(self):
-        """Obsługa dodania białego koloru napisów"""
-        data = self.config_mgr.load_preset()
         path = self.var_preset_full_path.get()
-
-        if "subtitle_colors" not in data or not isinstance(data["subtitle_colors"], list):
-            data["subtitle_colors"] = []
-
-        # Dodajemy nowy kolor
-        data["subtitle_colors"].append('#ffffff')
-
-        self.config_mgr.save_preset(path, data)
-        print(f"Dodano biały kolor")
-
-        # Odśwież pasek
-        self.refresh_color_canvas()
+        if not path or not os.path.exists(path): return 
+        
+        data = self.config_mgr.load_preset(path)
+        if 'areas' not in data: self.config_mgr._migrate_legacy_areas(data)
+        
+        areas = data.get('areas', [])
+        a1 = next((a for a in areas if a.get('id') == 1), None)
+        
+        if a1:
+            if '#ffffff' not in a1['colors']:
+                a1['colors'].append('#ffffff')
+                self.config_mgr.save_preset(path, data)
+                self.refresh_color_canvas()
 
     def delete_subtitle_color(self, idx):
         path = self.var_preset_full_path.get()
         if not path or not os.path.exists(path): return
 
         data = self.config_mgr.load_preset(path)
-        colors = data.get("subtitle_colors", [])
+        areas = data.get("areas", [])
+        a1 = next((a for a in areas if a.get('id') == 1), None)
 
-        if idx < len(colors):
-            color_to_remove = colors[idx]
-            if messagebox.askyesno("Usuwanie koloru", f"Czy usunąć kolor {color_to_remove}?"):
-                del colors[idx]
-                data["subtitle_colors"] = colors
-                self.config_mgr.save_preset(path, data)
-                self.refresh_color_canvas()
+        if a1:
+            colors = a1.get("colors", [])
+            if idx < len(colors):
+                color_to_remove = colors[idx]
+                if messagebox.askyesno("Usuwanie koloru", f"Czy usunąć kolor {color_to_remove} z Obszaru 1?"):
+                    del colors[idx]
+                    self.config_mgr.save_preset(path, data)
+                    self.refresh_color_canvas()
+
+    # --- ZARZĄDZANIE OBSZARAMI ---
+
+    def open_area_manager(self):
+        path = self.var_preset_full_path.get()
+        if not path:
+             messagebox.showerror("Błąd", "Brak aktywnego profilu.")
+             return
+             
+        data = self.config_mgr.load_preset(path)
+        if 'areas' not in data: self.config_mgr._migrate_legacy_areas(data)
+        
+        # Open Manager
+        AreaManagerWindow(self.root, data['areas'], self._save_areas_callback)
+
+    def _save_areas_callback(self, new_areas):
+        path = self.var_preset_full_path.get()
+        if path:
+            data = self.config_mgr.load_preset(path)
+            data['areas'] = new_areas
+            self.config_mgr.save_preset(path, data)
+            self._restart_hotkeys()
+            self.refresh_color_canvas() # Update in case Area 1 colors changed in manager
+
+    def set_area_1_direct(self):
+        """Ustawia obszar 1 bezpośrednio z głównego okna."""
+        self.root.withdraw()
+        self.root.update()
+        time.sleep(0.3)
+        
+        try:
+            img = capture_fullscreen()
+            if not img:
+                self.root.deiconify()
+                return
+
+            # Load existing rect for visualization
+            path = self.var_preset_full_path.get()
+            existing = []
+            if path:
+                data = self.config_mgr.load_preset(path)
+                if 'areas' not in data: self.config_mgr._migrate_legacy_areas(data)
+                a1 = next((a for a in data['areas'] if a.get('id') == 1), None)
+                if a1 and a1.get('rect'): existing = [a1['rect']]
+
+            sel = AreaSelector(self.root, img, existing_regions=existing)
+            self.root.wait_window(sel)
+            
+            if sel.geometry and path:
+                 data = self.config_mgr.load_preset(path)
+                 areas = data.get('areas', [])
+                 a1 = next((a for a in areas if a.get('id') == 1), None)
+                 
+                 if not a1:
+                     # Create if missing
+                     a1 = {"id": 1, "type": "continuous", "rect": sel.geometry, "hotkey": "", "colors": []}
+                     areas.insert(0, a1)
+                 else:
+                     a1['rect'] = sel.geometry
+                 
+                 data['areas'] = areas
+                 self.config_mgr.save_preset(path, data)
+                 
+        except Exception as e:
+            messagebox.showerror("Błąd", f"Wybór obszaru: {e}")
+        finally:
+            self.root.deiconify()
+
 
 def main():
     parser = argparse.ArgumentParser()

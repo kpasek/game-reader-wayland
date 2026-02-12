@@ -93,7 +93,7 @@ def check_alignment(bbox: Tuple[int, int, int, int], width: int, align_mode: str
     return False
 
 
-def preprocess_image(image: Image.Image, config_manager: ConfigManager) -> Tuple[Image.Image, bool, Optional[Tuple[int, int, int, int]]]:
+def preprocess_image(image: Image.Image, config_manager: ConfigManager, override_colors: List[str] = None) -> Tuple[Image.Image, bool, Optional[Tuple[int, int, int, int]]]:
     """
     Zwraca krotkę: (przetworzony_obraz, czy_zawiera_tresc, bbox).
     """
@@ -104,7 +104,7 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager) -> Tuple
         align_mode = preset.get('text_alignment', "None")
         scale = preset.get("ocr_scale_factor", 0.5)
         contrast = preset.get("contract", 0)
-        subtitle_colors = preset.get("subtitle_colors", [])
+        subtitle_colors = override_colors if override_colors is not None else preset.get("subtitle_colors", [])
         thickening = preset.get("text_thickening", [])
         valid_colors = [c for c in subtitle_colors if c]
 

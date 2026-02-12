@@ -4,7 +4,10 @@ try:
     import tkinter as tk
     from PIL import Image, ImageTk
 except ImportError:
-    sys.exit(1)
+    print("Ostrzeżenie: Brak tkinter lub PIL.ImageTk - GUI może nie działać.", file=sys.stderr)
+    tk = None
+    Image = None
+    ImageTk = None
 
 
 class AreaSelector(tk.Toplevel):
@@ -32,15 +35,33 @@ class AreaSelector(tk.Toplevel):
         self.cv.create_image(0, 0, image=self.bg_img, anchor=tk.NW)
 
         if existing_regions:
-            for i, r in enumerate(existing_regions):
-                if not r: continue
+            for i, area_data in enumerate(existing_regions):
+                # area_data can be dict with rect, id, colors
+                r = area_data.get('rect') if isinstance(area_data, dict) else area_data
+                
+                if not r or not isinstance(r, dict): continue
+                
                 x, y, w, h = r['left'], r['top'], r['width'], r['height']
-
-                # Rysuj ramkę
-                self.cv.create_rectangle(x, y, x + w, y + h, outline='blue', width=2, dash=(4, 4))
-                # Rysuj tło etykiety dla czytelności
-                self.cv.create_rectangle(x, y - 20, x + 80, y, fill='blue', outline='blue')
-                self.cv.create_text(x + 5, y - 10, text=f"Obszar {i + 1}", fill="white", anchor=tk.W,
+                
+                # Determine color
+                color = 'blue'
+                colors = area_data.get('colors', [])
+                if isinstance(area_data, dict) and colors:
+                    color = colors[0] # Primary color
+                
+                # Draw rect
+                self.cv.create_rectangle(x, y, x + w, y + h, outline=color, width=2, dash=(4, 4))
+                
+                # Draw label background
+                aid = area_data.get('id', i+1) if isinstance(area_data, dict) else i+1
+                typ = area_data.get('type', '?') if isinstance(area_data, dict) else ""
+                
+                label_txt = f"Obszar #{aid}"
+                if typ: label_txt += f" ({typ})"
+                
+                self.cv.create_rectangle(x, y - 25, x + 120, y, fill=color, outline=color)
+                # Text contrast? Assuming white text is mostly fine on colored bg or blue default
+                self.cv.create_text(x + 5, y - 12, text=label_txt, fill="white", anchor=tk.W,
                                     font=("Arial", 10, "bold"))
 
         self.cv.bind("<ButtonPress-1>", self.on_press)
