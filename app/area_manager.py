@@ -62,13 +62,14 @@ class AreaManagerWindow(tk.Toplevel):
 
         # Right side: Details
         self.right_frame = ttk.Labelframe(self, text="Szczegóły", padding=10)
-        self.right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.right_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         # Content of details (initially hidden/disabled)
         self._init_details_form()
 
     def _init_details_form(self):
         f = self.right_frame
+        f.columnconfigure(1, weight=1)  # Allow column 1 to expand
         
         # Area Type
         ttk.Label(f, text="Typ:").grid(row=0, column=0, sticky=tk.W, pady=5)

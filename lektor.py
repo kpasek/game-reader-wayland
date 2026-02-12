@@ -47,14 +47,14 @@ audio_queue = queue.Queue()
 log_queue = queue.Queue()
 debug_queue = queue.Queue()
 
-APP_VERSION = "v1.2.1"
+APP_VERSION = "v1.3.0"
 
 
 class LektorApp:
     def __init__(self, root: tk.Tk, autostart_preset: Optional[str], game_cmd: list):
         self.root = root
         self.root.title(f"Lektor {APP_VERSION}")
-        self.root.geometry("1050x500")
+        self.root.geometry("800x500")
 
         self.config_mgr = ConfigManager()
         self.game_cmd = game_cmd
@@ -268,10 +268,6 @@ class LektorApp:
         ttk.Button(f_res, text="Dopasuj rozdz.", command=self.auto_detect_resolution).pack(side=tk.LEFT, padx=5)
         self.btn_settings = ttk.Button(f_res, text="⚙ Ustawienia", command=self.open_settings)
         self.btn_settings.pack(side=tk.LEFT, padx=5)
-        self.btn_area_1 = ttk.Button(f_res, text="Ustaw obszar 1", command=self.set_area_1_direct)
-        self.btn_area_1.pack(side=tk.LEFT, padx=5)
-        self.btn_area_mgr = ttk.Button(f_res, text="Zarządzaj...", command=self.open_area_manager)
-        self.btn_area_mgr.pack(side=tk.LEFT, padx=5)
 
         # Kolory napisów
         grp_sub = ttk.LabelFrame(panel, text="Kolory napisów", padding=10)
