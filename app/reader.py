@@ -5,6 +5,7 @@ import queue
 from collections import deque
 from datetime import datetime
 from typing import Optional, Tuple, Dict, Any, List
+# ImageChops jest wykorzystywany w funkcji _images_are_similar, a ImageStat w tej samej funkcji.
 from PIL import Image, ImageChops, ImageStat, ImageOps, ImageFilter
 
 from app.capture import capture_region
