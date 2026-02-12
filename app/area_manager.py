@@ -16,7 +16,7 @@ class AreaManagerWindow(tk.Toplevel):
     def __init__(self, parent, areas: List[Dict[str, Any]], on_save_callback):
         super().__init__(parent)
         self.title("Zarządzanie Obszarami")
-        self.geometry("800x600")
+        self.geometry("1000x600")
         self.areas = [a.copy() for a in areas]  # Deep copy-ish (dicts are mutable but we replace lists)
         # Ensure deep copy of nested lists like 'colors'
         for a in self.areas:
@@ -40,7 +40,7 @@ class AreaManagerWindow(tk.Toplevel):
         ttk.Label(left_frame, text="Lista Obszarów").pack(anchor=tk.W)
         
         self.lb_areas = tk.Listbox(left_frame, width=20)
-        self.lb_areas.pack(fill=tk.Y, expand=True, pady=5)
+        self.lb_areas.pack(fill=tk.BOTH, expand=True, pady=5)
         self.lb_areas.bind('<<ListboxSelect>>', self._on_list_select)
 
         btn_frame = ttk.Frame(left_frame)
@@ -50,7 +50,7 @@ class AreaManagerWindow(tk.Toplevel):
         self.btn_remove = ttk.Button(btn_frame, text="- Usuń", command=self._remove_area, state=tk.DISABLED)
         self.btn_remove.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        self.btn_toggle = ttk.Button(btn_frame, text="Włącz/Wyłącz", command=self._toggle_area_enabled, state=tk.DISABLED)
+        self.btn_toggle = ttk.Button(btn_frame, text="Włącz/Wyłącz", command=self._toggle_area_enabled, state=tk.DISABLED, width=15)
         self.btn_toggle.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         # Main Actions
@@ -397,7 +397,18 @@ class AreaManagerWindow(tk.Toplevel):
     def _on_color_click(self, event):
         if self.current_selection_idx < 0: return
         
-        item = self.cv_colors.find_closest(event.x, event.y)
+        # Wykrywaj tylko elementy dokładnie pod kursorem
+        items = self.cv_colors.find_overlapping(event.x, event.y, event.x+1, event.y+1)
+        item = None
+        for i in reversed(items):
+            tags = self.cv_colors.gettags(i)
+            if "clickable" in tags:
+                item = i
+                break
+        
+        if item is None:
+            return
+
         tags = self.cv_colors.gettags(item)
         
         idx_to_remove = -1
@@ -418,9 +429,14 @@ class AreaManagerWindow(tk.Toplevel):
                 self._load_details(self.current_selection_idx)
     
     def _on_color_hover(self, event):
-        item = self.cv_colors.find_closest(event.x, event.y)
-        tags = self.cv_colors.gettags(item)
-        if "clickable" in tags:
+        items = self.cv_colors.find_overlapping(event.x, event.y, event.x+1, event.y+1)
+        is_clickable = False
+        for i in items:
+            if "clickable" in self.cv_colors.gettags(i):
+                is_clickable = True
+                break
+                
+        if is_clickable:
             self.cv_colors.config(cursor="hand2")
         else:
             self.cv_colors.config(cursor="")
