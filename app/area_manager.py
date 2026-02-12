@@ -82,7 +82,7 @@ class AreaManagerWindow(tk.Toplevel):
         self.lbl_rect = ttk.Label(f, text="-")
         self.lbl_rect.grid(row=1, column=1, sticky=tk.W, pady=5)
         
-        ttk.Button(f, text="Wybierz Obszar", command=self._select_area_on_screen).grid(row=2, column=0, columnspan=2, fill=tk.X, pady=5)
+        ttk.Button(f, text="Wybierz Obszar", command=self._select_area_on_screen).grid(row=2, column=0, columnspan=2, sticky=tk.EW, pady=5)
 
         # Hotkey
         ttk.Label(f, text="Skrót:").grid(row=3, column=0, sticky=tk.W, pady=5)
@@ -104,7 +104,7 @@ class AreaManagerWindow(tk.Toplevel):
         btn_col_frame = ttk.Frame(f)
         btn_col_frame.grid(row=6, column=0, columnspan=2, sticky=tk.EW)
         ttk.Button(btn_col_frame, text="+ Dodaj Kolor", command=self._add_color).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(btn_col_frame, text="- Usuń", command=self._remove_color).pack(side=tk.LEFT, px=5)
+        ttk.Button(btn_col_frame, text="- Usuń", command=self._remove_color).pack(side=tk.LEFT, padx=5)
         
         # Bind events at the end to prevent AttributeError on early trigger
         self.cb_type.bind("<<ComboboxSelected>>", self._on_field_change)
@@ -113,7 +113,7 @@ class AreaManagerWindow(tk.Toplevel):
         self.lb_areas.delete(0, tk.END)
         for i, area in enumerate(self.areas):
             typ_raw = area.get('type', 'manual')
-            t = "Stały" if typ_raw == 'continuous' else "Na skrót"
+            t = "Stały" if typ_raw == 'continuous' else "Wyzwalany"
             if typ_raw not in ['continuous', 'manual']: t = typ_raw # Fallback
             
             display = f"#{area.get('id', i+1)} [{t}]"
@@ -195,7 +195,6 @@ class AreaManagerWindow(tk.Toplevel):
 
     def _add_area(self):
         if len(self.areas) >= 5:
-            messagebox.showinfo("Limit", "Maksymalnie 5 obszarów.")
             return
             
         # Determine next ID
@@ -249,17 +248,24 @@ class AreaManagerWindow(tk.Toplevel):
             if not img:
                 self.deiconify()
                 return
-                
+            
+            # Use self.master as parent for AreaSelector since self is hidden
+            # Actually, standard Toplevel with parent hidden might also be hidden. 
+            # We can use root window (self.master) which should be visible or deiconifiable?
+            # Wait, LektorApp root might be visible.
+            # However, AreaSelector needs to be fullscreen on top.
+            
+            # Let's try passing the grand-parent (if self.master is Toplevel or Root)
+            # self.master should be valid Tk instance.
+            
             # Pass full area objects for context view
-            sel = AreaSelector(self, img, existing_regions=self.areas) 
+            sel = AreaSelector(self.master, img, existing_regions=self.areas) 
             # AreaSelector waits for window.
             if sel.geometry:
                 self.areas[self.current_selection_idx]['rect'] = sel.geometry
                 self._load_details(self.current_selection_idx)
                 self._refresh_list() # refresh potential changes
-            if sel.geometry:
-                self.areas[self.current_selection_idx]['rect'] = sel.geometry
-                self._load_details(self.current_selection_idx)
+
         except Exception as e:
             print(f"Error selecting area: {e}")
         finally:
