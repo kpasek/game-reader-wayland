@@ -1,9 +1,0 @@
-2026-02-12 20:11:06.058739 Resolution Debug: Physical=(2560, 1440), Target=(2560, 1440), Preset=3840x2160
-2026-02-12 20:23:30.086032 Resolution Debug: Physical=(2560, 1600), Target=(2560, 1600), Preset=3840x2160
-2026-02-12 20:23:30.086206 HiDPI Scaling Trap Detected (Ratio 1.50)! Overriding detected 2560x1600 with Preset 3840x2160
-2026-02-12 20:39:07.024274 Resolution Debug: Physical=(2560, 1600), Target=(2560, 1600), Preset=3840x2160
-2026-02-12 20:39:07.024438 HiDPI Scaling Trap Detected (Ratio 1.50)! Overriding detected 2560x1600 with Preset 3840x2160
-2026-02-12 20:40:08.643724 Resolution Debug: Physical=(2560, 1600), Target=(2560, 1600), Preset=3840x2160
-2026-02-12 20:40:08.643938 HiDPI Scaling Trap Detected (Ratio 1.50)! Overriding detected 2560x1600 with Preset 3840x2160
-2026-02-12 20:40:30.168788 Resolution Debug: Physical=(2560, 1600), Target=(2560, 1600), Preset=3840x2160
-2026-02-12 20:40:30.168940 HiDPI Scaling Trap Detected (Ratio 1.50)! Overriding detected 2560x1600 with Preset 3840x2160

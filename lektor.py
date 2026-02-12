@@ -190,9 +190,10 @@ class LektorApp:
                  for area in data['areas']:
                      hk = area.get('hotkey')
                      aid = area.get('id')
+                     atype = area.get('type', 'manual')
                      if hk:
                          # Capture aid in lambda default arg
-                         hotkeys[hk] = lambda aid=aid: self._on_hotkey_trigger_area(aid)
+                         hotkeys[hk] = lambda aid=aid, t=atype: self._on_hotkey_area_action(aid, t)
 
         try:
             self.hotkey_listener = keyboard.GlobalHotKeys(hotkeys)
@@ -206,8 +207,8 @@ class LektorApp:
     def _on_hotkey_start_stop(self):
         self.root.after(0, self._toggle_start_stop_hotkey)
 
-    def _on_hotkey_trigger_area(self, area_id):
-        self.root.after(0, lambda: self._trigger_reader_area(area_id))
+    def _on_hotkey_area_action(self, area_id, area_type):
+        self.root.after(0, lambda: self._trigger_reader_area(area_id, area_type))
 
     def _toggle_start_stop_hotkey(self):
         if self.is_running:
@@ -215,9 +216,12 @@ class LektorApp:
         else:
             self.start_reading()
 
-    def _trigger_reader_area(self, area_id):
+    def _trigger_reader_area(self, area_id, area_type='manual'):
         if self.is_running and self.reader_thread: 
-            self.reader_thread.trigger_area(area_id)
+            if area_type == 'continuous':
+                self.reader_thread.toggle_continuous_area(area_id)
+            else:
+                self.reader_thread.trigger_area(area_id)
 
     def _init_gui(self):
         menubar = tk.Menu(self.root)
@@ -860,6 +864,16 @@ class LektorApp:
             self.config_mgr.save_preset(path, data)
             self._restart_hotkeys()
             self.refresh_color_canvas() # Update in case Area 1 colors changed in manager
+            
+            # Restart reader to apply changes (geometry, enabled state, etc.)
+            if self.is_running:
+                print("Obszary zmienione, restartuję czytanie...")
+                self.stop_reading()
+                # Give it a moment using `after` isn't ideal for straight restart logic, 
+                # but direct restart is simpler.
+                # However, stop_reading signals flag. Thread needs to die.
+                # We can use a short delay to restart.
+                self.root.after(200, self.start_reading)
 
     def set_area_1_direct(self):
         """Ustawia obszar 1 bezpośrednio z głównego okna."""

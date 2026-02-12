@@ -50,6 +50,9 @@ class AreaManagerWindow(tk.Toplevel):
         self.btn_remove = ttk.Button(btn_frame, text="- Usuń", command=self._remove_area, state=tk.DISABLED)
         self.btn_remove.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
+        self.btn_toggle = ttk.Button(btn_frame, text="Włącz/Wyłącz", command=self._toggle_area_enabled, state=tk.DISABLED)
+        self.btn_toggle.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
         # Main Actions
         action_frame = ttk.Frame(left_frame, padding=(0, 20, 0, 0))
         action_frame.pack(fill=tk.X, side=tk.BOTTOM)
@@ -128,19 +131,47 @@ class AreaManagerWindow(tk.Toplevel):
             if typ_raw not in ['continuous', 'manual']: t = typ_raw # Fallback
             
             display = f"#{area.get('id', i+1)} [{t}]"
+
+            if typ_raw == 'continuous' and area.get('id') != 1:
+                state = "ON" if area.get('enabled', False) else "OFF"
+                display += f" [{state}]"
+
             self.lb_areas.insert(tk.END, display)
         
         if self.current_selection_idx >= 0 and self.current_selection_idx < len(self.areas):
             self.lb_areas.selection_set(self.current_selection_idx)
             self._load_details(self.current_selection_idx)
-            # Area 1 cannot be removed
-            if self.areas[self.current_selection_idx].get('id') == 1:
+            
+            area = self.areas[self.current_selection_idx]
+            is_area1 = area.get('id') == 1
+            is_cont = area.get('type', 'manual') == 'continuous'
+
+            # Update buttons state
+            if is_area1:
                 self.btn_remove.config(state=tk.DISABLED)
+                self.btn_toggle.config(state=tk.DISABLED)
             else:
                 self.btn_remove.config(state=tk.NORMAL)
+                if is_cont:
+                    self.btn_toggle.config(state=tk.NORMAL)
+                    txt = "Wyłącz" if area.get('enabled', False) else "Włącz"
+                    self.btn_toggle.config(text=txt)
+                else:
+                    self.btn_toggle.config(state=tk.DISABLED)
+                    self.btn_toggle.config(text="Włącz/Wyłącz")
         else:
             self.current_selection_idx = -1
             self._disable_details()
+
+    def _toggle_area_enabled(self):
+        if self.current_selection_idx < 0: return
+        area = self.areas[self.current_selection_idx]
+        if area.get('type') != 'continuous' or area.get('id') == 1:
+            return
+        
+        curr = area.get('enabled', False)
+        area['enabled'] = not curr
+        self._refresh_list()
 
     def _disable_details(self):
         # Clear and disable fields
@@ -171,7 +202,8 @@ class AreaManagerWindow(tk.Toplevel):
         self.var_type.set(display_typ)
         
         # Handle Hotkey State based on type
-        if typ == 'continuous' or area.get('id') == 1:
+        # Allow hotkeys for continuous areas EXCEPT area #1 (which is always ON)
+        if area.get('id') == 1:
             self.entry_hotkey.config(state=tk.DISABLED)
             self.btn_record.config(state=tk.DISABLED)
         else:

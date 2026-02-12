@@ -109,10 +109,10 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager, override
         valid_colors = [c for c in subtitle_colors if c]
 
         # Debug: Save original crop before processing
-        if preset.get('save_debug_crops', True): # Default True for now to debug
-            try:
-                image.save("debug_raw_crop.png")
-            except: pass
+        # if preset.get('save_debug_crops', True): # Default True for now to debug
+        #     try:
+        #         image.save("debug_raw_crop.png")
+        #     except: pass
 
         if valid_colors:
             tolerance = preset.get("color_tolerance", 10)
@@ -120,8 +120,8 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager, override
             if thickening > 0:
                 filter_size = (thickening * 2) + 1
                 image = image.filter(ImageFilter.MaxFilter(filter_size))
-            if preset.get('show_debug', False):
-                image.save("debug_img.png")
+            # if preset.get('show_debug', False):
+            #     image.save("debug_img.png")
             text_color = "Light"
 
         if contrast != 0 and not valid_colors:
@@ -170,14 +170,14 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager, override
                 print(f"  > Tolerancja: {preset.get('color_tolerance', 10)}")
                 
                 # Zrzut obrazu wejściowego dla celów diagnostycznych
-                try:
-                    debug_path = "debug_crop_failure.png"
-                    # Save the ORIGINAL crop (we need to pass it or have reference, 'image' here is already processed/grayscale/inverted/masked)
-                    # Actually 'image' at this point IS the processed mask if valid_colors was used.
-                    # If we want to see why it failed, we should save it.
-                    image.save(debug_path)
-                    print(f"  > Zapisano obraz po filtrowaniu do: {debug_path}")
-                except: pass
+                # try:
+                #     debug_path = "debug_crop_failure.png"
+                #     # Save the ORIGINAL crop (we need to pass it or have reference, 'image' here is already processed/grayscale/inverted/masked)
+                #     # Actually 'image' at this point IS the processed mask if valid_colors was used.
+                #     # If we want to see why it failed, we should save it.
+                #     image.save(debug_path)
+                #     print(f"  > Zapisano obraz po filtrowaniu do: {debug_path}")
+                # except: pass
                 
                 return image, False, (0, 0, image.width, image.height)
 

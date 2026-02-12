@@ -75,6 +75,7 @@ class ReaderThread(threading.Thread):
         self.last_monitor_crops: Dict[int, Image.Image] = {}
 
         self.triggered_area_ids = set()
+        self.enabled_continuous_areas = set()  # Dla stałych obszarów (poza 1)
 
         self.ocr_scale = 1.0
         self.empty_threshold = 0.15
@@ -93,10 +94,24 @@ class ReaderThread(threading.Thread):
         self.current_unified_area = {'left': 0, 'top': 0, 'width': 0, 'height': 0}
 
     def trigger_area(self, area_id: int):
-        """Aktywuje jednorazowe pobranie i przetworzenie Obszaru o danym ID."""
+        """Aktywuje jednorazowe pobranie i przetworzenie Obszaru o danym ID (manual/triggered)."""
         self.triggered_area_ids.add(area_id)
-        # Znajdz indeks dla cropa? IDs are unique.
-        # W run() uzywamy area['id'] do identyfikacji
+
+    def toggle_continuous_area(self, area_id: int):
+        """Włącza lub wyłącza przetwarzanie stałego obszaru (continuous)."""
+        if area_id == 1:
+            return  # Obszar 1 jest zawsze włączony
+
+        if area_id in self.enabled_continuous_areas:
+            self.enabled_continuous_areas.remove(area_id)
+            print(f"Area {area_id} DISABLED")
+            if self.log_queue:
+                self.log_queue.put({"time": "INFO", "line_text": f"Area #{area_id} deactivated."})
+        else:
+            self.enabled_continuous_areas.add(area_id)
+            print(f"Area {area_id} ENABLED")
+            if self.log_queue:
+                self.log_queue.put({"time": "INFO", "line_text": f"Area #{area_id} activated."})
         
         if self.log_queue:
             self.log_queue.put({
@@ -279,6 +294,15 @@ class ReaderThread(threading.Thread):
 
         if not valid_areas: return
         
+        # Initialize enabled continuous areas from config
+        self.enabled_continuous_areas = set()
+        for area in valid_areas:
+            # Area 1 is always implicitly enabled, we only track others here for filtering?
+            # Actually, logic below says "if area_id != 1 and area_id not in self.enabled_continuous_areas: continue"
+            # So we MUST add enabled areas here.
+            if area.get('type') == 'continuous' and area.get('enabled', False):
+                self.enabled_continuous_areas.add(area.get('id'))
+
         monitors = [a['rect'] for a in valid_areas] # For Unified Calculation
 
         min_l = min(m['left'] for m in monitors)
@@ -327,6 +351,22 @@ class ReaderThread(threading.Thread):
                 t_start_proc = time.perf_counter()
                 
                 area_id = area_obj.get('id', idx)
+                area_rect = area_obj.get('rect')
+                area_type = area_obj.get('type', 'manual')
+
+                # Logika włączania/wyłączania obszarów
+                if area_type == 'manual':
+                     if area_id not in self.triggered_area_ids:
+                         continue
+                     self.triggered_area_ids.remove(area_id)
+                     # Clear last crop logic for manual might needed?
+                     self.last_monitor_crops.pop(idx, None)
+                elif area_type == 'continuous':
+                    # Obszar 1 zawsze aktywny, inne muszą być włączone
+                    if area_id != 1 and area_id not in self.enabled_continuous_areas:
+                        continue
+
+                rel_x, rel_y = area_rect['left'] - min_l, area_rect['top'] - min_t
                 area_rect = area_obj.get('rect')
                 
                 if area_obj.get('type') == 'manual':
