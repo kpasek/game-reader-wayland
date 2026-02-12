@@ -41,6 +41,9 @@ DEFAULT_PRESET_CONTENT = {
 }
 
 
+import shutil
+import datetime
+
 class ConfigManager:
     """Zarządza ładowaniem i zapisywaniem głównej konfiguracji aplikacji oraz presetów."""
 
@@ -49,6 +52,21 @@ class ConfigManager:
         self.preset_path = preset_path
         self.settings = DEFAULT_CONFIG.copy()
         self.load_app_config()
+
+    def backup_preset(self, path: str) -> Optional[str]:
+        """Tworzy kopię zapasową pliku preset z timestampem."""
+        if not path or not os.path.exists(path):
+            return None
+        
+        try:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_path = f"{path}.{timestamp}.bak"
+            shutil.copy2(path, backup_path)
+            print(f"Utworzono kopię zapasową ustawień: {backup_path}")
+            return backup_path
+        except Exception as e:
+            print(f"Błąd tworzenia kopii zapasowej: {e}")
+            return None
 
     def import_gr_preset(self, import_path: str, target_preset_path: str) -> bool:
         """

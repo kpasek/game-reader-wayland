@@ -40,6 +40,7 @@ from app.area_selector import AreaSelector, ColorSelector
 from app.area_manager import AreaManagerWindow
 from app.capture import capture_fullscreen
 from app.help import HelpWindow
+from app.optimizer import SettingsOptimizer
 
 # Global events/queues
 stop_event = threading.Event()
@@ -232,6 +233,8 @@ class LektorApp:
         preset_menu.add_command(label="Zmień folder audio", command=lambda: self.change_path('audio_dir'))
         preset_menu.add_command(label="Zmień plik napisów", command=lambda: self.change_path('text_file_path'))
         preset_menu.add_command(label="Importuj preset (Game Reader)", command=self.import_preset_dialog)
+        preset_menu.add_separator()
+        preset_menu.add_command(label="Wykryj optymalne ustawienia", command=self.detect_optimal_settings)
         menubar.add_cascade(label="Lektor", menu=preset_menu)
 
         main_area_menu = tk.Menu(menubar, tearoff=0)
@@ -913,6 +916,131 @@ class LektorApp:
             messagebox.showerror("Błąd", f"Wybór obszaru: {e}")
         finally:
             self.root.deiconify()
+
+    def detect_optimal_settings(self):
+        """
+        Uruchamia proces automatycznego wykrywania ustawień.
+        """
+        path = self.var_preset_full_path.get()
+        if not path or not os.path.exists(path):
+            messagebox.showinfo("Info", "Najpierw wybierz lub stwórz preset.")
+            return
+
+        # 1. Zrzut ekranu
+        self.root.withdraw()
+        time.sleep(0.3)
+        img = capture_fullscreen()
+        
+        if not img:
+            self.root.deiconify()
+            messagebox.showerror("Błąd", "Nie udało się pobrać zrzutu ekranu.")
+            return
+
+        try:
+            # 2. Wybór obszaru (rough area)
+            sel = AreaSelector(self.root, img)
+            
+            if not sel.geometry:
+                self.root.deiconify()
+                return # Anulowano
+            
+            rough_area = (
+                sel.geometry['left'], 
+                sel.geometry['top'], 
+                sel.geometry['width'], 
+                sel.geometry['height']
+            )
+
+            # 3. Pobranie bazy napisów
+            data = self.config_mgr.load_preset(path)
+            txt_path = data.get('text_file_path')
+            
+            if not txt_path or not os.path.exists(txt_path):
+                self.root.deiconify()
+                messagebox.showerror("Błąd", "Nie znaleziono pliku napisów w ustawieniach presetu.")
+                return
+                
+            subtitle_lines = self.config_mgr.load_text_lines(txt_path)
+            if not subtitle_lines:
+                self.root.deiconify()
+                messagebox.showerror("Błąd", "Plik napisów jest pusty.")
+                return
+
+            # 4. Uruchomienie algorytmu (pokazujemy okno czekania/loading)
+            # Dla uproszczenia w tkinterze, robimy to synchronicznie ale z update UI, 
+            # lub w osobnym wątku. Ponieważ tkinter nie lubi wątków dotykających UI,
+            # tutaj zrobimy proste okno "Proszę czekać..." i update.
+            
+            wait_win = tk.Toplevel(self.root)
+            wait_win.title("Przetwarzanie...")
+            wait_win.geometry("300x100")
+            ttk.Label(wait_win, text="Trwa analiza obrazu i szukanie ustawień...\nTo może potrwać chwilę.", justify="center").pack(expand=True)
+            wait_win.update()
+            
+            optimizer = SettingsOptimizer(self.config_mgr)
+            result = optimizer.optimize(img, rough_area, subtitle_lines)
+            
+            wait_win.destroy()
+            self.root.deiconify()
+            
+            score = result.get('score', 0)
+            if score < 50:
+                messagebox.showwarning("Wynik", f"Nie znaleziono dobrych ustawień.\nNajlepszy wynik: {score}")
+                return
+
+            best_settings = result.get('settings', {})
+            optimized_area = result.get('optimized_area')
+            
+            msg = (f"Znaleziono optymalne ustawienia (Score: {score:.1f})\n\n"
+                   f"Jasność: {best_settings.get('brightness_threshold')}\n"
+                   f"Kontrast: {best_settings.get('contrast')}\n"
+                   f"Skala OCR: {best_settings.get('ocr_scale_factor')}\n"
+                   f"Kolory: {best_settings.get('subtitle_colors')}\n"
+                   f"Tolerancja: {best_settings.get('color_tolerance')}\n\n"
+                   "Czy chcesz zastosować te ustawienia?")
+            
+            if messagebox.askyesno("Sukces", msg):
+                # 5. Kopia zapasowa
+                bkp = self.config_mgr.backup_preset(path)
+                if bkp:
+                    print(f"Kopia zapasowa: {bkp}")
+                
+                # 6. Zapis
+                # Aktualizujemy bieżące dane presetu o nowe wartości
+                data.update(best_settings)
+                
+                # Aktualizacja obszaru (jeśli znaleziono lepszy)
+                if optimized_area:
+                     ox, oy, ow, oh = optimized_area
+                     new_rect = {'left': ox, 'top': oy, 'width': ow, 'height': oh}
+                     
+                     areas = data.get('areas', [])
+                     a1 = next((a for a in areas if a.get('id') == 1), None)
+                     
+                     if a1:
+                         a1['rect'] = new_rect
+                         # Aktualizujemy też kolory w obszarze, aby były spójne
+                         a1['colors'] = best_settings.get('subtitle_colors', [])
+                     else:
+                         areas.insert(0, {
+                             "id": 1, 
+                             "type": "continuous", 
+                             "rect": new_rect, 
+                             "hotkey": "", 
+                             "colors": best_settings.get('subtitle_colors', [])
+                         })
+                     data['areas'] = areas
+
+                self.config_mgr.save_preset(path, data)
+                
+                # Przeładowanie GUI
+                self.on_preset_selected_from_combo(None)
+                messagebox.showinfo("Gotowe", "Ustawienia zostały zaktualizowane.")
+
+        except Exception as e:
+            self.root.deiconify()
+            print(f"Błąd optymalizacji: {e}")
+            messagebox.showerror("Błąd", f"Wystąpił błąd podczas optymalizacji: {e}")
 
 
 def main():
