@@ -50,18 +50,19 @@ class AreaManagerWindow(tk.Toplevel):
         self.btn_remove = ttk.Button(btn_frame, text="- Usuń", command=self._remove_area, state=tk.DISABLED)
         self.btn_remove.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
+        # Main Actions
+        action_frame = ttk.Frame(left_frame, padding=(0, 20, 0, 0))
+        action_frame.pack(fill=tk.X, side=tk.BOTTOM)
+        
+        ttk.Button(action_frame, text="Zapisz", command=self._save_and_close).pack(fill=tk.X, pady=2)
+        ttk.Button(action_frame, text="Anuluj", command=self.destroy).pack(fill=tk.X, pady=2)
+
         # Right side: Details
         self.right_frame = ttk.Labelframe(self, text="Szczegóły", padding=10)
         self.right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         # Content of details (initially hidden/disabled)
         self._init_details_form()
-
-        # Bottom buttons
-        bottom_frame = ttk.Frame(self, padding=5)
-        bottom_frame.pack(side=tk.BOTTOM, fill=tk.X)
-        ttk.Button(bottom_frame, text="Anuluj", command=self.destroy).pack(side=tk.RIGHT, padx=5)
-        ttk.Button(bottom_frame, text="Zapisz", command=self._save_and_close).pack(side=tk.RIGHT, padx=5)
 
     def _init_details_form(self):
         f = self.right_frame
@@ -98,13 +99,22 @@ class AreaManagerWindow(tk.Toplevel):
 
         # Colors
         ttk.Label(f, text="Kolory:").grid(row=5, column=0, sticky=tk.NW, pady=5)
-        self.lb_colors = tk.Listbox(f, height=5)
-        self.lb_colors.grid(row=5, column=1, sticky=tk.EW, pady=5)
+        self.cv_colors = tk.Canvas(f, height=40, bg="#dddddd", highlightthickness=1, highlightbackground="#999999")
+        self.cv_colors.grid(row=5, column=1, sticky=tk.EW, pady=5)
+        self.cv_colors.bind("<Button-1>", self._on_color_click)
         
         btn_col_frame = ttk.Frame(f)
         btn_col_frame.grid(row=6, column=0, columnspan=2, sticky=tk.EW)
-        ttk.Button(btn_col_frame, text="+ Dodaj Kolor", command=self._add_color).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(btn_col_frame, text="- Usuń", command=self._remove_color).pack(side=tk.LEFT, padx=5)
+        
+        # Color buttons row 1
+        c_row1 = ttk.Frame(btn_col_frame)
+        c_row1.pack(fill=tk.X)
+        ttk.Button(c_row1, text="+ Dodaj Kolor", command=self._add_color).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # Color buttons row 2
+        c_row2 = ttk.Frame(btn_col_frame)
+        c_row2.pack(fill=tk.X, pady=(2,0))
+        ttk.Button(c_row2, text="+ Dodaj Biały", command=self._add_white_color).pack(side=tk.LEFT, fill=tk.X, expand=True)
         
         # Bind events at the end to prevent AttributeError on early trigger
         self.cb_type.bind("<<ComboboxSelected>>", self._on_field_change)
@@ -136,7 +146,7 @@ class AreaManagerWindow(tk.Toplevel):
         self.var_type.set("")
         self.lbl_rect.config(text="-")
         self.var_hotkey.set("")
-        self.lb_colors.delete(0, tk.END)
+        self.cv_colors.delete("all")
         
         for child in self.right_frame.winfo_children():
             try:
@@ -146,7 +156,7 @@ class AreaManagerWindow(tk.Toplevel):
     def _load_details(self, idx):
         area = self.areas[idx]
         
-        # Enable all children
+        # Enable all children initially
         for child in self.right_frame.winfo_children():
             try:
                 child.configure(state=tk.NORMAL)
@@ -159,6 +169,14 @@ class AreaManagerWindow(tk.Toplevel):
         display_typ = self.type_mapping.get(typ, typ)
         self.var_type.set(display_typ)
         
+        # Handle Hotkey State based on type
+        if typ == 'continuous' or area.get('id') == 1:
+            self.entry_hotkey.config(state=tk.DISABLED)
+            self.btn_record.config(state=tk.DISABLED)
+        else:
+            self.entry_hotkey.config(state="readonly")
+            self.btn_record.config(state=tk.NORMAL)
+        
         r = area.get('rect', {})
         if r:
             self.lbl_rect.config(text=f"{r.get('left')}x{r.get('top')} ({r.get('width')}x{r.get('height')})")
@@ -167,9 +185,21 @@ class AreaManagerWindow(tk.Toplevel):
             
         self.var_hotkey.set(area.get('hotkey', ''))
         
-        self.lb_colors.delete(0, tk.END)
-        for c in area.get('colors', []):
-            self.lb_colors.insert(tk.END, str(c))
+        self.cv_colors.delete("all")
+        x_off = 5
+        y_off = 10
+        size = 20
+        colors = area.get('colors', [])
+        if not colors:
+             self.cv_colors.create_text(5, 20, text="(brak)", anchor=tk.W, fill="gray")
+        else:
+            for i, c in enumerate(colors):
+                tag = f"col_{i}"
+                try:
+                    self.cv_colors.create_rectangle(x_off, y_off, x_off+size, y_off+size, 
+                                                    fill=c, outline="black", tags=(tag, "clickable"))
+                    x_off += size + 5
+                except: pass
             
         # Area 1 special rules
         if area.get('id') == 1:
@@ -234,6 +264,15 @@ class AreaManagerWindow(tk.Toplevel):
         
         self.areas[self.current_selection_idx]['type'] = real_val
         self._refresh_list() # To update label
+        
+        # Update UI state
+        if real_val == 'continuous':
+            self.entry_hotkey.config(state=tk.DISABLED)
+            self.btn_record.config(state=tk.DISABLED)
+            # Clear hotkey if switching to continuous? Optional
+        else:
+            self.entry_hotkey.config(state="readonly")
+            self.btn_record.config(state=tk.NORMAL)
 
     def _select_area_on_screen(self):
         if self.current_selection_idx < 0: return
@@ -285,11 +324,11 @@ class AreaManagerWindow(tk.Toplevel):
                 self.deiconify()
                 return
                 
-            sel = ColorSelector(self, img)
+            sel = ColorSelector(self.master, img) # Use master (root) to ensure visibility
             # Waits
             if sel.selected_color:
                 # Add if not exists
-                current_colors = self.areas[self.current_selection_idx]['colors']
+                current_colors = self.areas[self.current_selection_idx].setdefault('colors', [])
                 if sel.selected_color not in current_colors:
                     current_colors.append(sel.selected_color)
                 self._load_details(self.current_selection_idx)
@@ -298,17 +337,39 @@ class AreaManagerWindow(tk.Toplevel):
         finally:
             self.deiconify()
 
-    def _remove_color(self):
-        sel_idx = self.lb_colors.curselection()
-        if not sel_idx: return
-        color = self.lb_colors.get(sel_idx[0])
+    def _add_white_color(self):
+        if self.current_selection_idx < 0: return
         
-        if self.current_selection_idx >= 0:
-            current_colors = self.areas[self.current_selection_idx]['colors']
-            if color in current_colors:
-                current_colors.remove(color)
-            self._load_details(self.current_selection_idx)
-            
+        current_colors = self.areas[self.current_selection_idx].setdefault('colors', [])
+        # '#FFFFFF' or maybe different format depending on app logic, assuming HEX
+        white = '#FFFFFF'
+        if white not in current_colors:
+            current_colors.append(white)
+        self._load_details(self.current_selection_idx)
+
+    def _on_color_click(self, event):
+        if self.current_selection_idx < 0: return
+        
+        item = self.cv_colors.find_closest(event.x, event.y)
+        tags = self.cv_colors.gettags(item)
+        
+        idx_to_remove = -1
+        for t in tags:
+            if t.startswith("col_"):
+                try:
+                    idx_to_remove = int(t.split("_")[1])
+                except: pass
+                break
+                
+        if idx_to_remove == -1: return
+        
+        current_colors = self.areas[self.current_selection_idx].get('colors', [])
+        if idx_to_remove < len(current_colors):
+            c = current_colors[idx_to_remove]
+            if messagebox.askyesno("Usuń Kolor", f"Czy usunąć kolor {c}?"):
+                del current_colors[idx_to_remove]
+                self._load_details(self.current_selection_idx)
+
     def _record_hotkey(self):
         if not keyboard:
             messagebox.showerror("Błąd", "Biblioteka pynput niedostępna.")

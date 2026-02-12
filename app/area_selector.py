@@ -37,32 +37,49 @@ class AreaSelector(tk.Toplevel):
         if existing_regions:
             for i, area_data in enumerate(existing_regions):
                 # area_data can be dict with rect, id, colors
+                # Handle nested rect or direct rect
                 r = area_data.get('rect') if isinstance(area_data, dict) else area_data
                 
-                if not r or not isinstance(r, dict): continue
+                # Normalize r to (x, y, w, h)
+                x, y, w, h = 0, 0, 0, 0
+                if isinstance(r, dict):
+                    x = r.get('left', r.get('x', 0))
+                    y = r.get('top', r.get('y', 0))
+                    w = r.get('width', r.get('w', 0))
+                    h = r.get('height', r.get('h', 0))
+                elif isinstance(r, (list, tuple)) and len(r) >= 4:
+                    x, y, w, h = r[0], r[1], r[2], r[3]
+                else:
+                    continue
                 
-                x, y, w, h = r['left'], r['top'], r['width'], r['height']
+                if w <= 0 or h <= 0: continue
                 
-                # Determine color
+                # Determine color (default blue if missing or invalid)
                 color = 'blue'
                 colors = area_data.get('colors', [])
-                if isinstance(area_data, dict) and colors:
-                    color = colors[0] # Primary color
+                if isinstance(area_data, dict) and colors and isinstance(colors, list) and len(colors) > 0:
+                     color = colors[0]
                 
                 # Draw rect
-                self.cv.create_rectangle(x, y, x + w, y + h, outline=color, width=2, dash=(4, 4))
-                
-                # Draw label background
-                aid = area_data.get('id', i+1) if isinstance(area_data, dict) else i+1
-                typ = area_data.get('type', '?') if isinstance(area_data, dict) else ""
-                
-                label_txt = f"Obszar #{aid}"
-                if typ: label_txt += f" ({typ})"
-                
-                self.cv.create_rectangle(x, y - 25, x + 120, y, fill=color, outline=color)
-                # Text contrast? Assuming white text is mostly fine on colored bg or blue default
-                self.cv.create_text(x + 5, y - 12, text=label_txt, fill="white", anchor=tk.W,
-                                    font=("Arial", 10, "bold"))
+                try:
+                    self.cv.create_rectangle(x, y, x + w, y + h, outline=color, width=2, dash=(4, 4))
+                    
+                    # Draw label
+                    aid = area_data.get('id', i+1) if isinstance(area_data, dict) else i+1
+                    typ = area_data.get('type', '') if isinstance(area_data, dict) else ""
+                    # Translate type for display
+                    if typ == "continuous": typ = "Stały"
+                    elif typ == "manual": typ = "Wyzwalany"
+                    
+                    label_txt = f"#{aid}"
+                    if typ: label_txt += f" {typ}"
+                    
+                    # Label bg
+                    self.cv.create_rectangle(x, y - 22, x + 80 + (len(typ)*6), y, fill=color, outline=color)
+                    # Label text (black outline for contrast if needed, or just white)
+                    self.cv.create_text(x + 5, y - 11, text=label_txt, fill="white", anchor=tk.W, font=("Arial", 10, "bold"))
+                except Exception as e:
+                    print(f"Error drawing region {i}: {e}")
 
         self.cv.bind("<ButtonPress-1>", self.on_press)
         self.cv.bind("<B1-Motion>", self.on_drag)
