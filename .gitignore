@@ -8,3 +8,7 @@ app_config.json
 dist
 .idea
 __pycache__
+
+*.png
+*.jpg
+*.log

@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, scrolledtext, font
+from tkinter import scrolledtext, font
 
 class HelpWindow(tk.Toplevel):
     def __init__(self, parent):

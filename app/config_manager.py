@@ -36,7 +36,8 @@ DEFAULT_PRESET_CONTENT = {
     "audio_speed_inc": 1.20,
     "text_thickening": 0,
     "subtitle_colors": [],
-    "color_tolerance": 10
+    "color_tolerance": 10,
+    "areas": []
 }
 
 
@@ -187,6 +188,10 @@ class ConfigManager:
                 if k not in data:
                     data[k] = v
 
+            # Migracja starej konfiguracji (monitor -> areas)
+            if not data.get('areas') and data.get('monitor'):
+                self._migrate_legacy_areas(data)
+
             base_dir = os.path.dirname(os.path.abspath(path))
             for key in ['audio_dir', 'text_file_path']:
                 if key in data and isinstance(data[key], str):
@@ -195,6 +200,36 @@ class ConfigManager:
             return data
         except Exception:
             return {}
+
+    def _migrate_legacy_areas(self, data: Dict[str, Any]):
+        """Konwertuje stare ustawienia 'monitor' i 'subtitle_colors' na nową strukturę 'areas'."""
+        monitors = data.get('monitor', [])
+        colors = data.get('subtitle_colors', [])
+        
+        new_areas = []
+
+        # Area 1 (Zawsze Continuous)
+        if len(monitors) > 0 and monitors[0]:
+            new_areas.append({
+                "id": 1,
+                "type": "continuous",
+                "rect": monitors[0],
+                "hotkey": "",
+                "colors": colors  # Przypisz globalne kolory do obszaru 1
+            })
+        
+        # Area 3 (W starym kodzie index 2 był "Area 3" - manualny)
+        # Zakładamy, że jeśli istniał, to był manualny (bo tak działał ReaderThread)
+        if len(monitors) > 2 and monitors[2]:
+            new_areas.append({
+                "id": 2, # Zmieniamy ID na kolejne wolne
+                "type": "manual",
+                "rect": monitors[2],
+                "hotkey": self.settings.get('hotkey_area3', '<f3>'), # Próbujemy pobrać stary hotkey
+                "colors": []
+            })
+            
+        data['areas'] = new_areas
 
     def save_preset(self, path: str, data: Dict[str, Any]):
         try:

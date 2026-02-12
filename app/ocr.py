@@ -9,7 +9,7 @@ from app.config_manager import ConfigManager
 try:
     import pytesseract
     from pytesseract import Output
-    from PIL import Image, ImageOps, ImageEnhance, ImageStat, ImageFilter, ImageChops
+    from PIL import Image, ImageOps, ImageEnhance, ImageFilter, ImageChops
 except ImportError:
     print("Brak biblioteki Pillow lub pytesseract.", file=sys.stderr)
     sys.exit(1)
@@ -18,6 +18,7 @@ from app.text_processing import smart_remove_name
 
 # Konfiguracja języka OCR
 OCR_LANGUAGE = 'pol'
+# Znaków na białej liście używamy w psm 6
 WHITELIST_CHARS = "aąbcćdeęfghijklłmnńoóprsśtuwyzźżAĄBCĆDEĘFGHIJKLŁMNŃOÓPRSŚTUWYZŹŻ0123456789.,:;-?!()[] "
 
 CONFIG_FILE_PATH = os.path.join(tempfile.gettempdir(), "lektor_ocr_config.txt")
@@ -92,7 +93,7 @@ def check_alignment(bbox: Tuple[int, int, int, int], width: int, align_mode: str
     return False
 
 
-def preprocess_image(image: Image.Image, config_manager: ConfigManager) -> Tuple[Image.Image, bool, Optional[Tuple[int, int, int, int]]]:
+def preprocess_image(image: Image.Image, config_manager: ConfigManager, override_colors: List[str] = None) -> Tuple[Image.Image, bool, Optional[Tuple[int, int, int, int]]]:
     """
     Zwraca krotkę: (przetworzony_obraz, czy_zawiera_tresc, bbox).
     """
@@ -103,9 +104,15 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager) -> Tuple
         align_mode = preset.get('text_alignment', "None")
         scale = preset.get("ocr_scale_factor", 0.5)
         contrast = preset.get("contract", 0)
-        subtitle_colors = preset.get("subtitle_colors", [])
+        subtitle_colors = override_colors if override_colors is not None else preset.get("subtitle_colors", [])
         thickening = preset.get("text_thickening", [])
         valid_colors = [c for c in subtitle_colors if c]
+
+        # Debug: Save original crop before processing
+        # if preset.get('save_debug_crops', True): # Default True for now to debug
+        #     try:
+        #         image.save("debug_raw_crop.png")
+        #     except: pass
 
         if valid_colors:
             tolerance = preset.get("color_tolerance", 10)
@@ -113,8 +120,8 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager) -> Tuple
             if thickening > 0:
                 filter_size = (thickening * 2) + 1
                 image = image.filter(ImageFilter.MaxFilter(filter_size))
-            if preset.get('show_debug', False):
-                image.save("debug_img.png")
+            # if preset.get('show_debug', False):
+            #     image.save("debug_img.png")
             text_color = "Light"
 
         if contrast != 0 and not valid_colors:
@@ -156,7 +163,22 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager) -> Tuple
                 else:
                     crop_box = (0, 0, image.width, image.height)
             else:
-                print("Nie wykryto napisów.")
+                extrema = image.getextrema()
+                max_val = extrema[1] if isinstance(extrema, tuple) else '?'
+                print(f"Nie wykryto napisów. (Max jasność: {max_val}, Próg: {brightness_threshold})")
+                print(f"  > Szukane kolory: {valid_colors}")
+                print(f"  > Tolerancja: {preset.get('color_tolerance', 10)}")
+                
+                # Zrzut obrazu wejściowego dla celów diagnostycznych
+                # try:
+                #     debug_path = "debug_crop_failure.png"
+                #     # Save the ORIGINAL crop (we need to pass it or have reference, 'image' here is already processed/grayscale/inverted/masked)
+                #     # Actually 'image' at this point IS the processed mask if valid_colors was used.
+                #     # If we want to see why it failed, we should save it.
+                #     image.save(debug_path)
+                #     print(f"  > Zapisano obraz po filtrowaniu do: {debug_path}")
+                # except: pass
+                
                 return image, False, (0, 0, image.width, image.height)
 
         except Exception as e:

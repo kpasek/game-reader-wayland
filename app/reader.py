@@ -5,6 +5,7 @@ import queue
 from collections import deque
 from datetime import datetime
 from typing import Optional, Tuple, Dict, Any, List
+# ImageChops jest wykorzystywany w funkcji _images_are_similar, a ImageStat w tej samej funkcji.
 from PIL import Image, ImageChops, ImageStat, ImageOps, ImageFilter
 
 from app.capture import capture_region
@@ -73,7 +74,8 @@ class ReaderThread(threading.Thread):
         self.img_queue = None
         self.last_monitor_crops: Dict[int, Image.Image] = {}
 
-        self.area3_triggered = False
+        self.triggered_area_ids = set()
+        self.enabled_continuous_areas = set()  # Dla stałych obszarów (poza 1)
 
         self.ocr_scale = 1.0
         self.empty_threshold = 0.15
@@ -91,20 +93,36 @@ class ReaderThread(threading.Thread):
 
         self.current_unified_area = {'left': 0, 'top': 0, 'width': 0, 'height': 0}
 
-    def trigger_area_3(self):
-        """Aktywuje jednorazowe pobranie i przetworzenie Obszaru 3."""
-        self.area3_triggered = True
+    def trigger_area(self, area_id: int):
+        """Aktywuje jednorazowe pobranie i przetworzenie Obszaru o danym ID (manual/triggered)."""
+        self.triggered_area_ids.add(area_id)
 
-        self.last_monitor_crops.pop(2, None)
+    def toggle_continuous_area(self, area_id: int):
+        """Włącza lub wyłącza przetwarzanie stałego obszaru (continuous)."""
+        if area_id == 1:
+            return  # Obszar 1 jest zawsze włączony
 
+        if area_id in self.enabled_continuous_areas:
+            self.enabled_continuous_areas.remove(area_id)
+            print(f"Area {area_id} DISABLED")
+            if self.log_queue:
+                self.log_queue.put({"time": "INFO", "line_text": f"Area #{area_id} deactivated."})
+        else:
+            self.enabled_continuous_areas.add(area_id)
+            print(f"Area {area_id} ENABLED")
+            if self.log_queue:
+                self.log_queue.put({"time": "INFO", "line_text": f"Area #{area_id} activated."})
+        
         if self.log_queue:
             self.log_queue.put({
                 "time": datetime.now().strftime('%H:%M:%S'),
                 "ocr": "SYSTEM", "match": None,
-                "line_text": "Wyzwołano jednorazowy odczyt Obszaru 3", "stats": {}
+                "line_text": f"Wyzwołano jednorazowy odczyt Obszaru {area_id}", "stats": {}
             })
 
-    def _scale_monitor_areas(self, monitors: List[Dict], original_res_str: str) -> List[Dict]:
+
+    def _scale_monitor_areas_legacy(self, monitors: List[Dict], original_res_str: str) -> List[Dict]:
+        """Original Implementation for Reference"""
         if not self.target_resolution or not original_res_str: return monitors
         try:
             orig_w, orig_h = map(int, original_res_str.lower().split('x'))
@@ -116,29 +134,93 @@ class ReaderThread(threading.Thread):
         except:
             return monitors
 
-    def _get_fast_text_bounds(self, image: Image.Image, padding: int = 6) -> Optional[Tuple[int, int, int, int]]:
-        try:
-            if image.mode != 'L':
-                img_l = image.convert('L')
-            else:
-                img_l = image
-            filtered = img_l.filter(ImageFilter.MaxFilter(3))
-            inverted = ImageOps.invert(filtered)
-            bbox = inverted.getbbox()
+    def _scale_monitor_areas(self, monitors: List[Dict], original_res_str: str) -> List[Dict]:
+        """
+        Scales area coordinates from the original preset resolution to the actual capture resolution.
+        """
+        from app.capture import capture_fullscreen
+        
+        # Try to determine physical resolution
+        if not hasattr(self, '_physical_res'):
+            self._physical_res = None
+            
+            # Try capture ONCE to get real physical pixels (important for HiDPI)
+            # If it fails, we fall back to target_resolution immediately without waiting.
+            try:
+                img = capture_fullscreen()
+                if img:
+                    self._physical_res = img.size
+            except:
+                pass
+            
+            # If capture failed, we leave _physical_res as None and let the 
+            # fallback logic below handle the priority (Original > Target)
 
-            if not bbox:
-                return None
+        # Debug logging for resolution detection
+        if self.log_queue and not hasattr(self, '_logged_res'):
+             self._logged_res = True
+             res = getattr(self, '_physical_res', 'None')
+             msg = f"Resolution Debug: Physical={res}, Target={self.target_resolution}, Preset={original_res_str}"
+             self.log_queue.put({"time": "INFO", "line_text": msg})
+             # Force log to file as well for debugging
+             try:
+                 with open("session_debug.log", "a") as f:
+                     f.write(f"{datetime.now()} {msg}\n")
+             except: pass
 
-            l, t, r, b = bbox
-            w, h = image.size
-            l = max(0, l - padding)
-            t = max(0, t - padding)
-            r = min(w, r + padding)
-            b = min(h, b + padding)
+        dest_w, dest_h = self._physical_res if getattr(self, '_physical_res', None) else (None, None)
+        
+        # Parse original resolution
+        orig_w, orig_h = None, None
+        if original_res_str:
+            try:
+                orig_w, orig_h = map(int, original_res_str.lower().split('x'))
+            except:
+                pass
 
-            return (l, t, r, b)
-        except Exception:
-            return None
+        # Fallback Logic if Physical Capture failed
+        if not dest_w or not dest_h:
+             if orig_w and orig_h:
+                 # Assume same as preset
+                 dest_w, dest_h = orig_w, orig_h
+             elif self.target_resolution:
+                 # Only use target if we really don't know original
+                 dest_w, dest_h = self.target_resolution
+             else:
+                 return monitors
+        
+        # HiDPI Heuristic Logic
+        # Detect if we have a mismatch between Detected (Logical) and Preset (Physical) resolution
+        if orig_w and orig_h and dest_w and dest_h:
+            target_w = self.target_resolution[0] if self.target_resolution else 0
+            
+            # Check if this looks like a fractional scaling artifact (e.g. 1.5x which is 3840->2560)
+            # Common scaling factors: 1.25, 1.5, 1.75.
+            # Ratios like 2.0 (1920x1080) are ambiguous (could be genuine 1080p screen),
+            # but 1.5 (2560x1440) is almost certainly HiDPI scaling on a 4K panel.
+            ratio_w = orig_w / dest_w
+            is_fractional_scale = abs(ratio_w - 1.5) < 0.05 or abs(ratio_w - 1.25) < 0.05 or abs(ratio_w - 1.75) < 0.05
+            
+            # Use stricter condition: Detected matches Target (Logical) AND (Detected < Preset) AND (Fractional Scale OR User forced via config?)
+            # For now, explicit fractional scale detection is safest to avoid breaking 1080p users.
+            
+            if (orig_w > dest_w) and (target_w and abs(dest_w - target_w) < 50) and is_fractional_scale:
+                 if self.log_queue and not hasattr(self, '_logged_hidpi'):
+                    self._logged_hidpi = True
+                    msg = f"HiDPI Scaling Trap Detected (Ratio {ratio_w:.2f})! Overriding detected {dest_w}x{dest_h} with Preset {orig_w}x{orig_h}"
+                    self.log_queue.put({"time": "WARN", "line_text": msg})
+                    try:
+                       with open("session_debug.log", "a") as f: f.write(f"{datetime.now()} {msg}\n")
+                    except: pass
+                 dest_w, dest_h = orig_w, orig_h
+        
+        if not orig_w or not orig_h: return monitors
+        
+        if (orig_w, orig_h) == (dest_w, dest_h): return monitors
+        
+        sx, sy = dest_w / orig_w, dest_h / orig_h
+        return [{'left': int(m['left'] * sx), 'top': int(m['top'] * sy),
+                 'width': int(m['width'] * sx), 'height': int(m['height'] * sy)} for m in monitors]
 
     def _images_are_similar(self, img1: Image.Image, img2: Image.Image, similarity: float) -> bool:
         if similarity == 0: return False
@@ -174,10 +256,48 @@ class ReaderThread(threading.Thread):
         min_line_len = preset.get('min_line_length', 0)
         precomputed_data = precompute_subtitles(raw_subtitles, min_line_len) if raw_subtitles else ([], {})
 
-        raw_monitors = preset.get('monitor', [])
-        if isinstance(raw_monitors, dict): raw_monitors = [raw_monitors]
-        monitors = self._scale_monitor_areas([m for m in raw_monitors if m], preset.get('resolution'))
-        if not monitors: return
+        # --- LOAD AREAS ---
+        areas_config = preset.get('areas', [])
+        monitors = [] # List of rects for unified calc
+        
+        # If old config (no 'areas'), usage fallback (should be migrated but just in case)
+        if not areas_config and preset.get('monitor'):
+             raw_monitors = preset.get('monitor', [])
+             if isinstance(raw_monitors, dict): raw_monitors = [raw_monitors]
+             # Create dummy area objects
+             for i, m in enumerate(raw_monitors):
+                 if not m: continue
+                 areas_config.append({
+                     "id": i+1,
+                     "type": "manual" if i == 2 else "continuous",
+                     "rect": m,
+                     "colors": preset.get("subtitle_colors", []) if i==0 else []
+                 })
+
+        # Scale areas
+        valid_areas = []
+        for area in areas_config:
+            r = area.get('rect')
+            if not r: continue
+            
+            # Scale rect
+            scaled_list = self._scale_monitor_areas([r], preset.get('resolution'))
+            if scaled_list:
+                area['rect'] = scaled_list[0]
+                valid_areas.append(area)
+
+        if not valid_areas: return
+        
+        # Initialize enabled continuous areas from config
+        self.enabled_continuous_areas = set()
+        for area in valid_areas:
+            # Area 1 is always implicitly enabled, we only track others here for filtering?
+            # Actually, logic below says "if area_id != 1 and area_id not in self.enabled_continuous_areas: continue"
+            # So we MUST add enabled areas here.
+            if area.get('type') == 'continuous' and area.get('enabled', False):
+                self.enabled_continuous_areas.add(area.get('id'))
+
+        monitors = [a['rect'] for a in valid_areas] # For Unified Calculation
 
         min_l = min(m['left'] for m in monitors)
         min_t = min(m['top'] for m in monitors)
@@ -221,30 +341,51 @@ class ReaderThread(threading.Thread):
                 except queue.Empty:
                     pass
 
-            for idx, area in enumerate(monitors):
+            for idx, area_obj in enumerate(valid_areas):
                 t_start_proc = time.perf_counter()
+                
+                area_id = area_obj.get('id', idx)
+                area_rect = area_obj.get('rect')
+                area_type = area_obj.get('type', 'manual')
 
-                if idx == 2:
-                    if not self.area3_triggered:
+                # Logika włączania/wyłączania obszarów
+                if area_type == 'manual':
+                     if area_id not in self.triggered_area_ids:
+                         continue
+                     self.triggered_area_ids.remove(area_id)
+                     # Clear last crop logic for manual might needed?
+                     self.last_monitor_crops.pop(idx, None)
+                elif area_type == 'continuous':
+                    # Obszar 1 zawsze aktywny, inne muszą być włączone
+                    if area_id != 1 and area_id not in self.enabled_continuous_areas:
                         continue
-                    self.area3_triggered = False
 
-                rel_x, rel_y = area['left'] - min_l, area['top'] - min_t
-                crop = full_img.crop((rel_x, rel_y, rel_x + area['width'], rel_y + area['height']))
+                rel_x, rel_y = area_rect['left'] - min_l, area_rect['top'] - min_t
+                area_rect = area_obj.get('rect')
+                
+                if area_obj.get('type') == 'manual':
+                     if area_id not in self.triggered_area_ids:
+                         continue
+                     self.triggered_area_ids.remove(area_id)
+                     # Clear last crop logic for manual might needed?
+                     self.last_monitor_crops.pop(idx, None)
+
+                rel_x, rel_y = area_rect['left'] - min_l, area_rect['top'] - min_t
+                crop = full_img.crop((rel_x, rel_y, rel_x + area_rect['width'], rel_y + area_rect['height']))
 
                 last_crop = self.last_monitor_crops.get(idx)
                 if self._images_are_similar(crop, last_crop, similarity):
-                    print("images are similar")
+                    # print("images are similar")
                     continue
                 self.last_monitor_crops[idx] = crop.copy()
 
                 t_pre_start = time.perf_counter()
 
-                # Przekazanie parametru density_threshold
-                processed, has_content, crop_bbox = preprocess_image(crop, self.config_manager)
+                # Przekazanie parametru density_threshold + COLORS
+                processed, has_content, crop_bbox = preprocess_image(crop, self.config_manager, override_colors=area_obj.get('colors'))
 
                 if not has_content:
-                    print("images has no content")
+                    # print("images has no content")
                     continue
 
                 t_pre = (time.perf_counter() - t_pre_start) * 1000
@@ -255,16 +396,16 @@ class ReaderThread(threading.Thread):
                 t_ocr = (time.perf_counter() - t_ocr_start) * 1000
 
                 if not text:
-                    print("images has no text")
+                    # print("images has no text")
                     continue
 
                 if len(text) < 2 or text in self.last_ocr_texts:
-                    print("last ocr filter")
+                    # print("last ocr filter")
                     continue
 
                 if has_content and crop_bbox and self.debug_queue:
-                    abs_x = area['left'] + crop_bbox[0]
-                    abs_y = area['top'] + crop_bbox[1]
+                    abs_x = area_rect['left'] + crop_bbox[0]
+                    abs_y = area_rect['top'] + crop_bbox[1]
 
                     abs_w = crop_bbox[2] - crop_bbox[0]
                     abs_h = crop_bbox[3] - crop_bbox[1]
@@ -285,7 +426,7 @@ class ReaderThread(threading.Thread):
                         "time": datetime.now().strftime('%H:%M:%S.%f')[:-3],
                         "ocr": text, "match": match, "line_text": line_txt,
                         "stats": {
-                            "monitor": idx + 1,
+                            "monitor": f"#{area_id}",
                             "cap_ms": t_cap,
                             "pre_ms": t_pre,
                             "ocr_ms": t_ocr,
@@ -296,7 +437,7 @@ class ReaderThread(threading.Thread):
                     if self.save_logs:
                         with open("session_log.txt", "a", encoding='utf-8') as f:
                             match_str = f"MATCH({match[1]}%): {line_txt}" if match else "NO MATCH"
-                            log_line = (f"{log_entry['time']} | M{idx + 1} | "
+                            log_line = (f"{log_entry['time']} | A{area_id} | "
                                         f"Cap:{t_cap:.0f}ms | Pre:{t_pre:.0f}ms | OCR:{t_ocr:.0f}ms | Match:{t_match:.0f}ms | "
                                         f"'{text}' | {match_str}\n")
                             f.write(log_line)

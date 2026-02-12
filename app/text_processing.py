@@ -51,9 +51,9 @@ def clean_text(text: str) -> str:
     if not text:
         return ""
 
-    # 4. Rygorystyczne usuwanie krótkich słów (szumu)
+    # 4. Rygorystyczne usuwanie krótkich słów (szumu), z poszanowaniem krótkich słów kluczowych
     words = text.split()
-    cleaned_words = [w for w in words if len(w) > 2]
+    cleaned_words = [w for w in words if len(w) > 2 or w in VALID_SHORT_WORDS]
 
     if not cleaned_words:
         return ""

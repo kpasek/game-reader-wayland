@@ -42,7 +42,7 @@ class KWinSpectacleWrapper:
                 check=True,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                timeout=3
+                timeout=10
             )
 
             if not os.path.exists(temp_path):
