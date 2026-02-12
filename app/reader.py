@@ -116,30 +116,6 @@ class ReaderThread(threading.Thread):
         except:
             return monitors
 
-    def _get_fast_text_bounds(self, image: Image.Image, padding: int = 6) -> Optional[Tuple[int, int, int, int]]:
-        try:
-            if image.mode != 'L':
-                img_l = image.convert('L')
-            else:
-                img_l = image
-            filtered = img_l.filter(ImageFilter.MaxFilter(3))
-            inverted = ImageOps.invert(filtered)
-            bbox = inverted.getbbox()
-
-            if not bbox:
-                return None
-
-            l, t, r, b = bbox
-            w, h = image.size
-            l = max(0, l - padding)
-            t = max(0, t - padding)
-            r = min(w, r + padding)
-            b = min(h, b + padding)
-
-            return (l, t, r, b)
-        except Exception:
-            return None
-
     def _images_are_similar(self, img1: Image.Image, img2: Image.Image, similarity: float) -> bool:
         if similarity == 0: return False
         if img1 is None or img2 is None: return False

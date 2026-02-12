@@ -9,7 +9,7 @@ from app.config_manager import ConfigManager
 try:
     import pytesseract
     from pytesseract import Output
-    from PIL import Image, ImageOps, ImageEnhance, ImageStat, ImageFilter, ImageChops
+    from PIL import Image, ImageOps, ImageEnhance, ImageFilter
 except ImportError:
     print("Brak biblioteki Pillow lub pytesseract.", file=sys.stderr)
     sys.exit(1)
@@ -21,12 +21,10 @@ OCR_LANGUAGE = 'pol'
 WHITELIST_CHARS = "aąbcćdeęfghijklłmnńoóprsśtuwyzźżAĄBCĆDEĘFGHIJKLŁMNŃOÓPRSŚTUWYZŹŻ0123456789.,:;-?!()[] "
 
 CONFIG_FILE_PATH = os.path.join(tempfile.gettempdir(), "lektor_ocr_config.txt")
-HAS_CONFIG_FILE = False
 
 try:
     with open(CONFIG_FILE_PATH, "w", encoding="utf-8") as f:
         f.write(f"tessedit_char_whitelist {WHITELIST_CHARS}")
-    HAS_CONFIG_FILE = True
 except Exception as e:
     print(f"Ostrzeżenie: Nie udało się utworzyć pliku config dla OCR: {e}", file=sys.stderr)
 

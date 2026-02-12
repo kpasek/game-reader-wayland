@@ -11,7 +11,7 @@ from typing import Optional
 
 try:
     import tkinter as tk
-    from tkinter import ttk, filedialog, messagebox, scrolledtext, font
+    from tkinter import ttk, filedialog, messagebox, font
 except ImportError:
     print("Błąd: Brak biblioteki tkinter.", file=sys.stderr)
     sys.exit(1)
@@ -47,8 +47,6 @@ log_queue = queue.Queue()
 debug_queue = queue.Queue()
 
 APP_VERSION = "v1.2.1"
-STANDARD_WIDTH = 3840
-STANDARD_HEIGHT = 2160
 
 
 class LektorApp:
