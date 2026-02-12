@@ -45,16 +45,22 @@ class LogWindow(tk.Toplevel):
             msg = f"[{timestamp}] {line_text}\n"
             msg += "-" * 40 + "\n"
         else:
-            msg = f"[{timestamp}] OCR: {ocr}\n"
+            mon_info = ""
             if stats:
                 mon = stats.get('monitor', '?')
+                # stats['monitor'] is usually "#1", so display becomes "[Obszar #1] "
+                mon_info = f"[Obszar {mon}] "
+
+            msg = f"[{timestamp}] {mon_info}OCR: {ocr}\n"
+            if stats:
+                mon = stats.get('monitor', '?') # Kept variable if needed, but not used in msg below
                 t_cap = stats.get('cap_ms', 0)
                 t_pre = stats.get('pre_ms', 0)
                 t_ocr = stats.get('ocr_ms', 0)
                 t_match = stats.get('match_ms', 0)
 
                 # Bardziej zwarty format
-                msg += f"   [M{mon} | Cap:{t_cap:.0f} | Pre:{t_pre:.0f} | OCR:{t_ocr:.0f} | Match:{t_match:.0f} ms]\n"
+                msg += f"   [Czasy: Cap:{t_cap:.0f} | Pre:{t_pre:.0f} | OCR:{t_ocr:.0f} | Match:{t_match:.0f} ms]\n"
 
             if match:
                 msg += f"   >>> MATCH ({match[1]}%): {line_text}\n"

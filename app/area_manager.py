@@ -328,10 +328,18 @@ class AreaManagerWindow(tk.Toplevel):
             sel = ColorSelector(self.master, img) # Use master (root) to ensure visibility
             # Waits
             if sel.selected_color:
-                # Add if not exists
+                # Add if not exists (case insensitive check)
+                new_col = sel.selected_color
                 current_colors = self.areas[self.current_selection_idx].setdefault('colors', [])
-                if sel.selected_color not in current_colors:
-                    current_colors.append(sel.selected_color)
+                
+                exists = False
+                for c in current_colors:
+                    if c.lower() == new_col.lower():
+                        exists = True
+                        break
+                
+                if not exists:
+                    current_colors.append(new_col)
                 self._load_details(self.current_selection_idx)
         except Exception as e:
             print(f"Error picking color: {e}")
@@ -342,9 +350,15 @@ class AreaManagerWindow(tk.Toplevel):
         if self.current_selection_idx < 0: return
         
         current_colors = self.areas[self.current_selection_idx].setdefault('colors', [])
-        # '#FFFFFF' or maybe different format depending on app logic, assuming HEX
-        white = '#FFFFFF'
-        if white not in current_colors:
+        white = '#ffffff'
+        
+        exists = False
+        for c in current_colors:
+            if c.lower() == white.lower():
+                exists = True
+                break
+                
+        if not exists:
             current_colors.append(white)
         self._load_details(self.current_selection_idx)
 
