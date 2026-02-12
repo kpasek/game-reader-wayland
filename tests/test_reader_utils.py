@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from PIL import Image, ImageChops
 from app.reader import ReaderThread
 
@@ -13,13 +13,22 @@ def reader_thread():
 def test_scale_monitor_areas_no_change(reader_thread):
     monitors = [{'left': 0, 'top': 0, 'width': 3840, 'height': 2160}]
     # Original is same as target
-    scaled = reader_thread._scale_monitor_areas(monitors, "3840x2160")
+    # patch capture_fullscreen to avoid MagicMock unpacking error if mocked globally,
+    # or to control return value.
+    with patch('app.capture.capture_fullscreen', return_value=None):
+        scaled = reader_thread._scale_monitor_areas(monitors, "3840x2160")
     assert scaled[0] == monitors[0]
 
 def test_scale_monitor_areas_scaling(reader_thread):
     # Original 1920x1080 -> Target 3840x2160 (2x)
     monitors = [{'left': 100, 'top': 50, 'width': 200, 'height': 100}]
-    scaled = reader_thread._scale_monitor_areas(monitors, "1920x1080")
+    
+    # We must simulate Physical detection of 4K to trigger upscaling
+    mock_img = MagicMock()
+    mock_img.size = (3840, 2160)
+    
+    with patch('app.capture.capture_fullscreen', return_value=mock_img):
+        scaled = reader_thread._scale_monitor_areas(monitors, "1920x1080")
     
     assert scaled[0]['left'] == 200
     assert scaled[0]['top'] == 100
@@ -29,7 +38,8 @@ def test_scale_monitor_areas_scaling(reader_thread):
 def test_scale_monitor_areas_bad_input(reader_thread):
     monitors = [{'left': 10}]
     # Bad resolution string
-    res = reader_thread._scale_monitor_areas(monitors, "invalid")
+    with patch('app.capture.capture_fullscreen', return_value=None):
+        res = reader_thread._scale_monitor_areas(monitors, "invalid")
     assert res == monitors
 
 def test_images_are_similar(reader_thread):
@@ -51,5 +61,5 @@ def test_images_are_similar(reader_thread):
     assert reader_thread._images_are_similar(img1, img4, similarity=20.0) is True
 
 def test_trigger_area_3(reader_thread):
-    reader_thread.trigger_area_3()
-    assert reader_thread.area3_triggered is True
+    reader_thread.trigger_area(3)
+    assert 3 in reader_thread.triggered_area_ids

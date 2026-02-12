@@ -882,7 +882,7 @@ class LektorApp:
                 existing = data.get('areas', [])
 
             sel = AreaSelector(self.root, img, existing_regions=existing)
-            self.root.wait_window(sel)
+            # AreaSelector is modal and waits inside its __init__, so no external wait needed.
             
             if sel.geometry and path:
                  data = self.config_mgr.load_preset(path)

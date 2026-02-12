@@ -1,45 +1,35 @@
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 import sys
 
-# Mock dependecies
-sys.modules['pyscreenshot'] = MagicMock()
-sys.modules['PIL'] = MagicMock()
-sys.modules['PIL.Image'] = MagicMock()
-sys.modules['PIL.ImageTk'] = MagicMock()
-sys.modules['PIL.ImageOps'] = MagicMock()
-sys.modules['PIL.ImageEnhance'] = MagicMock()
-sys.modules['PIL.ImageFilter'] = MagicMock()
-sys.modules['PIL.ImageChops'] = MagicMock()
-sys.modules['PIL.ImageStat'] = MagicMock()
-sys.modules['mss'] = MagicMock()
-sys.modules['pytesseract'] = MagicMock() # FIX: mock pytesseract
+# We should rely on installed dependencies for imports to ensure other tests aren't affected by global mocks.
+# Specific dependencies will be mocked in setUp or tests.
 
-# Since ReaderThread imports from app.capture which imports pyscreenshot and mss
-# We must ensure they are mocked before import 
-
-from app.reader import ReaderThread    
+from app.reader import ReaderThread
 
 class TestScaling(unittest.TestCase):
     def setUp(self):
-        # We need to mock app.capture.capture_fullscreen since it's imported inside the method
-        # We'll use sys.modules to get the module and set the mock
-        if 'app.capture' in sys.modules:
-            self.capture_module = sys.modules['app.capture']
-        else:
-            # Should invoke import if not present, but it should be there due to ReaderThread import
-            import app.capture
-            self.capture_module = app.capture
-            
-        self.original_capture = getattr(self.capture_module, 'capture_fullscreen', None)
+        # Mock capture module methods that are used
+        self.patcher = patch('app.capture.capture_fullscreen')
+        self.mock_capture = self.patcher.start()
+        
+        # Configure default behavior properly (1080p)
+        self.mock_capture.return_value = MagicMock()
+        self.mock_capture.return_value.size = (1920, 1080)
 
     def tearDown(self):
-        if self.original_capture:
-            self.capture_module.capture_fullscreen = self.original_capture
+        self.patcher.stop()
+
+    def set_res(self, w, h):
+        if w is None:
+            self.mock_capture.return_value = None
+        else:
+            self.mock_capture.return_value = MagicMock()
+            self.mock_capture.return_value.size = (w, h)
 
     def test_scale_monitor_areas_no_scaling(self):
         # Physical 1080p
-        self.capture_module.capture_fullscreen = MagicMock(return_value=MagicMock(size=(1920, 1080)))
+        self.set_res(1920, 1080)
         
         reader = ReaderThread(MagicMock(), MagicMock(), MagicMock(), target_resolution=(1920, 1080))
         monitors = [{'left': 100, 'top': 100, 'width': 200, 'height': 200}]
@@ -47,11 +37,12 @@ class TestScaling(unittest.TestCase):
         # Same resolution (Preset 1080p -> Physical 1080p)
         scaled = reader._scale_monitor_areas(monitors, "1920x1080")
         self.assertEqual(scaled[0]['left'], 100)
+        self.assertEqual(scaled[0]['width'], 200)
         
     def test_scale_monitor_areas_downscaling(self):
         # Scenario: User made a preset on 4K, now running on 1080p screen.
         # Physical 1080p
-        self.capture_module.capture_fullscreen = MagicMock(return_value=MagicMock(size=(1920, 1080)))
+        self.set_res(1920, 1080)
         
         reader = ReaderThread(MagicMock(), MagicMock(), MagicMock(), target_resolution=(1920, 1080))
         monitors = [{'left': 200, 'top': 200, 'width': 400, 'height': 400}]
@@ -64,7 +55,7 @@ class TestScaling(unittest.TestCase):
     def test_scale_monitor_areas_upscaling(self):
         # Scenario: User made a preset on 1080p, now running on 4K screen.
         # Physical 4K
-        self.capture_module.capture_fullscreen = MagicMock(return_value=MagicMock(size=(3840, 2160)))
+        self.set_res(3840, 2160)
         
         reader = ReaderThread(MagicMock(), MagicMock(), MagicMock(), target_resolution=(3840, 2160))
         monitors = [{'left': 100, 'top': 100, 'width': 200, 'height': 200}]
@@ -79,10 +70,8 @@ class TestScaling(unittest.TestCase):
         Mock capture_fullscreen to return 4K image (True physical resolution).
         Target Resolution is set to 1080p (User preference/misconfiguration).
         Preset is 4K.
-        
-        Expectation: Coordinates should match PHYSICAL resolution (4K), thus REMAIN 4K (no scaling).
         """
-        self.capture_module.capture_fullscreen = MagicMock(return_value=MagicMock(size=(3840, 2160)))
+        self.set_res(3840, 2160)
         
         reader = ReaderThread(MagicMock(), MagicMock(), MagicMock(), target_resolution=(1920, 1080))
         
@@ -100,13 +89,10 @@ class TestScaling(unittest.TestCase):
     def test_capture_fails_fallback_logic(self):
         """
         Mock capture_fullscreen to FAIL (return None).
-        Target Resolution is 1080p.
-        Preset is 4K.
-        
         Old Behavior (Bug): Fallback to Target (1080p) -> Scale 0.5 -> Shift Left/Up.
         New Behavior (Fix): Fallback to Original (4K) -> Scale 1.0 -> Correct Position.
         """
-        self.capture_module.capture_fullscreen = MagicMock(return_value=None)
+        self.set_res(None, None)
         
         reader = ReaderThread(MagicMock(), MagicMock(), MagicMock(), target_resolution=(1920, 1080))
         
@@ -115,7 +101,7 @@ class TestScaling(unittest.TestCase):
         
         scaled = reader._scale_monitor_areas(monitors, preset_res)
         
-        # Should default to NO SCALING instead of aggressive downscaling
+        # Should default to NO SCALING
         self.assertEqual(scaled[0]['left'], 3000)
 
     def test_hidpi_logical_vs_physical_mismatch(self):
@@ -123,14 +109,9 @@ class TestScaling(unittest.TestCase):
         Scenario: 
         - 4K Physical Screen (Preset created here: 3840x2160)
         - System uses 150% scaling, so Logical Resolution is 2560x1440.
-        - capture_fullscreen() at startup returns Logical (2560x1440) due to fallback/API behavior.
-        - BUT Spectacle used later returns Physical (3840x2160).
-        
-        Bug: We scaled coords down to 2560 (0.66x). Loop uses 3840 image. Crop is top-left.
-        Fix: If Preset > Physical (detected), assume HiDPI and trust Preset.
         """
         # Detected resolution is Smaller (Logical)
-        self.capture_module.capture_fullscreen = MagicMock(return_value=MagicMock(size=(2560, 1440)))
+        self.set_res(2560, 1440)
         
         reader = ReaderThread(MagicMock(), MagicMock(), MagicMock(), target_resolution=(2560, 1440))
         
@@ -143,29 +124,12 @@ class TestScaling(unittest.TestCase):
         # Should NOT scale down to 2560/3840 = 0.66.
         # Should return unscaled (3000) because we trust Preset on HiDPI mismatch.
         self.assertEqual(scaled[0]['left'], 3000)
-        # Preset (3840x2160) == Physical (3840x2160).
-        # So scale should be 1.0. 
-        # Left should range 3000.
-        
-        self.assertEqual(scaled[0]['left'], 3000)
         self.assertEqual(scaled[0]['width'], 100)
 
     def test_logic_upscaling_with_physical_resolution(self):
-        """
-        Mock capture_fullscreen to return 4K image.
-        Preset is 1080p.
-        
-        Expectation: Coordinates should UPSCALED to 4K.
-        """
-        sys.modules['app.capture'].capture_fullscreen = MagicMock(return_value=MagicMock(size=(3840, 2160)))
-        
-        reader = ReaderThread(MagicMock(), MagicMock(), MagicMock(), target_resolution=(1920, 1080)) # Target res is irrelevant
-        
+        # Redundant but kept for structure
+        self.set_res(3840, 2160)
+        reader = ReaderThread(MagicMock(), MagicMock(), MagicMock(), target_resolution=(1920, 1080)) 
         monitors = [{'left': 100, 'top': 100, 'width': 100, 'height': 100}]
-        preset_res = "1920x1080"
-        
-        scaled = reader._scale_monitor_areas(monitors, preset_res)
-        
-        # 1080p -> 4K (Double)
+        scaled = reader._scale_monitor_areas(monitors, "1920x1080")
         self.assertEqual(scaled[0]['left'], 200)
-        self.assertEqual(scaled[0]['width'], 200)

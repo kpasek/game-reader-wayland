@@ -23,6 +23,12 @@ class MockToplevel:
     def wait_visibility(self): pass
     def grab_set(self): pass
     def wait_window(self, *args): pass
+    def transient(self, *args): pass
+
+class MockVar:
+    def __init__(self, value=None): self._val = value
+    def set(self, val): self._val = val
+    def get(self): return self._val
 
 mock_tk.Toplevel = MockToplevel
 mock_tk.Tk = MockToplevel
@@ -31,7 +37,10 @@ mock_tk.Label = MagicMock()
 mock_tk.Button = MagicMock()
 mock_tk.Listbox = MagicMock()
 mock_tk.Canvas = MagicMock()
-mock_tk.StringVar = MagicMock
+mock_tk.StringVar = MockVar
+mock_tk.IntVar = MockVar
+mock_tk.DoubleVar = MockVar
+mock_tk.BooleanVar = MockVar
 mock_tk.END = "end"
 mock_tk.NORMAL = "normal"
 mock_tk.DISABLED = "disabled"
@@ -48,14 +57,14 @@ sys.modules['tkinter'] = mock_tk
 sys.modules['tkinter.ttk'] = MagicMock()
 sys.modules['tkinter.messagebox'] = MagicMock()
 
-# Mock PIL
-mock_pil = MagicMock()
-sys.modules['PIL'] = mock_pil
-sys.modules['PIL.Image'] = MagicMock()
+# Mock PIL.ImageTk because it requires active Tkinter window
+# But allow real PIL.Image for logic tests
 sys.modules['PIL.ImageTk'] = MagicMock()
+# sys.modules['PIL'] = mock_pil  <-- REMOVED: Real PIL needed for other tests
+# sys.modules['PIL.Image'] = MagicMock() <-- REMOVED
 
 # Mock pyscreenshot
-sys.modules['pyscreenshot'] = MagicMock()
+# sys.modules['pyscreenshot'] = MagicMock() <-- REMOVED: Use real module or patch in specific tests
 
 # NOW import the app module
 from app.area_manager import AreaManagerWindow
