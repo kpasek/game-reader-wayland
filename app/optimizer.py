@@ -104,9 +104,8 @@ class SettingsOptimizer:
         # Konwertujemy z powrotem na listę dla deterministycznej iteracji (sortowanie opcjonalne, ale pomocne)
         candidate_colors_list = sorted(list(candidate_colors))
 
-        best_score = -1
-        best_settings = {}
-        best_crop_rel = None # Bbox względem rough_area
+        candidates = []
+        overall_best = (0, {}, None)
 
         # Wspólne ustawienia (niezmienne w pętli)
         common_settings = {
@@ -147,10 +146,11 @@ class SettingsOptimizer:
                 })
 
                 score, bbox = self._evaluate_settings(crop, settings, precomputed_db)
-                if score > best_score:
-                    best_score = score
-                    best_settings = settings
-                    best_crop_rel = bbox
+                if score >= 80:
+                    candidates.append((score, settings, bbox))
+                
+                if score > overall_best[0]:
+                    overall_best = (score, settings, bbox)
 
         # ---------------------------------------------------------
         # Branch B: Grayscale/Binary (No specific color)
@@ -178,10 +178,39 @@ class SettingsOptimizer:
              })
 
              score, bbox = self._evaluate_settings(crop, settings, precomputed_db)
-             if score > best_score:
-                 best_score = score
-                 best_settings = settings
-                 best_crop_rel = bbox
+             if score >= 80:
+                 candidates.append((score, settings, bbox))
+
+             if score > overall_best[0]:
+                 overall_best = (score, settings, bbox)
+        
+        # Wybór najlepszego kandydata
+        best_candidate = overall_best
+        
+        if candidates:
+            # 1. Filtrujemy tylko te z maksymalnym wynikiem
+            max_score = max(c[0] for c in candidates)
+            top_tier = [c for c in candidates if c[0] == max_score]
+            
+            # 2. Sortowanie wg kryteriów
+            def sort_key(item):
+                score, sett, _ = item
+                has_color = bool(sett.get('subtitle_colors'))
+                tolerance = sett.get('color_tolerance', 100)
+                scale = sett.get('ocr_scale_factor', 1.0)
+                brightness = sett.get('brightness_threshold', 255)
+                
+                # Priorytet: 
+                # 1. Kolor obecny (True) -> 0, Brak -> 1
+                # 2. Tolerance rosnąco (stricter is better for lower values)
+                # 3. Scale rosnąco
+                # 4. Brightness rosnąco
+                return (not has_color, tolerance, scale, brightness)
+
+            top_tier.sort(key=sort_key)
+            best_candidate = top_tier[0]
+
+        best_score, best_settings, best_crop_rel = best_candidate
 
         # 4. Obliczanie wynikowego, absolutnego obszaru
         final_area = rough_area

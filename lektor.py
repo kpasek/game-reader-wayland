@@ -919,7 +919,7 @@ class LektorApp:
 
     def detect_optimal_settings(self):
         """
-        Uruchamia proces automatycznego wykrywania ustawień.
+        Uruchamia proces automatycznego wykrywania ustawień (Threaded).
         """
         path = self.var_preset_full_path.get()
         if not path or not os.path.exists(path):
@@ -966,81 +966,210 @@ class LektorApp:
                 messagebox.showerror("Błąd", "Plik napisów jest pusty.")
                 return
 
-            # 4. Uruchomienie algorytmu (pokazujemy okno czekania/loading)
-            # Dla uproszczenia w tkinterze, robimy to synchronicznie ale z update UI, 
-            # lub w osobnym wątku. Ponieważ tkinter nie lubi wątków dotykających UI,
-            # tutaj zrobimy proste okno "Proszę czekać..." i update.
-            
+            # 4. Uruchomienie algorytmu w wątku (z UI oczekiwania)
             wait_win = tk.Toplevel(self.root)
             wait_win.title("Przetwarzanie...")
-            wait_win.geometry("300x100")
-            ttk.Label(wait_win, text="Trwa analiza obrazu i szukanie ustawień...\nTo może potrwać chwilę.", justify="center").pack(expand=True)
-            wait_win.update()
+            wait_win.geometry("400x150")
+            wait_win.resizable(False, False)
             
-            optimizer = SettingsOptimizer(self.config_mgr)
-            result = optimizer.optimize(img, rough_area, subtitle_lines)
+            lbl = ttk.Label(wait_win, text="Trwa analiza obrazu i szukanie optymalnych ustawień.\nMoże to potrwać dłuższą chwilę...", justify="center")
+            lbl.pack(pady=20)
             
-            wait_win.destroy()
-            self.root.deiconify()
-            
-            score = result.get('score', 0)
-            if score < 50:
-                messagebox.showwarning("Wynik", f"Nie znaleziono dobrych ustawień.\nNajlepszy wynik: {score}")
-                return
+            pbar = ttk.Progressbar(wait_win, mode='indeterminate')
+            pbar.pack(fill=tk.X, padx=30, pady=10)
+            pbar.start(15)
 
-            best_settings = result.get('settings', {})
-            optimized_area = result.get('optimized_area')
-            
-            msg = (f"Znaleziono optymalne ustawienia (Score: {score:.1f})\n\n"
-                   f"Jasność: {best_settings.get('brightness_threshold')}\n"
-                   f"Kontrast: {best_settings.get('contrast')}\n"
-                   f"Skala OCR: {best_settings.get('ocr_scale_factor')}\n"
-                   f"Kolory: {best_settings.get('subtitle_colors')}\n"
-                   f"Tolerancja: {best_settings.get('color_tolerance')}\n\n"
-                   "Czy chcesz zastosować te ustawienia?")
-            
-            if messagebox.askyesno("Sukces", msg):
-                # 5. Kopia zapasowa
-                bkp = self.config_mgr.backup_preset(path)
-                if bkp:
-                    print(f"Kopia zapasowa: {bkp}")
-                
-                # 6. Zapis
-                # Aktualizujemy bieżące dane presetu o nowe wartości
-                data.update(best_settings)
-                
-                # Aktualizacja obszaru (jeśli znaleziono lepszy)
-                if optimized_area:
-                     ox, oy, ow, oh = optimized_area
-                     new_rect = {'left': ox, 'top': oy, 'width': ow, 'height': oh}
-                     
-                     areas = data.get('areas', [])
-                     a1 = next((a for a in areas if a.get('id') == 1), None)
-                     
-                     if a1:
-                         a1['rect'] = new_rect
-                         # Aktualizujemy też kolory w obszarze, aby były spójne
-                         a1['colors'] = best_settings.get('subtitle_colors', [])
-                     else:
-                         areas.insert(0, {
-                             "id": 1, 
-                             "type": "continuous", 
-                             "rect": new_rect, 
-                             "hotkey": "", 
-                             "colors": best_settings.get('subtitle_colors', [])
-                         })
-                     data['areas'] = areas
+            # Thread context
+            thread_context = {"result": None, "error": None}
 
-                self.config_mgr.save_preset(path, data)
-                
-                # Przeładowanie GUI
-                self.on_preset_selected_from_combo(None)
-                messagebox.showinfo("Gotowe", "Ustawienia zostały zaktualizowane.")
+            def worker():
+                try:
+                    optimizer = SettingsOptimizer(self.config_mgr)
+                    res = optimizer.optimize(img, rough_area, subtitle_lines)
+                    thread_context["result"] = res
+                except Exception as e:
+                    thread_context["error"] = e
+
+            t = threading.Thread(target=worker, daemon=True)
+            t.start()
+            
+            def check_thread():
+                if t.is_alive():
+                    self.root.after(100, check_thread)
+                else:
+                    wait_win.destroy()
+                    self.root.deiconify()
+                    self._on_optimization_finished(thread_context, path, data)
+
+            check_thread()
 
         except Exception as e:
             self.root.deiconify()
             print(f"Błąd optymalizacji: {e}")
             messagebox.showerror("Błąd", f"Wystąpił błąd podczas optymalizacji: {e}")
+
+    def _on_optimization_finished(self, context, preset_path, preset_data):
+        if context["error"]:
+            messagebox.showerror("Błąd", f"Błąd podczas optymalizacji: {context['error']}")
+            return
+
+        result = context["result"]
+        if not result:
+             messagebox.showerror("Błąd", "Brak wyników z optymalizatora.")
+             return
+
+        score = result.get('score', 0)
+        
+        if score < 50:
+            messagebox.showwarning("Wynik", f"Nie znaleziono dobrych ustawień (Score: {score:.1f}).\nSpróbuj zmienić obszar lub klatkę z gry. Najlepsze co mamy to: {score}")
+            return
+
+        best_settings = result.get('settings', {})
+        optimized_area = result.get('optimized_area')
+        
+        # Select result dialog
+        current_areas = preset_data.get('areas', [])
+        dialog_res = self._show_custom_result_dialog(score, best_settings, optimized_area, current_areas)
+        
+        if dialog_res["confirmed"]:
+            # 5. Kopia zapasowa
+            bkp = self.config_mgr.backup_preset(preset_path)
+            if bkp:
+                print(f"Kopia zapasowa: {bkp}")
+            
+            # 6. Zapis
+            preset_data.update(best_settings)
+            
+            if optimized_area:
+                 ox, oy, ow, oh = optimized_area
+                 new_rect = {'left': ox, 'top': oy, 'width': ow, 'height': oh}
+                 
+                 target_id = dialog_res["target_id"]
+                 
+                 if target_id is None:
+                     # Create new
+                     existing_ids = [a.get('id', 0) for a in current_areas]
+                     new_id = (max(existing_ids) if existing_ids else 0) + 1
+                     current_areas.append({
+                         "id": new_id, 
+                         "type": "continuous", 
+                         "rect": new_rect, 
+                         "hotkey": "", 
+                         "colors": best_settings.get('subtitle_colors', [])
+                     })
+                 else:
+                     # Update existing
+                     for area in current_areas:
+                         if area.get('id') == target_id:
+                             area['rect'] = new_rect
+                             area['colors'] = best_settings.get('subtitle_colors', [])
+                             break
+                 
+                 preset_data['areas'] = current_areas
+
+            self.config_mgr.save_preset(preset_path, preset_data)
+            
+            # Przeładowanie GUI
+            self.on_preset_selected_from_combo(None)
+            messagebox.showinfo("Gotowe", "Ustawienia zostały zaktualizowane.")
+
+    def _show_custom_result_dialog(self, score, settings, optimized_area, existing_areas):
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"Wynik Optymalizacji")
+        dialog.geometry("450x650")
+        
+        content = tk.Frame(dialog, padx=20, pady=20)
+        content.pack(fill="both", expand=True)
+
+        tk.Label(content, text="Znaleziono optymalne ustawienia", font=("Arial", 12, "bold")).pack(pady=(0, 15))
+        
+        def add_row_custom(label, widget_creator_func):
+            f = tk.Frame(content)
+            f.pack(fill="x", pady=3)
+            tk.Label(f, text=label, width=22, anchor="w", fg="#555").pack(side="left", anchor="n")
+            w = widget_creator_func(f)
+            w.pack(side="left", fill='x', expand=True, anchor="w")
+
+        def add_text_row(label, value):
+            add_row_custom(label, lambda p: tk.Label(p, text=str(value), anchor="w", font=("Arial", 10, "bold"), wraplength=200, justify="left"))
+
+        add_text_row("Wynik (Score):", f"{score:.1f} / 100")
+        
+        # Area info
+        if optimized_area:
+            ox, oy, ow, oh = optimized_area
+            area_str = f"X: {ox}, Y: {oy}, Wymiary: {ow}x{oh}"
+            add_text_row("Wykryty obszar:", area_str)
+
+        add_text_row("Jasność (Threshold):", settings.get('brightness_threshold', '-'))
+        add_text_row("Kontrast:", settings.get('contrast', '-'))
+        add_text_row("Skala OCR:", settings.get('ocr_scale_factor', '-'))
+        add_text_row("Tryb koloru:", settings.get('text_color_mode', '-'))
+        
+        # Colors with swatches
+        cols = settings.get('subtitle_colors', [])
+        
+        def create_color_widget(parent):
+            if not cols:
+                 return tk.Label(parent, text="Brak (Grayscale)", font=("Arial", 10, "bold"), anchor="w")
+            
+            f_cols = tk.Frame(parent)
+            for c in cols:
+                row = tk.Frame(f_cols)
+                row.pack(fill="x", pady=1)
+                tk.Label(row, relief="solid", borderwidth=1, bg=c, width=3, height=1).pack(side="left", padx=(0, 5))
+                tk.Label(row, text=c, font=("Arial", 10, "bold")).pack(side="left")
+            return f_cols
+
+        add_row_custom("Kolory:", create_color_widget)
+        add_text_row("Tolerancja:", settings.get('color_tolerance', '-'))
+
+        # Area Selection
+        tk.Label(content, text="\nZastosuj ustawienia do:", font=("Arial", 11, "bold")).pack(pady=(15, 5), anchor="w")
+        
+        area_options = ["Utwórz nowy obszar"]
+        area_map = {} # "Display Name" -> ID (int) or None
+        
+        for a in existing_areas:
+            aid = a.get('id')
+            aname = f"Obszar {aid}"
+            if a.get('type'):
+                aname += f" ({a.get('type')})"
+            area_options.append(aname)
+            area_map[aname] = aid
+            
+        selected_option = tk.StringVar(value=area_options[0])
+        cb = ttk.Combobox(content, textvariable=selected_option, values=area_options, state="readonly", font=("Arial", 10))
+        cb.pack(fill="x", pady=5)
+        
+        tk.Label(content, text="\nCzy chcesz zapisać te ustawienia?", font=("Arial", 11)).pack(pady=20)
+        
+        btn_frame = tk.Frame(dialog, pady=5)
+        btn_frame.pack(fill="x", side="bottom", pady=10)
+        
+        result = {"confirmed": False, "target_id": None}
+        
+        def on_yes():
+            result["confirmed"] = True
+            val = selected_option.get()
+            if val == "Utwórz nowy obszar":
+                result["target_id"] = None
+            else:
+                result["target_id"] = area_map.get(val)
+            dialog.destroy()
+            
+        def on_no():
+            dialog.destroy()
+            
+        tk.Button(btn_frame, text="Zastosuj", command=on_yes, width=15, height=2, bg="#e0ffe0").pack(side="left", padx=20, expand=True)
+        tk.Button(btn_frame, text="Anuluj", command=on_no, width=15, height=2).pack(side="right", padx=20, expand=True)
+        
+        dialog.transient(self.root)
+        dialog.wait_visibility()
+        dialog.grab_set()
+        self.root.wait_window(dialog)
+        
+        return result
 
 
 def main():
