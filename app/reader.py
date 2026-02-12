@@ -139,29 +139,23 @@ class ReaderThread(threading.Thread):
         Scales area coordinates from the original preset resolution to the actual capture resolution.
         """
         from app.capture import capture_fullscreen
-        import time
         
-        # Try to determine physical resolution with retries
+        # Try to determine physical resolution
         if not hasattr(self, '_physical_res'):
-            attempts = 10
-            for i in range(attempts):
-                try:
-                    img = capture_fullscreen()
-                    if img:
-                        self._physical_res = img.size
-                        # If we have 4K screen vs 1080p, and we are on wayland, 
-                        # ensure we aren't getting fallback logical resolution if possible.
-                        # But we can't easily check backend here cleanly.
-                        # Just trust that if we got an image, it's correct-ish.
-                        break
-                except:
-                    pass
-                if i < attempts - 1:
-                    time.sleep(0.5)
+            self._physical_res = None
             
-            if not hasattr(self, '_physical_res'):
-                self._physical_res = None
-        
+            # Try capture ONCE to get real physical pixels (important for HiDPI)
+            # If it fails, we fall back to target_resolution immediately without waiting.
+            try:
+                img = capture_fullscreen()
+                if img:
+                    self._physical_res = img.size
+            except:
+                pass
+            
+            # If capture failed, we leave _physical_res as None and let the 
+            # fallback logic below handle the priority (Original > Target)
+
         # Debug logging for resolution detection
         if self.log_queue and not hasattr(self, '_logged_res'):
              self._logged_res = True
