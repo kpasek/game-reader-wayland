@@ -124,25 +124,40 @@ class ReaderThread(threading.Thread):
         Scales area coordinates from the original preset resolution to the actual capture resolution.
         """
         from app.capture import capture_fullscreen
+        import time
         
-        # Try to determine physical resolution once
+        # Try to determine physical resolution with retries
         if not hasattr(self, '_physical_res'):
-            try:
-                img = capture_fullscreen()
-                if img:
-                    self._physical_res = img.size
-                else:
-                     self._physical_res = None
-            except:
+            attempts = 10
+            for i in range(attempts):
+                try:
+                    img = capture_fullscreen()
+                    if img:
+                        self._physical_res = img.size
+                        # If we have 4K screen vs 1080p, and we are on wayland, 
+                        # ensure we aren't getting fallback logical resolution if possible.
+                        # But we can't easily check backend here cleanly.
+                        # Just trust that if we got an image, it's correct-ish.
+                        break
+                except:
+                    pass
+                if i < attempts - 1:
+                    time.sleep(0.5)
+            
+            if not hasattr(self, '_physical_res'):
                 self._physical_res = None
         
         # Debug logging for resolution detection
         if self.log_queue and not hasattr(self, '_logged_res'):
              self._logged_res = True
-             self.log_queue.put({
-                 "time": "INFO", 
-                 "line_text": f"Resolution Debug: Physical={getattr(self, '_physical_res', 'None')}, Target={self.target_resolution}, Preset={original_res_str}"
-             })
+             res = getattr(self, '_physical_res', 'None')
+             msg = f"Resolution Debug: Physical={res}, Target={self.target_resolution}, Preset={original_res_str}"
+             self.log_queue.put({"time": "INFO", "line_text": msg})
+             # Force log to file as well for debugging
+             try:
+                 with open("session_debug.log", "a") as f:
+                     f.write(f"{datetime.now()} {msg}\n")
+             except: pass
 
         dest_w, dest_h = self._physical_res if getattr(self, '_physical_res', None) else (None, None)
         
@@ -156,11 +171,6 @@ class ReaderThread(threading.Thread):
 
         # Fallback Logic if Physical Capture failed
         if not dest_w or not dest_h:
-             # If capture failed, do we fallback to target_resolution?
-             # If we trust user changed resolution to target, we should scale.
-             # BUT, if user is on 4K and capture just failed, assuming 1080p (Target) causes broken coordinates.
-             # It is SAFER to assume resolution hasn't changed from Preset (Original).
-             
              if orig_w and orig_h:
                  # Assume same as preset
                  dest_w, dest_h = orig_w, orig_h
@@ -169,6 +179,31 @@ class ReaderThread(threading.Thread):
                  dest_w, dest_h = self.target_resolution
              else:
                  return monitors
+        
+        # HiDPI Heuristic Logic
+        # Detect if we have a mismatch between Detected (Logical) and Preset (Physical) resolution
+        if orig_w and orig_h and dest_w and dest_h:
+            target_w = self.target_resolution[0] if self.target_resolution else 0
+            
+            # Check if this looks like a fractional scaling artifact (e.g. 1.5x which is 3840->2560)
+            # Common scaling factors: 1.25, 1.5, 1.75.
+            # Ratios like 2.0 (1920x1080) are ambiguous (could be genuine 1080p screen),
+            # but 1.5 (2560x1440) is almost certainly HiDPI scaling on a 4K panel.
+            ratio_w = orig_w / dest_w
+            is_fractional_scale = abs(ratio_w - 1.5) < 0.05 or abs(ratio_w - 1.25) < 0.05 or abs(ratio_w - 1.75) < 0.05
+            
+            # Use stricter condition: Detected matches Target (Logical) AND (Detected < Preset) AND (Fractional Scale OR User forced via config?)
+            # For now, explicit fractional scale detection is safest to avoid breaking 1080p users.
+            
+            if (orig_w > dest_w) and (target_w and abs(dest_w - target_w) < 50) and is_fractional_scale:
+                 if self.log_queue and not hasattr(self, '_logged_hidpi'):
+                    self._logged_hidpi = True
+                    msg = f"HiDPI Scaling Trap Detected (Ratio {ratio_w:.2f})! Overriding detected {dest_w}x{dest_h} with Preset {orig_w}x{orig_h}"
+                    self.log_queue.put({"time": "WARN", "line_text": msg})
+                    try:
+                       with open("session_debug.log", "a") as f: f.write(f"{datetime.now()} {msg}\n")
+                    except: pass
+                 dest_w, dest_h = orig_w, orig_h
         
         if not orig_w or not orig_h: return monitors
         

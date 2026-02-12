@@ -117,6 +117,32 @@ class TestScaling(unittest.TestCase):
         
         # Should default to NO SCALING instead of aggressive downscaling
         self.assertEqual(scaled[0]['left'], 3000)
+
+    def test_hidpi_logical_vs_physical_mismatch(self):
+        """
+        Scenario: 
+        - 4K Physical Screen (Preset created here: 3840x2160)
+        - System uses 150% scaling, so Logical Resolution is 2560x1440.
+        - capture_fullscreen() at startup returns Logical (2560x1440) due to fallback/API behavior.
+        - BUT Spectacle used later returns Physical (3840x2160).
+        
+        Bug: We scaled coords down to 2560 (0.66x). Loop uses 3840 image. Crop is top-left.
+        Fix: If Preset > Physical (detected), assume HiDPI and trust Preset.
+        """
+        # Detected resolution is Smaller (Logical)
+        self.capture_module.capture_fullscreen = MagicMock(return_value=MagicMock(size=(2560, 1440)))
+        
+        reader = ReaderThread(MagicMock(), MagicMock(), MagicMock(), target_resolution=(2560, 1440))
+        
+        # Area defined at 4K coords
+        monitors = [{'left': 3000, 'top': 2000, 'width': 100, 'height': 100}]
+        preset_res = "3840x2160" # LARGER than detected
+        
+        scaled = reader._scale_monitor_areas(monitors, preset_res)
+        
+        # Should NOT scale down to 2560/3840 = 0.66.
+        # Should return unscaled (3000) because we trust Preset on HiDPI mismatch.
+        self.assertEqual(scaled[0]['left'], 3000)
         # Preset (3840x2160) == Physical (3840x2160).
         # So scale should be 1.0. 
         # Left should range 3000.
