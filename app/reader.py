@@ -122,31 +122,6 @@ class ReaderThread(threading.Thread):
     def _scale_monitor_areas(self, monitors: List[Dict], original_res_str: str) -> List[Dict]:
         """
         Scales area coordinates from the original preset resolution to the actual capture resolution.
-        If self.target_resolution is provided, we ASSUME it represents the user's intent to treat
-        the screen as having that logical resolution, BUT we must be careful.
-        
-        The previous implementation blindly scaled from Preset Res -> Target Res.
-        This fails if the Physical Capture is 4K but Target is 1080p, and Preset is 4K.
-        
-        Ideally, we should scale Preset Res -> Actual Physical Capture Res.
-        However, at this point we might not know Physical Capture Res if we rely on Target Res parameter.
-        
-        FIX: We should ignore target_resolution for coordinate scaling if we want to match physical pixels.
-        BUT, we can't ignore it if we don't have the physical resolution available here.
-        
-        Ideally, ReaderThread should receive physical resolution in __init__ or determine it.
-        Since we can't change __init__ signature easily without breaking callers, 
-        and determining it via capture_fullscreen here might be slow or problematic...
-        
-        Wait, if we use capture_region later, we rely on these coordinates being correct for the captured image.
-        If the captured image is from physical screen, coordinates must be physical.
-        
-        So: Scale from Preset Resolution -> Physical Resolution.
-        How to get Physical Resolution?
-        Quickest way: app.capture.capture_fullscreen().size (assuming check is fast enough)
-        Or: Just trust valid_areas are physically correct if preset matches physical.
-        
-        If we can't get physical res, returning monitors as-is (no scaling) is safer than downscaling to 1080p on a 4K screen.
         """
         from app.capture import capture_fullscreen
         
@@ -161,31 +136,47 @@ class ReaderThread(threading.Thread):
             except:
                 self._physical_res = None
         
+        # Debug logging for resolution detection
+        if self.log_queue and not hasattr(self, '_logged_res'):
+             self._logged_res = True
+             self.log_queue.put({
+                 "time": "INFO", 
+                 "line_text": f"Resolution Debug: Physical={getattr(self, '_physical_res', 'None')}, Target={self.target_resolution}, Preset={original_res_str}"
+             })
+
         dest_w, dest_h = self._physical_res if getattr(self, '_physical_res', None) else (None, None)
         
-        # If we couldn't get physical res, fallback to target_resolution ONLY if we are sure it's reliable?
-        # Actually, previous bug was trusting target_resolution too much. 
-        # If we failed to get physical res, likely capture will fail anyway.
-        # But let's fallback to target_resolution as a safety net if physical is missing, 
-        # assuming user set target == physical in that case.
+        # Parse original resolution
+        orig_w, orig_h = None, None
+        if original_res_str:
+            try:
+                orig_w, orig_h = map(int, original_res_str.lower().split('x'))
+            except:
+                pass
+
+        # Fallback Logic if Physical Capture failed
         if not dest_w or not dest_h:
-             if self.target_resolution:
+             # If capture failed, do we fallback to target_resolution?
+             # If we trust user changed resolution to target, we should scale.
+             # BUT, if user is on 4K and capture just failed, assuming 1080p (Target) causes broken coordinates.
+             # It is SAFER to assume resolution hasn't changed from Preset (Original).
+             
+             if orig_w and orig_h:
+                 # Assume same as preset
+                 dest_w, dest_h = orig_w, orig_h
+             elif self.target_resolution:
+                 # Only use target if we really don't know original
                  dest_w, dest_h = self.target_resolution
              else:
-                 return monitors # No info, return as is
+                 return monitors
         
-        if not original_res_str: return monitors
+        if not orig_w or not orig_h: return monitors
         
-        try:
-            orig_w, orig_h = map(int, original_res_str.lower().split('x'))
-            
-            if (orig_w, orig_h) == (dest_w, dest_h): return monitors
-            
-            sx, sy = dest_w / orig_w, dest_h / orig_h
-            return [{'left': int(m['left'] * sx), 'top': int(m['top'] * sy),
-                     'width': int(m['width'] * sx), 'height': int(m['height'] * sy)} for m in monitors]
-        except:
-            return monitors
+        if (orig_w, orig_h) == (dest_w, dest_h): return monitors
+        
+        sx, sy = dest_w / orig_w, dest_h / orig_h
+        return [{'left': int(m['left'] * sx), 'top': int(m['top'] * sy),
+                 'width': int(m['width'] * sx), 'height': int(m['height'] * sy)} for m in monitors]
 
     def _images_are_similar(self, img1: Image.Image, img2: Image.Image, similarity: float) -> bool:
         if similarity == 0: return False

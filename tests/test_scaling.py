@@ -96,6 +96,27 @@ class TestScaling(unittest.TestCase):
         # It should stay 3000.
         self.assertEqual(scaled[0]['left'], 3000)
         self.assertEqual(scaled[0]['width'], 100)
+
+    def test_capture_fails_fallback_logic(self):
+        """
+        Mock capture_fullscreen to FAIL (return None).
+        Target Resolution is 1080p.
+        Preset is 4K.
+        
+        Old Behavior (Bug): Fallback to Target (1080p) -> Scale 0.5 -> Shift Left/Up.
+        New Behavior (Fix): Fallback to Original (4K) -> Scale 1.0 -> Correct Position.
+        """
+        self.capture_module.capture_fullscreen = MagicMock(return_value=None)
+        
+        reader = ReaderThread(MagicMock(), MagicMock(), MagicMock(), target_resolution=(1920, 1080))
+        
+        monitors = [{'left': 3000, 'top': 2000, 'width': 100, 'height': 100}]
+        preset_res = "3840x2160"
+        
+        scaled = reader._scale_monitor_areas(monitors, preset_res)
+        
+        # Should default to NO SCALING instead of aggressive downscaling
+        self.assertEqual(scaled[0]['left'], 3000)
         # Preset (3840x2160) == Physical (3840x2160).
         # So scale should be 1.0. 
         # Left should range 3000.
