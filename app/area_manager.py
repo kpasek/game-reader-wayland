@@ -16,7 +16,7 @@ class AreaManagerWindow(tk.Toplevel):
     def __init__(self, parent, areas: List[Dict[str, Any]], on_save_callback):
         super().__init__(parent)
         self.title("Zarządzanie Obszarami")
-        self.geometry("600x500")
+        self.geometry("800x600")
         self.areas = [a.copy() for a in areas]  # Deep copy-ish (dicts are mutable but we replace lists)
         # Ensure deep copy of nested lists like 'colors'
         for a in self.areas:
@@ -102,6 +102,7 @@ class AreaManagerWindow(tk.Toplevel):
         self.cv_colors = tk.Canvas(f, height=40, bg="#dddddd", highlightthickness=1, highlightbackground="#999999")
         self.cv_colors.grid(row=5, column=1, sticky=tk.EW, pady=5)
         self.cv_colors.bind("<Button-1>", self._on_color_click)
+        self.cv_colors.bind("<Motion>", self._on_color_hover)
         
         btn_col_frame = ttk.Frame(f)
         btn_col_frame.grid(row=6, column=0, columnspan=2, sticky=tk.EW)
@@ -366,9 +367,17 @@ class AreaManagerWindow(tk.Toplevel):
         current_colors = self.areas[self.current_selection_idx].get('colors', [])
         if idx_to_remove < len(current_colors):
             c = current_colors[idx_to_remove]
-            if messagebox.askyesno("Usuń Kolor", f"Czy usunąć kolor {c}?"):
+            if messagebox.askyesno("Usuń Kolor", f"Czy usunąć kolor {c}?", parent=self):
                 del current_colors[idx_to_remove]
                 self._load_details(self.current_selection_idx)
+    
+    def _on_color_hover(self, event):
+        item = self.cv_colors.find_closest(event.x, event.y)
+        tags = self.cv_colors.gettags(item)
+        if "clickable" in tags:
+            self.cv_colors.config(cursor="hand2")
+        else:
+            self.cv_colors.config(cursor="")
 
     def _record_hotkey(self):
         if not keyboard:
