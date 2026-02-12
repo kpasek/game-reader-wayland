@@ -105,13 +105,83 @@ class ReaderThread(threading.Thread):
                 "line_text": f"Wyzwołano jednorazowy odczyt Obszaru {area_id}", "stats": {}
             })
 
-    def _scale_monitor_areas(self, monitors: List[Dict], original_res_str: str) -> List[Dict]:
+
+    def _scale_monitor_areas_legacy(self, monitors: List[Dict], original_res_str: str) -> List[Dict]:
+        """Original Implementation for Reference"""
         if not self.target_resolution or not original_res_str: return monitors
         try:
             orig_w, orig_h = map(int, original_res_str.lower().split('x'))
             target_w, target_h = self.target_resolution
             if (orig_w, orig_h) == (target_w, target_h): return monitors
             sx, sy = target_w / orig_w, target_h / orig_h
+            return [{'left': int(m['left'] * sx), 'top': int(m['top'] * sy),
+                     'width': int(m['width'] * sx), 'height': int(m['height'] * sy)} for m in monitors]
+        except:
+            return monitors
+
+    def _scale_monitor_areas(self, monitors: List[Dict], original_res_str: str) -> List[Dict]:
+        """
+        Scales area coordinates from the original preset resolution to the actual capture resolution.
+        If self.target_resolution is provided, we ASSUME it represents the user's intent to treat
+        the screen as having that logical resolution, BUT we must be careful.
+        
+        The previous implementation blindly scaled from Preset Res -> Target Res.
+        This fails if the Physical Capture is 4K but Target is 1080p, and Preset is 4K.
+        
+        Ideally, we should scale Preset Res -> Actual Physical Capture Res.
+        However, at this point we might not know Physical Capture Res if we rely on Target Res parameter.
+        
+        FIX: We should ignore target_resolution for coordinate scaling if we want to match physical pixels.
+        BUT, we can't ignore it if we don't have the physical resolution available here.
+        
+        Ideally, ReaderThread should receive physical resolution in __init__ or determine it.
+        Since we can't change __init__ signature easily without breaking callers, 
+        and determining it via capture_fullscreen here might be slow or problematic...
+        
+        Wait, if we use capture_region later, we rely on these coordinates being correct for the captured image.
+        If the captured image is from physical screen, coordinates must be physical.
+        
+        So: Scale from Preset Resolution -> Physical Resolution.
+        How to get Physical Resolution?
+        Quickest way: app.capture.capture_fullscreen().size (assuming check is fast enough)
+        Or: Just trust valid_areas are physically correct if preset matches physical.
+        
+        If we can't get physical res, returning monitors as-is (no scaling) is safer than downscaling to 1080p on a 4K screen.
+        """
+        from app.capture import capture_fullscreen
+        
+        # Try to determine physical resolution once
+        if not hasattr(self, '_physical_res'):
+            try:
+                img = capture_fullscreen()
+                if img:
+                    self._physical_res = img.size
+                else:
+                     self._physical_res = None
+            except:
+                self._physical_res = None
+        
+        dest_w, dest_h = self._physical_res if getattr(self, '_physical_res', None) else (None, None)
+        
+        # If we couldn't get physical res, fallback to target_resolution ONLY if we are sure it's reliable?
+        # Actually, previous bug was trusting target_resolution too much. 
+        # If we failed to get physical res, likely capture will fail anyway.
+        # But let's fallback to target_resolution as a safety net if physical is missing, 
+        # assuming user set target == physical in that case.
+        if not dest_w or not dest_h:
+             if self.target_resolution:
+                 dest_w, dest_h = self.target_resolution
+             else:
+                 return monitors # No info, return as is
+        
+        if not original_res_str: return monitors
+        
+        try:
+            orig_w, orig_h = map(int, original_res_str.lower().split('x'))
+            
+            if (orig_w, orig_h) == (dest_w, dest_h): return monitors
+            
+            sx, sy = dest_w / orig_w, dest_h / orig_h
             return [{'left': int(m['left'] * sx), 'top': int(m['top'] * sy),
                      'width': int(m['width'] * sx), 'height': int(m['height'] * sy)} for m in monitors]
         except:

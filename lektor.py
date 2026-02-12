@@ -873,14 +873,13 @@ class LektorApp:
                 self.root.deiconify()
                 return
 
-            # Load existing rect for visualization
+            # Load existing rects for visualization
             path = self.var_preset_full_path.get()
             existing = []
             if path:
                 data = self.config_mgr.load_preset(path)
                 if 'areas' not in data: self.config_mgr._migrate_legacy_areas(data)
-                a1 = next((a for a in data['areas'] if a.get('id') == 1), None)
-                if a1 and a1.get('rect'): existing = [a1['rect']]
+                existing = data.get('areas', [])
 
             sel = AreaSelector(self.root, img, existing_regions=existing)
             self.root.wait_window(sel)
