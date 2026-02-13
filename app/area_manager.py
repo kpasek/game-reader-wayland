@@ -171,7 +171,11 @@ class AreaManagerWindow(tk.Toplevel):
         
         # Mode
         self.var_mode = tk.StringVar()
-        self.mode_mapping = {"Full Lines": "Pełne linie", "Partial": "Częściowe"}
+        self.mode_mapping = {
+            "Full Lines": "Pełne linie", 
+            "Starts With": "Zaczyna się na",
+            "Partial": "Częściowe"
+        }
         self.rev_mode_mapping = {v: k for k, v in self.mode_mapping.items()}
         cb_mode = ttk.Combobox(pl, textvariable=self.var_mode, values=list(self.mode_mapping.values()), state="readonly")
         cb_mode.bind("<<ComboboxSelected>>", self._on_field_change)
@@ -510,6 +514,11 @@ class AreaManagerWindow(tk.Toplevel):
     def _duplicate_area(self):
         if self.current_selection_idx < 0: return
         area_copy = self.areas[self.current_selection_idx].copy()
+        
+        # New Unique Name
+        max_id = max((a.get('id', 0) for a in self.areas), default=0)
+        area_copy['id'] = max_id + 1
+        
         if 'settings' in area_copy:
              area_copy['settings'] = area_copy['settings'].copy()
              if 'subtitle_colors' in area_copy['settings']:
@@ -608,47 +617,81 @@ class AreaManagerWindow(tk.Toplevel):
              else:
                   msg += "\n\nSłaby wynik. Czy chcesz uruchomić optymalizator?"
                   if messagebox.askyesno("Wynik Testu", msg):
-                       # Optimize
-                       w2 = tk.Toplevel(self)
-                       lbl_status = tk.Label(w2, text="Pobieranie próbek obrazu (3 klatki)...")
-                       lbl_status.pack(padx=20, pady=20)
-                       w2.update()
-                       
-                       # Capture multiple frames
-                       frames = [full_img] # First one we already have
-                       import time
-                       
-                       # Try to capture 2 more frames with delay
-                       self.withdraw()
-                       for i in range(2):
-                           time.sleep(0.5)
-                           f = capture_fullscreen()
-                           if f: frames.append(f)
-                       
-                       self.deiconify()
-                       lbl_status.config(text="Szukam najlepszych ustawień...")
-                       w2.update()
-                       
-                       # Try optimizing using all frames
-                       target_rect = (ex, ey, ew, eh) if expanded_better else (ox, oy, ow, oh)
-                       res = optimizer.optimize(frames, target_rect, self.subtitle_lines, mode)
-                       w2.destroy()
-                       
-                       if res and res.get('score', 0) > final_score:
-                            new_score = res['score']
-                            if messagebox.askyesno("Znaleziono lepsze ustawienia", 
-                                                   f"Obecne: {display_score:.1f}%\nNowe (średnia): {new_score:.1f}%\n\nCzy chcesz zaktualizować?"):
-                                 area['settings'].update(res['settings'])
-                                 # If we optimized on expanded area, we might need to update rect too?
-                                 # Currently optimize() doesn't return new rect.
-                                 # But we can check bounds on the optimized settings
-                                 if expanded_better:
-                                      self._propose_rect_update(expanded_crop, ex, ey, area)
-                                 
-                                 self._load_details(self.current_selection_idx)
-                                 messagebox.showinfo("Zaktualizowano", "Nowe ustawienia zostały przyjęte.")
-                       else:
-                            messagebox.showinfo("Info", "Nie znaleziono lepszych ustawień.")
+                       def run_opt_callback(frames_data):
+                            # Collect rects
+                            # Base rect is either expanded or original
+                            base = (ex, ey, ew, eh) if expanded_better else (ox, oy, ow, oh)
+                            
+                            valid_rects = []
+                            valid_images = []
+                            for f in frames_data:
+                                valid_images.append(f['image'])
+                                if f['rect']:
+                                    valid_rects.append(f['rect'])
+                                else:
+                                    valid_rects.append(base)
+                            
+                            if not valid_rects: valid_rects = [base]
+                            
+                            # Union logic (suma zbiorów)
+                            min_x = min(r[0] for r in valid_rects)
+                            min_y = min(r[1] for r in valid_rects)
+                            max_x = max(r[0] + r[2] for r in valid_rects)
+                            max_y = max(r[1] + r[3] for r in valid_rects)
+                            
+                            u_w = max_x - min_x
+                            u_h = max_y - min_y
+                            
+                            # 5% Margin
+                            mx = int(u_w * 0.05)
+                            my = int(u_h * 0.05)
+                            
+                            # Bounds check against first image
+                            fw, fh = valid_images[0].size
+                            fx = max(0, min_x - mx)
+                            fy = max(0, min_y - my)
+                            real_w = min(fw - fx, u_w + 2 * mx)
+                            real_h = min(fh - fy, u_h + 2 * my)
+                            
+                            target_rect_final = (fx, fy, real_w, real_h)
+                            
+                            # Progress Window
+                            w_prog = tk.Toplevel(self)
+                            w_prog.title("Przetwarzanie")
+                            tk.Label(w_prog, text="Optymalizacja w toku...\n(To może chwilę potrwać)", padx=20, pady=20).pack()
+                            w_prog.update()
+                            
+                            try:
+                                res = optimizer.optimize(valid_images, target_rect_final, self.subtitle_lines, mode)
+                            except Exception as ex:
+                                w_prog.destroy()
+                                messagebox.showerror("Błąd Optymalizacji", str(ex))
+                                return
+                            
+                            w_prog.destroy()
+                            
+                            if res and res.get('score', 0) > final_score:
+                                ns = res['score']
+                                if messagebox.askyesno("Sukces", 
+                                                       f"Znaleziono lepsze ustawienia!\nŚredni wynik: {ns:.1f}%\n"
+                                                       "Czy chcesz zaktualizować obszar i parametry OCR?"):
+                                    area['settings'].update(res['settings'])
+                                    # Update rect (Union + Margin)
+                                    area['rect']['left'] = int(fx)
+                                    area['rect']['top'] = int(fy)
+                                    area['rect']['width'] = int(real_w)
+                                    area['rect']['height'] = int(real_h)
+                                    
+                                    self._load_details(self.current_selection_idx)
+                                    messagebox.showinfo("Zapisano", "Zaktualizowano ustawienia i granice obszaru.")
+                            else:
+                                messagebox.showinfo("Info", "Nie udało się znaleźć lepszych parametrów.")
+
+                       # Open Capture Window
+                       opt_win = OptimizationCaptureWindow(self, run_opt_callback, self)
+                       # Add the initial capture we already have
+                       opt_win.frames.append({'image': full_img, 'rect': None})
+                       opt_win.lb_screens.insert(tk.END, "Zrzut #1 (Aktualny ekran)")
 
         except Exception as e:
              messagebox.showerror("Błąd", f"Podczas testu wystąpił błąd: {e}")
@@ -696,3 +739,111 @@ class AreaManagerWindow(tk.Toplevel):
         except Exception as e:
             messagebox.showerror("Błąd zapisu", f"Nie udało się zapisać obszarów: {e}")
             print(f"Save error: {e}")
+
+class OptimizationCaptureWindow(tk.Toplevel):
+    def __init__(self, parent, on_start, area_manager=None):
+        super().__init__(parent)
+        self.title("Optymalizacja Ustawień")
+        self.geometry("500x400")
+        self.on_start = on_start
+        self.area_manager = area_manager
+        self.frames = []
+        self.current_area_data = None
+        
+        # UI
+        main_f = ttk.Frame(self, padding=15)
+        main_f.pack(fill=tk.BOTH, expand=True)
+        
+        ttk.Label(main_f, text="Kreator Optymalizacji", font=("Arial", 12, "bold")).pack(pady=10)
+        ttk.Label(main_f, text="Dodaj zrzuty ekranu z widocznymi napisami.\nIm więcej przykładów, tym lepszy wynik.", justify=tk.CENTER).pack(pady=5)
+        
+        self.list_frame = ttk.Frame(main_f)
+        self.list_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        
+        self.lb_screens = tk.Listbox(self.list_frame, height=6)
+        self.lb_screens.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        btn_box = ttk.Frame(self.list_frame)
+        btn_box.pack(side=tk.LEFT, fill=tk.Y, padx=5)
+        
+        self.btn_add_scr = ttk.Button(btn_box, text="Dodaj zrzut", command=self._add_screenshot)
+        self.btn_add_scr.pack(fill=tk.X, pady=2)
+
+        self.btn_add_area = ttk.Button(btn_box, text="Dodaj i zaznacz", command=self._add_with_selection)
+        self.btn_add_area.pack(fill=tk.X, pady=2)
+        
+        self.btn_rem = ttk.Button(btn_box, text="Usuń", command=self._remove_screenshot)
+        self.btn_rem.pack(fill=tk.X, pady=2)
+        
+        # Start
+        ttk.Button(main_f, text="Uruchom Optymalizację", command=self._start_opt).pack(pady=10, fill=tk.X)
+        self.status = ttk.Label(main_f, text="")
+        self.status.pack(pady=5)
+        
+    def _add_screenshot(self):
+        # Hide manager and self
+        self.withdraw()
+        if self.area_manager: self.area_manager.withdraw()
+        import time
+        time.sleep(0.3)
+        
+        img = capture_fullscreen()
+        
+        self.deiconify()
+        if self.area_manager: self.area_manager.deiconify()
+        
+        if img:
+            self.frames.append({"image": img, "rect": None})
+            self.lb_screens.insert(tk.END, f"Zrzut #{len(self.frames)} (Pełny ekran)")
+
+    def _add_with_selection(self):
+        self.withdraw()
+        if self.area_manager: self.area_manager.withdraw()
+        import time
+        time.sleep(0.3)
+        
+        img = capture_fullscreen()
+        
+        if not img:
+            self.deiconify()
+            if self.area_manager: self.area_manager.deiconify()
+            return
+            
+        # Select area
+        sel = AreaSelector(self.area_manager, img) # Parent area manager or root
+        self.area_manager.wait_window(sel)
+        
+        self.deiconify()
+        if self.area_manager: self.area_manager.deiconify()
+        
+        if sel.geometry:
+            r = sel.geometry
+            # Store rect relative to screen
+            # (left, top, width, height)
+            rect_tuple = (r['left'], r['top'], r['width'], r['height'])
+            self.frames.append({"image": img, "rect": rect_tuple})
+            self.lb_screens.insert(tk.END, f"Zrzut #{len(self.frames)} (Zaznaczony obszar: {rect_tuple})")
+        else:
+            # User cancelled selection but maybe still wants image? 
+            # Assume cancel means cancel add.
+            pass
+
+    def _remove_screenshot(self):
+        sel = self.lb_screens.curselection()
+        if not sel: return
+        idx = sel[0]
+        del self.frames[idx]
+        self.lb_screens.delete(idx)
+        # Renumber/refresh list? lazy way:
+        self.lb_screens.delete(0, tk.END)
+        for i, f in enumerate(self.frames):
+             info = f" (Zaznaczony obszar: {f['rect']})" if f['rect'] else " (Pełny ekran)"
+             self.lb_screens.insert(tk.END, f"Zrzut #{i+1}{info}")
+
+    def _start_opt(self):
+        if not self.frames:
+            messagebox.showerror("Błąd", "Dodaj przynajmniej jeden zrzut ekranu.")
+            return
+            
+        self.on_start(self.frames)
+        self.destroy()
