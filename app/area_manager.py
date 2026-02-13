@@ -770,8 +770,7 @@ class OptimizationCaptureWindow(tk.Toplevel):
         self.btn_add_area = ttk.Button(btn_box, text="Dodaj kolejny zrzut (Wycinek)", command=self._add_with_selection)
         self.btn_add_area.pack(fill=tk.X, pady=2)
 
-        self.btn_add_scr = ttk.Button(btn_box, text="Dodaj cały ekran", command=self._add_screenshot)
-        self.btn_add_scr.pack(fill=tk.X, pady=2)
+        # Removed Add Full Screen button as per request
         
         self.btn_rem = ttk.Button(btn_box, text="Usuń", command=self._remove_screenshot)
         self.btn_rem.pack(fill=tk.X, pady=2)
@@ -780,29 +779,18 @@ class OptimizationCaptureWindow(tk.Toplevel):
         ttk.Button(main_f, text="Uruchom Optymalizację", command=self._start_opt).pack(pady=10, fill=tk.X)
         self.status = ttk.Label(main_f, text="")
         self.status.pack(pady=5)
-        
-    def _add_screenshot(self):
-        # Hide manager and self
-        self.withdraw()
-        if self.area_manager: self.area_manager.withdraw()
-        import time
-        time.sleep(0.3)
-        
-        try:
-            img = capture_fullscreen()
-        except:
-            img = None
-        
-        self.deiconify()
-        if self.area_manager: self.area_manager.deiconify()
-        
-        if img:
-            self.frames.append({"image": img, "rect": None})
-            self.lb_screens.insert(tk.END, f"Zrzut #{len(self.frames)} (Pełny ekran)")
+    
+    # Removed _add_screenshot method
 
     def _add_with_selection(self):
+        # We need a reference to root to create the selector correctly
+        root = self.winfo_toplevel()
+        
         self.withdraw()
         if self.area_manager: self.area_manager.withdraw()
+        
+        # Ensure UI updates before sleeping
+        self.update()
         import time
         time.sleep(0.3)
         
@@ -818,10 +806,24 @@ class OptimizationCaptureWindow(tk.Toplevel):
             
         # Select area
         try:
-            # Pass None as parent to avoid issues with withdrawn windows
-            sel = AreaSelector(None, img) 
-            self.wait_window(sel)
+            # Explicitly find root to parent the selector
+            # This prevents issues with withdrawn parents hiding children
+            root = self._get_root()
+            
+            # Pass root as parent. If root is invalid, None (default) is used.
+            sel = AreaSelector(root, img)
+            
+            # Use wait_window() on the selector itself.
+            # When called without arguments (or with itself), it waits until the window is destroyed.
+            # This avoids dependency on other windows' state for the wait loop.
+            sel.wait_window()
+            
         except Exception as e:
+            # Fallback
+            print(f"Error opening selector: {e}")
+            self.deiconify()
+            if self.area_manager: self.area_manager.deiconify()
+            return
             # Fallback
             print(f"Error opening selector: {e}")
             self.deiconify()
@@ -842,6 +844,12 @@ class OptimizationCaptureWindow(tk.Toplevel):
             # User cancelled selection but maybe still wants image? 
             # Assume cancel means cancel add.
             pass
+
+    def _get_root(self):
+        w = self
+        while w.master:
+             w = w.master
+        return w
 
     def _remove_screenshot(self):
         sel = self.lb_screens.curselection()
