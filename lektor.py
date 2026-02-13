@@ -284,7 +284,8 @@ class LektorApp:
         btn_areas = tk.Button(grp_act, text="Zarządzaj Obszarami", command=self.open_area_manager, bg="#e0e0e0", relief="raised")
         btn_areas.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
-        # Removed 'Wykryj Ustawienia' button as requested
+        btn_detect = tk.Button(grp_act, text="Wykryj Ustawienia", command=self.detect_optimal_settings, bg="#e0e0e0", relief="raised")
+        btn_detect.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
         # Removed old subtitle colors section
         # grp_sub = ttk.LabelFrame(panel, text="Kolory napisów", padding=10) ...
