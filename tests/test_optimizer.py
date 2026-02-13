@@ -45,11 +45,11 @@ class TestSettingsOptimizer(unittest.TestCase):
         self.assertIn('optimized_area', result)
         
         # Sprawdź czy algorytm przeliczył obszar
-        # rough (10,10) + bbox offset (0,0) -> 10,10
-        # wymiary z bbox (50, 20)
+        # UPDATE: Now we expect the optimizer to return the rough_area without shrinking it
+        # to preserve margins added by the wizard.
+        # rough (10,10, 80, 40) should be returned as is.
         opt_area = result['optimized_area']
-        self.assertEqual(opt_area, (10, 10, 50, 20))
-
+        self.assertEqual(opt_area, (10, 10, 80, 40))
     @patch('app.optimizer.preprocess_image')
     @patch('app.optimizer.recognize_text')
     def test_optimize_no_match(self, mock_recognize, mock_preprocess):

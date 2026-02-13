@@ -217,11 +217,19 @@ class SettingsOptimizer:
                 # Średni score na obraz
                 avg_score = best_total_score / len(input_images)
                 
-                if best_bbox:
-                    bx, by, bw, bh = best_bbox
-                    opt_rect = (rx + bx, ry + by, bw, bh)
-                else:
-                    opt_rect = rough_area
+                # Use rough_area as the optimized area to preserve the user's intent (margin)
+                # Using the tight bbox (detect_text_bounds) removes the margin we carefully added.
+                opt_rect = rough_area
+                
+                # Update: If the detected area is significantly different or shifted, 
+                # we might inform the user, but overwriting the margin with a tight fit
+                # causes the "Shifted Right/Down" illusion when content changes slightly.
+                # However, if we really want to use the refined area, we must ensure 'bx, by' 
+                # are relative to 'rough_area' correctly. They seem to be.
+                # But 'bbox' comes from 'preprocess_image' which adds padding=4.
+                
+                # FIX: Always return the rough_area (Input + Margin) to respect the expansion.
+                # The text detection inside it is just for OCR validation.
 
                 return {
                     "score": avg_score, 
@@ -231,11 +239,8 @@ class SettingsOptimizer:
 
         # Fallback jeśli tylko 1 obraz LUB brak survivors
         if best_settings_st1:
-            if best_bbox_st1:
-                bx, by, bw, bh = best_bbox_st1
-                opt_rect = (rx + bx, ry + by, bw, bh)
-            else:
-                opt_rect = rough_area
+            # Same fix here
+            opt_rect = rough_area
                 
             return {
                 "score": best_score_st1, 
