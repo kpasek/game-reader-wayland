@@ -681,6 +681,9 @@ class AreaManagerWindow(tk.Toplevel):
                                                        "Czy chcesz zaktualizować obszar i parametry OCR?"):
                                     area['settings'].update(res['settings'])
                                     # Update rect (Union + Margin)
+                                    if 'rect' not in area or not area['rect']:
+                                        area['rect'] = {}
+                                    
                                     area['rect']['left'] = int(fx)
                                     area['rect']['top'] = int(fy)
                                     area['rect']['width'] = int(real_w)
