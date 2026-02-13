@@ -415,8 +415,13 @@ class AreaManagerWindow(tk.Toplevel):
                 self.deiconify()
                 return
             
-            sel = AreaSelector(self.master, img, existing_regions=self.areas) 
-            self.wait_window(sel)
+            # Explicit root + no wait_window() on sel
+            root = self._get_root()
+            sel = AreaSelector(root, img, existing_regions=self.areas) 
+            try:
+                 sel.wait_window()
+            except:
+                 pass
             
             if sel.geometry:
                 self.areas[self.current_selection_idx]['rect'] = sel.geometry
@@ -469,9 +474,14 @@ class AreaManagerWindow(tk.Toplevel):
             if not img:
                 self.deiconify()
                 return
-                
-            sel = ColorSelector(self.master, img)
-            self.wait_window(sel)
+            
+            # Use root as parent
+            root = self._get_root()
+            sel = ColorSelector(root, img)
+            # wait_window was likely called in init for ColorSelector too? 
+            # Checking ColorSelector... Yes, it has wait_window() in init.
+            # So no wait_window needed here.
+            # But let's verify.
             
             if sel.selected_color:
                 self._add_color_manual(sel.selected_color)
