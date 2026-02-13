@@ -30,6 +30,9 @@ try:
     HAS_PYNPUT = True
 except ImportError:
     HAS_PYNPUT = False
+    
+STANDARD_WIDTH = 3840
+STANDARD_HEIGHT = 2160
 
 from app.config_manager import ConfigManager
 from app.reader import ReaderThread

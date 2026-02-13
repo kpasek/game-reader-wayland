@@ -96,11 +96,11 @@ class AreaManagerWindow(tk.Toplevel):
         self.var_type = tk.StringVar()
         self.type_mapping = {"continuous": "Stały (Ciągłe czytanie)", "manual": "Wyzwalany (Na żądanie)"}
         self.rev_type_mapping = {v: k for k, v in self.type_mapping.items()}
-        cb = ttk.Combobox(grid, textvariable=self.var_type, values=list(self.type_mapping.values()), state="readonly")
-        cb.grid(row=0, column=1, sticky=tk.EW, padx=10)
-        cb.bind("<<ComboboxSelected>>", self._on_field_change)
+        self.cb_type = ttk.Combobox(grid, textvariable=self.var_type, values=list(self.type_mapping.values()), state="readonly")
+        self.cb_type.grid(row=0, column=1, sticky=tk.EW, padx=10)
+        self.cb_type.bind("<<ComboboxSelected>>", self._on_field_change)
         
-        # Enbaled (Continuous only)
+        # Tab General
         self.var_enabled = tk.BooleanVar()
         self.chk_enabled = ttk.Checkbutton(grid, text="Aktywny (Włączony)", variable=self.var_enabled, command=self._on_field_change)
         self.chk_enabled.grid(row=1, column=1, sticky=tk.W, padx=10)
@@ -192,7 +192,7 @@ class AreaManagerWindow(tk.Toplevel):
 
     def _init_tab_colors(self, parent):
         self.var_use_colors = tk.BooleanVar()
-        ttk.Checkbutton(parent, text="Używaj filtrowania kolorów (Dla tego obszaru)", variable=self.var_use_colors, command=self._on_field_change).pack(anchor=tk.W, pady=10)
+        self.chk_use_colors.pack(anchor=tk.W, pady=10)
         
         row = ttk.Frame(parent)
         row.pack(fill=tk.BOTH, expand=True)
@@ -323,158 +323,25 @@ class AreaManagerWindow(tk.Toplevel):
                  self.btn_remove.config(state=tk.DISABLED)
             else:
                  self.btn_remove.config(state=tk.NORMAL)
-        self.cv_colors.grid(row=5, column=1, sticky=tk.EW, pady=5)
-        
-        # Settings Button
-        ttk.Separator(f, orient=tk.HORIZONTAL).grid(row=6, column=0, columnspan=2, sticky=tk.EW, pady=15)
-        self.btn_settings = ttk.Button(f, text="Edytuj Ustawienia Obszaru...", command=self._open_settings_dialog)
-        self.btn_settings.grid(row=7, column=0, columnspan=2, sticky=tk.EW, pady=5)
-
-        self.cb_type.bind("<<ComboboxSelected>>", self._on_field_change)
-
-    def _open_settings_dialog(self):
-        if self.current_selection_idx < 0: return
-        area = self.areas[self.current_selection_idx]
-        if 'settings' not in area: area['settings'] = {}
-        
-        dlg = AreaSettingsDialog(self, area['settings'])
-        self.wait_window(dlg)
-        
-        if dlg.changed:
-            self._load_details(self.current_selection_idx) # Refresh UI
-
-    def _refresh_list(self):
-        self.lb_areas.delete(0, tk.END)
-        for i, area in enumerate(self.areas):
-            typ_raw = area.get('type', 'manual')
-            t = "Stały" if typ_raw == 'continuous' else "Wyzwalany"
-            if typ_raw not in ['continuous', 'manual']: t = typ_raw
-            
-            display = f"#{area.get('id', i+1)} [{t}]"
-
-            if typ_raw == 'continuous' and area.get('id') != 1:
-                state = "ON" if area.get('enabled', False) else "OFF"
-                display += f" [{state}]"
-
-            self.lb_areas.insert(tk.END, display)
-        
-        if self.current_selection_idx >= 0 and self.current_selection_idx < len(self.areas):
-            self.lb_areas.selection_set(self.current_selection_idx)
-            self._load_details(self.current_selection_idx)
-            
-            area = self.areas[self.current_selection_idx]
-            is_area1 = area.get('id') == 1
-            is_cont = area.get('type', 'manual') == 'continuous'
-
-            if is_area1:
-                self.btn_remove.config(state=tk.DISABLED)
-                self.btn_toggle.config(state=tk.DISABLED)
-            else:
-                self.btn_remove.config(state=tk.NORMAL)
-                if is_cont:
-                    self.btn_toggle.config(state=tk.NORMAL)
-                    txt = "Wyłącz" if area.get('enabled', False) else "Włącz"
-                    self.btn_toggle.config(text=txt)
-                else:
-                    self.btn_toggle.config(state=tk.DISABLED)
-                    self.btn_toggle.config(text="Włącz/Wyłącz")
         else:
-            self.current_selection_idx = -1
             self._disable_details()
 
-    def _toggle_area_enabled(self):
-        if self.current_selection_idx < 0: return
-        area = self.areas[self.current_selection_idx]
-        if area.get('type') != 'continuous' or area.get('id') == 1:
-            return
-        
-        curr = area.get('enabled', False)
-        area['enabled'] = not curr
-        self._refresh_list()
-
     def _disable_details(self):
+        self.ignore_updates = True
         self.var_type.set("")
-        self.lbl_rect.config(text="-")
+        self.lbl_rect.config(text="Brak zaznaczenia")
         self.var_hotkey.set("")
-        self.cv_colors.delete("all")
+        self.lb_colors.delete(0, tk.END)
         
-        for child in self.right_frame.winfo_children():
-            try:
-                child.configure(state=tk.DISABLED)
-            except: pass
-
-    def _load_details(self, idx):
-        area = self.areas[idx]
-        
-        for child in self.right_frame.winfo_children():
-            try:
-                child.configure(state=tk.NORMAL)
-            except: pass
-            
-        self.entry_hotkey.config(state="readonly")
-        self.cb_type.config(state="readonly")
-            
-        typ = area.get('type', 'manual')
-        display_typ = self.type_mapping.get(typ, typ)
-        self.var_type.set(display_typ)
-        
-        if area.get('id') == 1:
-            self.entry_hotkey.config(state=tk.DISABLED)
-            self.btn_record.config(state=tk.DISABLED)
-        else:
-            self.entry_hotkey.config(state="readonly")
-            self.btn_record.config(state=tk.NORMAL)
-        
-        r = area.get('rect', {})
-        if r:
-            self.lbl_rect.config(text=f"{r.get('left')}x{r.get('top')} ({r.get('width')}x{r.get('height')})")
-        else:
-            self.lbl_rect.config(text="Brak")
-            
-        self.var_hotkey.set(area.get('hotkey', ''))
-        
-        # Colors Preview
-        self.cv_colors.delete("all")
-        x_off = 5
-        y_off = 5
-        size = 20
-        
-        settings = area.get('settings', {})
-        colors = settings.get('subtitle_colors', [])
-        
-        if not colors:
-             self.cv_colors.create_text(5, 15, text="(Domyślne/Brak)", anchor=tk.W, fill="gray")
-        else:
-            for c in colors:
-                try:
-                    self.cv_colors.create_rectangle(x_off, y_off, x_off+size, y_off+size, 
-                                                    fill=c, outline="black")
-                    x_off += size + 5
-                except: pass
-            
-        if area.get('id') == 1:
-            self.cb_type.config(state=tk.DISABLED) 
-        else:
-            self.cb_type.config(state="readonly")
-
-    def _on_list_select(self, event):
-        sel = self.lb_areas.curselection()
-        if not sel: return
-        self.current_selection_idx = sel[0]
-        self._refresh_list() 
-
-    def _add_default_area(self):
-         self.areas.append({
-                "id": 1,
-                "type": "continuous",
-                "rect": None,
-                "hotkey": "",
-                "settings": {}
-            })
-         self._refresh_list()
+        for tab in [self.tab_general, self.tab_ocr, self.tab_colors]:
+             for child in tab.winfo_children():
+                 try: child.config(state=tk.DISABLED)
+                 except: pass
+        self.ignore_updates = False
 
     def _add_area(self):
         if len(self.areas) >= 5:
+            messagebox.showinfo("Limit", "Osiągnięto limit obszarów (5).")
             return
             
         existing_ids = {a.get('id', 0) for a in self.areas}
@@ -500,30 +367,23 @@ class AreaManagerWindow(tk.Toplevel):
             return
             
         del self.areas[self.current_selection_idx]
-        self.current_selection_idx = -1
+        if self.current_selection_idx >= len(self.areas):
+            self.current_selection_idx = len(self.areas) - 1
         self._refresh_list()
 
-    def _on_field_change(self, event=None):
-        if self.current_selection_idx < 0: return
-        disp_val = self.var_type.get()
-        real_val = self.rev_type_mapping.get(disp_val, disp_val)
-        self.areas[self.current_selection_idx]['type'] = real_val
-        self._refresh_list() 
-
-        
-        # Update UI state
-        if real_val == 'continuous':
-            self.entry_hotkey.config(state=tk.DISABLED)
-            self.btn_record.config(state=tk.DISABLED)
-            # Clear hotkey if switching to continuous? Optional
-        else:
-            self.entry_hotkey.config(state="readonly")
-            self.btn_record.config(state=tk.NORMAL)
+    def _add_default_area(self):
+         self.areas.append({
+                "id": 1,
+                "type": "continuous",
+                "rect": None,
+                "hotkey": "",
+                "settings": {}
+            })
+         self._refresh_list()
 
     def _select_area_on_screen(self):
         if self.current_selection_idx < 0: return
         self.withdraw()
-        # Sleep a bit to allow window to minimize
         self.update() 
         import time
         time.sleep(0.3)
@@ -535,6 +395,8 @@ class AreaManagerWindow(tk.Toplevel):
                 return
             
             sel = AreaSelector(self.master, img, existing_regions=self.areas) 
+            self.wait_window(sel)
+            
             if sel.geometry:
                 self.areas[self.current_selection_idx]['rect'] = sel.geometry
                 self._load_details(self.current_selection_idx)
@@ -556,6 +418,9 @@ class AreaManagerWindow(tk.Toplevel):
         colors = area['settings'].setdefault('subtitle_colors', [])
         if color not in colors:
             colors.append(color)
+            # Safe update
+            s = set(colors)
+            area['settings']['subtitle_colors'] = list(s)
             self._load_details(self.current_selection_idx)
 
     def _remove_color(self):
@@ -603,17 +468,13 @@ class AreaManagerWindow(tk.Toplevel):
         self.btn_record.config(text="Naciśnij klawisz...", state=tk.DISABLED)
         self.update()
         
-        # Simple listener for one key
         def on_press(key):
             try:
                 k = f"<{key.name}>"
             except AttributeError:
                 k = f"<{key.char}>"
-                
-            # Normalize common keys
-            # Lektor uses <f3>, <ctrl>, etc.
             self.after(0, lambda: self._set_hotkey(k))
-            return False # Stop listener
+            return False 
 
         listener = keyboard.Listener(on_press=on_press)
         listener.start()
@@ -622,7 +483,7 @@ class AreaManagerWindow(tk.Toplevel):
         if self.current_selection_idx >= 0:
             self.areas[self.current_selection_idx]['hotkey'] = key_str
             self.var_hotkey.set(key_str)
-        self.btn_record.config(text="Nagraj Skrót", state=tk.NORMAL)
+        self.btn_record.config(text="Nagraj", state=tk.NORMAL)
 
     def _clear_hotkey(self):
         if self.current_selection_idx >= 0:
@@ -630,6 +491,21 @@ class AreaManagerWindow(tk.Toplevel):
             self.var_hotkey.set("")
 
     def _save_and_close(self):
-        # Notify parent
-        self.on_save(self.areas)
-        self.destroy()
+        import copy
+        # Ensure data is clean (no Tk vars)
+        cleaned = []
+        for a in self.areas:
+            new_a = {}
+            for k, v in a.items():
+                if k == 'settings':
+                    new_a[k] = copy.deepcopy(v)
+                else:
+                    new_a[k] = v
+            cleaned.append(new_a)
+            
+        try:
+            self.on_save(cleaned)
+            self.destroy()
+        except Exception as e:
+            messagebox.showerror("Błąd zapisu", f"Nie udało się zapisać obszarów: {e}")
+            print(f"Save error: {e}")
