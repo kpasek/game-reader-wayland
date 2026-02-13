@@ -14,6 +14,19 @@ from app.matcher import find_best_match, precompute_subtitles
 from app.config_manager import ConfigManager
 
 
+class AreaConfigContext:
+    """
+    Pomocnicza klasa udająca ConfigManager, ale zwracająca ustawienia
+    specyficzne dla danego obszaru (połączone z globalnymi).
+    """
+    def __init__(self, effective_preset_data):
+        self.preset_data = effective_preset_data
+        self.settings = effective_preset_data
+
+    def load_preset(self, path=None):
+        return self.preset_data
+
+
 class CaptureWorker(threading.Thread):
     """Wątek PRODUCENTA: Robi zrzuty ekranu."""
 
@@ -379,10 +392,23 @@ class ReaderThread(threading.Thread):
                     continue
                 self.last_monitor_crops[idx] = crop.copy()
 
+                # --- Prepare Context for Area ---
+                area_settings = area_obj.get('settings', {}).copy()
+                # Legacy fallback for colors
+                if 'subtitle_colors' not in area_settings and 'colors' in area_obj:
+                     area_settings['subtitle_colors'] = area_obj['colors']
+                
+                merged_preset = preset.copy()
+                merged_preset.update(area_settings)
+                
+                area_ctx = AreaConfigContext(merged_preset)
+                current_subtitle_mode = merged_preset.get('subtitle_mode', 'Full Lines')
+
                 t_pre_start = time.perf_counter()
 
-                # Przekazanie parametru density_threshold + COLORS
-                processed, has_content, crop_bbox = preprocess_image(crop, self.config_manager, override_colors=area_obj.get('colors'))
+                # Używamy area_ctx zamiast globalnego configa. override_colors nie jest już potrzebne
+                # bo settings w kontekście ma już poprawne kolory.
+                processed, has_content, crop_bbox = preprocess_image(crop, area_ctx)
 
                 if not has_content:
                     # print("images has no content")
@@ -391,7 +417,7 @@ class ReaderThread(threading.Thread):
                 t_pre = (time.perf_counter() - t_pre_start) * 1000
 
                 t_ocr_start = time.perf_counter()
-                text = recognize_text(processed, self.config_manager)
+                text = recognize_text(processed, area_ctx)
 
                 t_ocr = (time.perf_counter() - t_ocr_start) * 1000
 
@@ -414,8 +440,8 @@ class ReaderThread(threading.Thread):
                 self.last_ocr_texts.append(text)
 
                 t_match_start = time.perf_counter()
-                # Przekazanie matcher_config
-                match = find_best_match(text, precomputed_data, self.subtitle_mode,
+                # Przekazanie dynamicznego trybu dopasowania (Area Specific)
+                match = find_best_match(text, precomputed_data, current_subtitle_mode,
                                         last_index=self.last_matched_idx,
                                         matcher_config=self.matcher_config)
                 t_match = (time.perf_counter() - t_match_start) * 1000

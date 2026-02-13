@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, colorchooser
 import threading
 from typing import List, Dict, Any, Optional
 
@@ -12,23 +12,193 @@ from app.area_selector import AreaSelector, ColorSelector
 from app.capture import capture_fullscreen
 
 
+class AreaSettingsDialog(tk.Toplevel):
+    def __init__(self, parent, settings: Dict[str, Any]):
+        super().__init__(parent)
+        self.title("Ustawienia Obszaru")
+        self.geometry("500x550")
+        self.settings = settings
+        
+        # Working Copy variables
+        self.colors = list(settings.get('subtitle_colors', []))
+        self.var_tolerance = tk.IntVar(value=settings.get('color_tolerance', 10))
+        self.var_scale = tk.DoubleVar(value=settings.get('ocr_scale_factor', 1.0))
+        self.var_sub_mode = tk.StringVar(value=settings.get('subtitle_mode', 'Full Lines'))
+        self.var_text_color_mode = tk.StringVar(value=settings.get('text_color_mode', 'Light'))
+        self.var_brightness = tk.IntVar(value=settings.get('brightness_threshold', 200))
+        self.var_contrast = tk.DoubleVar(value=settings.get('contrast', 0.0))
+        self.var_thickening = tk.IntVar(value=settings.get('text_thickening', 0))
+
+        self.changed = False
+        self._init_ui()
+
+    def _init_ui(self):
+        main = ttk.Frame(self, padding=15)
+        main.pack(fill=tk.BOTH, expand=True)
+
+        # --- Colors Section ---
+        lf_colors = ttk.Labelframe(main, text="Kolory Napisów", padding=10)
+        lf_colors.pack(fill=tk.X, pady=5)
+        
+        row_c = ttk.Frame(lf_colors)
+        row_c.pack(fill=tk.X)
+        
+        self.lb_colors = tk.Listbox(row_c, height=5, width=20)
+        self.lb_colors.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        btn_box = ttk.Frame(row_c)
+        btn_box.pack(side=tk.LEFT, fill=tk.Y, padx=5)
+        
+        ttk.Button(btn_box, text="Pobierz z Ekranu", command=self._pick_color_screen).pack(fill=tk.X, pady=2)
+        ttk.Button(btn_box, text="Dodaj Biały", command=lambda: self._add_color_manual("#FFFFFF")).pack(fill=tk.X, pady=2)
+        ttk.Button(btn_box, text="Usuń", command=self._remove_color).pack(fill=tk.X, pady=2)
+
+        ttk.Label(lf_colors, text="Tolerancja koloru:").pack(anchor=tk.W, pady=(10, 0))
+        xc = ttk.Frame(lf_colors)
+        xc.pack(fill=tk.X)
+        ttk.Scale(xc, from_=0, to=100, variable=self.var_tolerance, orient=tk.HORIZONTAL).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Label(xc, textvariable=self.var_tolerance, width=4).pack(side=tk.LEFT)
+
+        self._refresh_color_list()
+
+        # --- Parameters Section ---
+        lf_params = ttk.Labelframe(main, text="Parametry OCR i Obrazu", padding=10)
+        lf_params.pack(fill=tk.BOTH, expand=True, pady=10)
+        
+        grid = ttk.Frame(lf_params)
+        grid.pack(fill=tk.X)
+        grid.columnconfigure(1, weight=1)
+
+        # Helper for grid rows
+        r = 0
+        def add_param(label, widget):
+            nonlocal r
+            ttk.Label(grid, text=label).grid(row=r, column=0, sticky=tk.W, pady=5, padx=5)
+            widget.grid(row=r, column=1, sticky=tk.EW, pady=5, padx=5)
+            r += 1
+
+        # Scale
+        s_scale = tk.Spinbox(grid, from_=0.5, to=5.0, increment=0.25, textvariable=self.var_scale)
+        add_param("Skala OCR:", s_scale)
+        
+        # Mode
+        cb_mode = ttk.Combobox(grid, textvariable=self.var_sub_mode, values=["Full Lines", "Partial"], state="readonly")
+        add_param("Tryb dopasowania:", cb_mode)
+
+        # Text Color Mode
+        cb_tcm = ttk.Combobox(grid, textvariable=self.var_text_color_mode, values=["Light", "Dark", "Mixed"], state="readonly")
+        add_param("Kolor tekstu:", cb_tcm)
+        
+        # Brightness
+        f_br = ttk.Frame(grid)
+        ttk.Scale(f_br, from_=0, to=255, variable=self.var_brightness, orient=tk.HORIZONTAL).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Label(f_br, textvariable=self.var_brightness, width=4).pack(side=tk.LEFT)
+        add_param("Próg jasności:", f_br)
+        
+        # Contrast
+        f_co = ttk.Frame(grid)
+        ttk.Scale(f_co, from_=0.0, to=5.0, variable=self.var_contrast, orient=tk.HORIZONTAL).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        # Hack to show float with limited precision
+        lbl_cont = ttk.Label(f_co, text="0.0")
+        def update_lbl(*args): lbl_cont.config(text=f"{self.var_contrast.get():.1f}")
+        self.var_contrast.trace_add("write", update_lbl)
+        update_lbl()
+        lbl_cont.pack(side=tk.LEFT)
+        add_param("Kontrast:", f_co)
+
+        # Thickening
+        s_thick = tk.Spinbox(grid, from_=0, to=5, textvariable=self.var_thickening)
+        add_param("Pogrubienie:", s_thick)
+
+        # --- Buttons ---
+        btn_row = ttk.Frame(self, padding=10)
+        btn_row.pack(side=tk.BOTTOM, fill=tk.X)
+        ttk.Button(btn_row, text="Zapisz", command=self._save).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(btn_row, text="Anuluj", command=self.destroy).pack(side=tk.RIGHT)
+
+    def _refresh_color_list(self):
+        self.lb_colors.delete(0, tk.END)
+        for c in self.colors:
+            self.lb_colors.insert(tk.END, c)
+
+    def _add_color_manual(self, color):
+        if color not in self.colors:
+            self.colors.append(color)
+            self._refresh_color_list()
+
+    def _remove_color(self):
+        sel = self.lb_colors.curselection()
+        if not sel: return
+        idx = sel[0]
+        del self.colors[idx]
+        self._refresh_color_list()
+
+    def _pick_color_screen(self):
+        self.withdraw()
+        # Need capture logic similar to AreaSelector
+        # For simplicity, reuse logic or implement simplified
+        try:
+             time.sleep(0.2)
+             img = capture_fullscreen()
+             if not img: 
+                 self.deiconify()
+                 return
+             
+             sel = ColorSelector(self, img)
+             self.wait_window(sel)
+             
+             if sel.selected_color:
+                 self._add_color_manual(sel.selected_color)
+                 
+        except Exception as e:
+            print(e)
+            
+        self.deiconify()
+
+    def _save(self):
+        self.settings['subtitle_colors'] = self.colors
+        self.settings['color_tolerance'] = self.var_tolerance.get()
+        self.settings['ocr_scale_factor'] = self.var_scale.get()
+        self.settings['subtitle_mode'] = self.var_sub_mode.get()
+        self.settings['text_color_mode'] = self.var_text_color_mode.get()
+        self.settings['brightness_threshold'] = self.var_brightness.get()
+        self.settings['contrast'] = self.var_contrast.get()
+        self.settings['text_thickening'] = self.var_thickening.get()
+        self.changed = True
+        self.destroy()
+
+
+import time
+
 class AreaManagerWindow(tk.Toplevel):
     def __init__(self, parent, areas: List[Dict[str, Any]], on_save_callback):
         super().__init__(parent)
         self.title("Zarządzanie Obszarami")
         self.geometry("1000x600")
-        self.areas = [a.copy() for a in areas]  # Deep copy-ish (dicts are mutable but we replace lists)
-        # Ensure deep copy of nested lists like 'colors'
+        self.areas = [a.copy() for a in areas]
+        
+        # Migration: Move top-level colors provided by legacy code to settings
+        # Also ensure 'settings' dict exists
         for a in self.areas:
-            a['colors'] = list(a.get('colors', []))
+            if 'settings' not in a:
+                a['settings'] = {}
             
+            # Migrate legacy colors
+            if 'colors' in a and a['colors']:
+                if 'subtitle_colors' not in a['settings']:
+                    a['settings']['subtitle_colors'] = list(a['colors'])
+                del a['colors']
+                
+            # Ensure safe defaults if missing in settings
+            # We don't force them here to allow global defaults, but for UI we might needed defaults?
+            # area_ctx logic handles merging, so empty is fine.
+
         self.on_save = on_save_callback
         self.current_selection_idx = -1
 
         self._init_ui()
         self._refresh_list()
         
-        # Ensure Area 1 exists
         if not self.areas:
             self._add_default_area()
 
@@ -39,7 +209,7 @@ class AreaManagerWindow(tk.Toplevel):
 
         ttk.Label(left_frame, text="Lista Obszarów").pack(anchor=tk.W)
         
-        self.lb_areas = tk.Listbox(left_frame, width=20)
+        self.lb_areas = tk.Listbox(left_frame, width=25)
         self.lb_areas.pack(fill=tk.BOTH, expand=True, pady=5)
         self.lb_areas.bind('<<ListboxSelect>>', self._on_list_select)
 
@@ -64,23 +234,20 @@ class AreaManagerWindow(tk.Toplevel):
         self.right_frame = ttk.Labelframe(self, text="Szczegóły", padding=10)
         self.right_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        # Content of details (initially hidden/disabled)
         self._init_details_form()
 
     def _init_details_form(self):
         f = self.right_frame
-        f.columnconfigure(1, weight=1)  # Allow column 1 to expand
+        f.columnconfigure(1, weight=1)
         
         # Area Type
         ttk.Label(f, text="Typ:").grid(row=0, column=0, sticky=tk.W, pady=5)
         self.var_type = tk.StringVar()
-        # English keys mapping to Polish labels
         self.type_mapping = {"continuous": "Stały", "manual": "Wyzwalany"}
         self.rev_type_mapping = {v: k for k, v in self.type_mapping.items()}
         
         self.cb_type = ttk.Combobox(f, textvariable=self.var_type, values=list(self.type_mapping.values()), state="readonly")
         self.cb_type.grid(row=0, column=1, sticky=tk.EW, pady=5)
-        # Bind later to avoid early triggers
 
         # Bounds
         ttk.Label(f, text="Współrzędne:").grid(row=1, column=0, sticky=tk.W, pady=5)
@@ -101,35 +268,35 @@ class AreaManagerWindow(tk.Toplevel):
         self.btn_record.pack(side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(btn_hk_frame, text="Wyczyść", command=self._clear_hotkey).pack(side=tk.LEFT, padx=5)
 
-        # Colors
+        # Colors Preview (Read Only)
         ttk.Label(f, text="Kolory:").grid(row=5, column=0, sticky=tk.NW, pady=5)
-        self.cv_colors = tk.Canvas(f, height=40, bg="#dddddd", highlightthickness=1, highlightbackground="#999999")
+        self.cv_colors = tk.Canvas(f, height=30, bg="#f0f0f0", highlightthickness=0)
         self.cv_colors.grid(row=5, column=1, sticky=tk.EW, pady=5)
-        self.cv_colors.bind("<Button-1>", self._on_color_click)
-        self.cv_colors.bind("<Motion>", self._on_color_hover)
         
-        btn_col_frame = ttk.Frame(f)
-        btn_col_frame.grid(row=6, column=0, columnspan=2, sticky=tk.EW)
-        
-        # Color buttons row 1
-        c_row1 = ttk.Frame(btn_col_frame)
-        c_row1.pack(fill=tk.X)
-        ttk.Button(c_row1, text="+ Dodaj Kolor", command=self._add_color).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        # Settings Button
+        ttk.Separator(f, orient=tk.HORIZONTAL).grid(row=6, column=0, columnspan=2, sticky=tk.EW, pady=15)
+        self.btn_settings = ttk.Button(f, text="Edytuj Ustawienia Obszaru...", command=self._open_settings_dialog)
+        self.btn_settings.grid(row=7, column=0, columnspan=2, sticky=tk.EW, pady=5)
 
-        # Color buttons row 2
-        c_row2 = ttk.Frame(btn_col_frame)
-        c_row2.pack(fill=tk.X, pady=(2,0))
-        ttk.Button(c_row2, text="+ Dodaj Biały", command=self._add_white_color).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        
-        # Bind events at the end to prevent AttributeError on early trigger
         self.cb_type.bind("<<ComboboxSelected>>", self._on_field_change)
+
+    def _open_settings_dialog(self):
+        if self.current_selection_idx < 0: return
+        area = self.areas[self.current_selection_idx]
+        if 'settings' not in area: area['settings'] = {}
+        
+        dlg = AreaSettingsDialog(self, area['settings'])
+        self.wait_window(dlg)
+        
+        if dlg.changed:
+            self._load_details(self.current_selection_idx) # Refresh UI
 
     def _refresh_list(self):
         self.lb_areas.delete(0, tk.END)
         for i, area in enumerate(self.areas):
             typ_raw = area.get('type', 'manual')
             t = "Stały" if typ_raw == 'continuous' else "Wyzwalany"
-            if typ_raw not in ['continuous', 'manual']: t = typ_raw # Fallback
+            if typ_raw not in ['continuous', 'manual']: t = typ_raw
             
             display = f"#{area.get('id', i+1)} [{t}]"
 
@@ -147,7 +314,6 @@ class AreaManagerWindow(tk.Toplevel):
             is_area1 = area.get('id') == 1
             is_cont = area.get('type', 'manual') == 'continuous'
 
-            # Update buttons state
             if is_area1:
                 self.btn_remove.config(state=tk.DISABLED)
                 self.btn_toggle.config(state=tk.DISABLED)
@@ -175,7 +341,6 @@ class AreaManagerWindow(tk.Toplevel):
         self._refresh_list()
 
     def _disable_details(self):
-        # Clear and disable fields
         self.var_type.set("")
         self.lbl_rect.config(text="-")
         self.var_hotkey.set("")
@@ -189,21 +354,18 @@ class AreaManagerWindow(tk.Toplevel):
     def _load_details(self, idx):
         area = self.areas[idx]
         
-        # Enable all children initially
         for child in self.right_frame.winfo_children():
             try:
                 child.configure(state=tk.NORMAL)
             except: pass
             
-        self.entry_hotkey.config(state="readonly") # Keep readonly
+        self.entry_hotkey.config(state="readonly")
         self.cb_type.config(state="readonly")
             
         typ = area.get('type', 'manual')
         display_typ = self.type_mapping.get(typ, typ)
         self.var_type.set(display_typ)
         
-        # Handle Hotkey State based on type
-        # Allow hotkeys for continuous areas EXCEPT area #1 (which is always ON)
         if area.get('id') == 1:
             self.entry_hotkey.config(state=tk.DISABLED)
             self.btn_record.config(state=tk.DISABLED)
@@ -215,27 +377,29 @@ class AreaManagerWindow(tk.Toplevel):
         if r:
             self.lbl_rect.config(text=f"{r.get('left')}x{r.get('top')} ({r.get('width')}x{r.get('height')})")
         else:
-            self.lbl_rect.config(text="Brak (cały ekran?)")
+            self.lbl_rect.config(text="Brak")
             
         self.var_hotkey.set(area.get('hotkey', ''))
         
+        # Colors Preview
         self.cv_colors.delete("all")
         x_off = 5
-        y_off = 10
+        y_off = 5
         size = 20
-        colors = area.get('colors', [])
+        
+        settings = area.get('settings', {})
+        colors = settings.get('subtitle_colors', [])
+        
         if not colors:
-             self.cv_colors.create_text(5, 20, text="(brak)", anchor=tk.W, fill="gray")
+             self.cv_colors.create_text(5, 15, text="(Domyślne/Brak)", anchor=tk.W, fill="gray")
         else:
-            for i, c in enumerate(colors):
-                tag = f"col_{i}"
+            for c in colors:
                 try:
                     self.cv_colors.create_rectangle(x_off, y_off, x_off+size, y_off+size, 
-                                                    fill=c, outline="black", tags=(tag, "clickable"))
+                                                    fill=c, outline="black")
                     x_off += size + 5
                 except: pass
             
-        # Area 1 special rules
         if area.get('id') == 1:
             self.cb_type.config(state=tk.DISABLED) 
         else:
@@ -253,7 +417,7 @@ class AreaManagerWindow(tk.Toplevel):
                 "type": "continuous",
                 "rect": None,
                 "hotkey": "",
-                "colors": []
+                "settings": {}
             })
          self._refresh_list()
 
@@ -261,7 +425,6 @@ class AreaManagerWindow(tk.Toplevel):
         if len(self.areas) >= 5:
             return
             
-        # Determine next ID
         existing_ids = {a.get('id', 0) for a in self.areas}
         next_id = 1
         while next_id in existing_ids:
@@ -272,7 +435,7 @@ class AreaManagerWindow(tk.Toplevel):
             "type": "manual",
             "rect": None,
             "hotkey": "",
-            "colors": []
+            "settings": {}
         })
         self.current_selection_idx = len(self.areas) - 1
         self._refresh_list()
@@ -290,14 +453,11 @@ class AreaManagerWindow(tk.Toplevel):
 
     def _on_field_change(self, event=None):
         if self.current_selection_idx < 0: return
-        # Update model from vars
-        
-        # Reverse map UI string to key
         disp_val = self.var_type.get()
         real_val = self.rev_type_mapping.get(disp_val, disp_val)
-        
         self.areas[self.current_selection_idx]['type'] = real_val
-        self._refresh_list() # To update label
+        self._refresh_list() 
+
         
         # Update UI state
         if real_val == 'continuous':

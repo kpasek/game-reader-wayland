@@ -1055,14 +1055,21 @@ class LektorApp:
                          "type": "continuous", 
                          "rect": new_rect, 
                          "hotkey": "", 
-                         "colors": best_settings.get('subtitle_colors', [])
+                         "settings": best_settings
                      })
                  else:
                      # Update existing
                      for area in current_areas:
                          if area.get('id') == target_id:
                              area['rect'] = new_rect
-                             area['colors'] = best_settings.get('subtitle_colors', [])
+                             # Update or create settings dict
+                             if 'settings' not in area:
+                                 area['settings'] = {}
+                             area['settings'].update(best_settings)
+                             
+                             # Remove legacy top-level colors if present to avoid confusion
+                             if 'colors' in area:
+                                 del area['colors']
                              break
                  
                  preset_data['areas'] = current_areas
