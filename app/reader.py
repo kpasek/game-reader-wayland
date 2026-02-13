@@ -43,8 +43,14 @@ class CaptureWorker(threading.Thread):
 
     def run(self):
         print("CaptureWorker thread started.")
+        frame_count = 0
         while not self.stop_event.is_set():
             loop_start = time.monotonic()
+            
+            # Heartbeat log every 10 frames
+            frame_count += 1
+            if frame_count % 10 == 0:
+                 print(f"DEBUG: CaptureWorker loop #{frame_count}")
 
             self.capture()
 
@@ -206,11 +212,44 @@ class ReaderThread(threading.Thread):
         
         # Parse original resolution
         orig_w, orig_h = None, None
-        if original_res_str:
-            try:
-                orig_w, orig_h = map(int, original_res_str.lower().split('x'))
-            except:
-                pass
+        
+        # FIX: If preset lacks resolution, try to infer or default to standard 4K if coordinates seem high
+        if not original_res_str:
+             print("DEBUG: Preset has no resolution defined! attempting heuristic or default.")
+             # Check if any area has coords > 2560 or > 1440
+             max_x = max([m.get('left',0) + m.get('width',0) for m in monitors]) if monitors else 0
+             max_y = max([m.get('top',0) + m.get('height',0) for m in monitors]) if monitors else 0
+             
+             if max_x > 2560 or max_y > 1440:
+                 original_res_str = "3840x2160"
+                 print("DEBUG: Heuristic detected 4K coordinates. Assuming source is 3840x2160.")
+             elif max_x > 1920 or max_y > 1080:
+                 original_res_str = "2560x1440"
+             else:
+                 original_res_str = "1920x1080" # Default fallback
+        
+        # original_res_str logic bypassed in favor of Forced 4K standard
+        # if original_res_str:
+
+
+        # --- FIX FOR "ALWAYS 4K NORMALIZED" LOGIC ---
+        # User confirmed that areas are saved normalized to 4K (3840x2160).
+        # Therefore, we should treat the source resolution as 3840x2160 by default, 
+        # unless explicit override is needed. This prevents issues where 'resolution' field 
+        # in preset is outdated (e.g. 1920x1080) but coordinates are 4K-based.
+        
+        orig_w, orig_h = 3840, 2160
+        # --------------------------------------------
+
+        print(f"DEBUG: _scale_monitor_areas. Orig(Forced 4K): {orig_w}x{orig_h}, Dest: {dest_w}x{dest_h}, Target: {self.target_resolution}")
+
+        # --- EXPLICIT OVERRIDE REMOVED ---
+        # We must trust 'dest_w' derived from _physical_res (screenshot size).
+        # If Spectacle returns 3840px image on a 150% scaled screen (logical 2560),
+        # we MUST use 3840 as dest, otherwise we scale down coords and crop top-left.
+        # if self.target_resolution:
+        #    dest_w, dest_h = self.target_resolution
+        # ---------------------------------------
 
         # Fallback Logic if Physical Capture failed
         if not dest_w or not dest_h:
@@ -223,36 +262,21 @@ class ReaderThread(threading.Thread):
              else:
                  return monitors
         
-        # HiDPI Heuristic Logic
-        # Detect if we have a mismatch between Detected (Logical) and Preset (Physical) resolution
-        if orig_w and orig_h and dest_w and dest_h:
-            target_w = self.target_resolution[0] if self.target_resolution else 0
-            
-            # Check if this looks like a fractional scaling artifact (e.g. 1.5x which is 3840->2560)
-            # Common scaling factors: 1.25, 1.5, 1.75.
-            # Ratios like 2.0 (1920x1080) are ambiguous (could be genuine 1080p screen),
-            # but 1.5 (2560x1440) is almost certainly HiDPI scaling on a 4K panel.
-            ratio_w = orig_w / dest_w
-            is_fractional_scale = abs(ratio_w - 1.5) < 0.05 or abs(ratio_w - 1.25) < 0.05 or abs(ratio_w - 1.75) < 0.05
-            
-            # Use stricter condition: Detected matches Target (Logical) AND (Detected < Preset) AND (Fractional Scale OR User forced via config?)
-            # For now, explicit fractional scale detection is safest to avoid breaking 1080p users.
-            
-            if (orig_w > dest_w) and (target_w and abs(dest_w - target_w) < 50) and is_fractional_scale:
-                 if self.log_queue and not hasattr(self, '_logged_hidpi'):
-                    self._logged_hidpi = True
-                    msg = f"HiDPI Scaling Trap Detected (Ratio {ratio_w:.2f})! Overriding detected {dest_w}x{dest_h} with Preset {orig_w}x{orig_h}"
-                    self.log_queue.put({"time": "WARN", "line_text": msg})
-                    try:
-                       with open("session_debug.log", "a") as f: f.write(f"{datetime.now()} {msg}\n")
-                    except: pass
-                 dest_w, dest_h = orig_w, orig_h
+        # HiDPI Heuristic Logic (Causing issues with valid scaling, removing)
+        # The previous logic below was detecting 3840 > 2560 and assuming it was 
+        # a HiDPI bug, thus forcing dest=orig and effectively disabling scaling.
+        # We need scaling to happen (3840 -> 2560).
+        
+        # if (orig_w > dest_w) ... [REMOVED]
         
         if not orig_w or not orig_h: return monitors
         
-        if (orig_w, orig_h) == (dest_w, dest_h): return monitors
+        if (orig_w, orig_h) == (dest_w, dest_h): 
+             print("DEBUG: Resolution Match - No Scaling needed.")
+             return monitors
         
         sx, sy = dest_w / orig_w, dest_h / orig_h
+        print(f"DEBUG: Applying Scale Factors: X={sx:.3f}, Y={sy:.3f}")
         return [{'left': int(m['left'] * sx), 'top': int(m['top'] * sy),
                  'width': int(m['width'] * sx), 'height': int(m['height'] * sy)} for m in monitors]
 
@@ -319,9 +343,13 @@ class ReaderThread(threading.Thread):
                 continue
             
             # Scale rect
-            scaled_list = self._scale_monitor_areas([r], preset.get('resolution'))
+            preset_res = preset.get('resolution')
+            print(f"DEBUG: Scaling Area {area.get('id')} Input: {r} | PresetRes: {preset_res}")
+            
+            scaled_list = self._scale_monitor_areas([r], preset_res)
             if scaled_list:
                 area['rect'] = scaled_list[0]
+                print(f"DEBUG: Scaling Area {area.get('id')} Output: {area['rect']}")
                 valid_areas.append(area)
             else:
                 print(f"DEBUG: Scaling returned empty for area {area.get('id')}")
@@ -349,6 +377,7 @@ class ReaderThread(threading.Thread):
         max_r = max(m['left'] + m['width'] for m in monitors)
         max_b = max(m['top'] + m['height'] for m in monitors)
         unified_area = {'left': min_l, 'top': min_t, 'width': max_r - min_l, 'height': max_b - min_t}
+        print(f"DEBUG: Unified Area: {unified_area}")
 
         self.current_unified_area = {
             'left': min_l,
@@ -387,6 +416,33 @@ class ReaderThread(threading.Thread):
                     self.img_queue.get_nowait()
                 except queue.Empty:
                     pass
+            
+            # DEBUG: Save first capture to verify we see the screen
+            if not getattr(self, '_debug_capture_saved', False):
+                 if hasattr(full_img, 'save'):
+                     try:
+                        # Draw the crop area on the full image for debugging
+                        debug_viz = full_img.copy()
+                        from PIL import ImageDraw
+                        draw = ImageDraw.Draw(debug_viz)
+                        
+                        # Draw Unified Area
+                        ua = self.current_unified_area
+                        u_rect = [ua['left'], ua['top'], ua['left']+ua['width'], ua['top']+ua['height']]
+                        draw.rectangle(u_rect, outline="red", width=5)
+                        draw.text((ua['left']+10, ua['top']+10), "Unified Area (Crop)", fill="red")
+                        
+                        # Draw Individual Areas
+                        for i, area in enumerate(valid_areas):
+                             r = area['rect']
+                             draw.rectangle([r['left'], r['top'], r['left']+r['width'], r['top']+r['height']], outline="blue", width=3)
+                             draw.text((r['left']+5, r['top']+5), f"Area {i}", fill="blue")
+
+                        debug_viz.save("debug_full_capture_viz.png")
+                        print("DEBUG: Saved debug_full_capture_viz.png with RED rectangle showing crop area.")
+                        self._debug_capture_saved = True
+                     except Exception as e:
+                        print(f"DEBUG: Failed to save viz capture: {e}")
 
             for idx, area_obj in enumerate(valid_areas):
                 t_start_proc = time.perf_counter()
@@ -422,7 +478,9 @@ class ReaderThread(threading.Thread):
 
                 last_crop = self.last_monitor_crops.get(idx)
                 if self._images_are_similar(crop, last_crop, similarity):
-                    # print("images are similar")
+                    # Throttle "no change" logs
+                    if idx == 0 and time.time() % 2 < 0.2: 
+                        print("DEBUG: No change detected (Skipping OCR)")
                     continue
                 self.last_monitor_crops[idx] = crop.copy()
 
@@ -434,6 +492,10 @@ class ReaderThread(threading.Thread):
                 
                 merged_preset = preset.copy()
                 merged_preset.update(area_settings)
+
+                # DEBUG LOGGING FOR SETTINGS
+                if idx == 0 and time.time() % 5 < 0.2:
+                     print(f"DEBUG: Processing Area {area_id}. Colors: {merged_preset.get('subtitle_colors')}, Tol: {merged_preset.get('color_tolerance')}, Bright: {merged_preset.get('brightness_threshold')}")
                 
                 area_ctx = AreaConfigContext(merged_preset)
                 current_subtitle_mode = merged_preset.get('subtitle_mode', 'Full Lines')
