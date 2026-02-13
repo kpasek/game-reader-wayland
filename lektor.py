@@ -237,11 +237,11 @@ class LektorApp:
         preset_menu.add_command(label="Wykryj optymalne ustawienia", command=self.detect_optimal_settings)
         menubar.add_cascade(label="Lektor", menu=preset_menu)
 
-        main_area_menu = tk.Menu(menubar, tearoff=0)
+        # Removed main area menu as requested
+        # main_area_menu = tk.Menu(menubar, tearoff=0)
         # main_area_menu.add_command(label="Zarządzaj Obszarami...", command=self.open_area_manager)
         # main_area_menu.add_separator()
         # main_area_menu.add_command(label="Ustaw główny obszar (1)", command=self.set_area_1_direct)
-
         # menubar.add_cascade(label="Obszary", menu=main_area_menu)
 
         help_menu = tk.Menu(menubar, tearoff=0)
@@ -269,29 +269,22 @@ class LektorApp:
             self._update_scale_for_resolution(self.var_resolution.get())
         ])
         ttk.Button(f_res, text="Dopasuj rozdz.", command=self.auto_detect_resolution).pack(side=tk.LEFT, padx=5)
-        
-        # New Areas Button
-        ttk.Button(f_res, text="Obszary", command=self.open_area_manager).pack(side=tk.LEFT, padx=5)
-        
         self.btn_settings = ttk.Button(f_res, text="⚙ Ustawienia", command=self.open_settings)
         self.btn_settings.pack(side=tk.LEFT, padx=5)
 
-        # Kolory napisów
-        grp_sub = ttk.LabelFrame(panel, text="Kolory napisów", padding=10)
-        grp_sub.pack(fill=tk.X, pady=(5, 5))  # Padding żeby oddzielić od reszty
+        # Actions Panel (Replaces Colors Panel)
+        grp_act = ttk.LabelFrame(panel, text="Akcje", padding=10)
+        grp_act.pack(fill=tk.X, pady=5)
+        
+        # Big Buttons for main actions
+        btn_areas = tk.Button(grp_act, text="Zarządzaj Obszarami", command=self.open_area_manager, bg="#e0e0e0", relief="raised", height=2)
+        btn_areas.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
-        # Przycisk po lewej
-        self.btn_pick_color = ttk.Button(grp_sub, text="Dodaj biały", command=self.add_white_subtitle_color)
-        self.btn_pick_color.pack(side=tk.LEFT, padx=(0, 10))
-        self.btn_pick_color = ttk.Button(grp_sub, text="Wybierz kolor", command=self.add_subtitle_color)
-        self.btn_pick_color.pack(side=tk.LEFT, padx=(0, 10))
+        btn_detect = tk.Button(grp_act, text="Wykryj Ustawienia", command=self.detect_optimal_settings, bg="#d0f0ff", relief="raised", height=2)
+        btn_detect.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
-        # Canvas (lista kolorów) po prawej
-        # highlightthickness=0 usuwa brzydką ramkę wokół canvasu
-        self.color_canvas = tk.Canvas(grp_sub, height=24, bg="#f0f0f0", highlightthickness=0)
-        self.color_canvas.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        # Bindowanie kliknięcia w kolor
-        self.color_canvas.bind("<Button-1>", self.on_color_click)
+        # Removed old subtitle colors section
+        # grp_sub = ttk.LabelFrame(panel, text="Kolory napisów", padding=10) ...
 
         # --- AUDIO ---
         grp_aud = ttk.LabelFrame(panel, text="Kontrola Audio", padding=10)
