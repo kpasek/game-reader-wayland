@@ -238,11 +238,11 @@ class LektorApp:
         menubar.add_cascade(label="Lektor", menu=preset_menu)
 
         main_area_menu = tk.Menu(menubar, tearoff=0)
-        main_area_menu.add_command(label="Zarządzaj Obszarami...", command=self.open_area_manager)
-        main_area_menu.add_separator()
-        main_area_menu.add_command(label="Ustaw główny obszar (1)", command=self.set_area_1_direct)
+        # main_area_menu.add_command(label="Zarządzaj Obszarami...", command=self.open_area_manager)
+        # main_area_menu.add_separator()
+        # main_area_menu.add_command(label="Ustaw główny obszar (1)", command=self.set_area_1_direct)
 
-        menubar.add_cascade(label="Obszary", menu=main_area_menu)
+        # menubar.add_cascade(label="Obszary", menu=main_area_menu)
 
         help_menu = tk.Menu(menubar, tearoff=0)
         help_menu.add_command(label="Podgląd logów", command=self.show_logs)
@@ -269,6 +269,10 @@ class LektorApp:
             self._update_scale_for_resolution(self.var_resolution.get())
         ])
         ttk.Button(f_res, text="Dopasuj rozdz.", command=self.auto_detect_resolution).pack(side=tk.LEFT, padx=5)
+        
+        # New Areas Button
+        ttk.Button(f_res, text="Obszary", command=self.open_area_manager).pack(side=tk.LEFT, padx=5)
+        
         self.btn_settings = ttk.Button(f_res, text="⚙ Ustawienia", command=self.open_settings)
         self.btn_settings.pack(side=tk.LEFT, padx=5)
 
@@ -926,46 +930,104 @@ class LektorApp:
             messagebox.showinfo("Info", "Najpierw wybierz lub stwórz preset.")
             return
 
-        # 1. Zrzut ekranu
-        self.root.withdraw()
-        time.sleep(0.3)
-        img = capture_fullscreen()
-        
-        if not img:
-            self.root.deiconify()
-            messagebox.showerror("Błąd", "Nie udało się pobrać zrzutu ekranu.")
-            return
-
-        try:
-            # 2. Wybór obszaru (rough area)
-            sel = AreaSelector(self.root, img)
-            
-            if not sel.geometry:
-                self.root.deiconify()
-                return # Anulowano
-            
-            rough_area = (
-                sel.geometry['left'], 
-                sel.geometry['top'], 
-                sel.geometry['width'], 
-                sel.geometry['height']
-            )
-
-            # 3. Pobranie bazy napisów
-            data = self.config_mgr.load_preset(path)
-            txt_path = data.get('text_file_path')
-            
-            if not txt_path or not os.path.exists(txt_path):
-                self.root.deiconify()
-                messagebox.showerror("Błąd", "Nie znaleziono pliku napisów w ustawieniach presetu.")
-                return
+        # Check subtitles first
+        data = self.config_mgr.load_preset(path)
+        txt_path = data.get('text_file_path')
+        if not txt_path or not os.path.exists(txt_path):
+             messagebox.showerror("Błąd", "Nie znaleziono pliku napisów w ustawieniach presetu.")
+             return
                 
-            subtitle_lines = self.config_mgr.load_text_lines(txt_path)
-            if not subtitle_lines:
-                self.root.deiconify()
-                messagebox.showerror("Błąd", "Plik napisów jest pusty.")
-                return
+        subtitle_lines = self.config_mgr.load_text_lines(txt_path)
+        if not subtitle_lines:
+             messagebox.showerror("Błąd", "Plik napisów jest pusty.")
+             return
 
+        # Open Setup Dialog
+        self._show_optimization_setup(data, subtitle_lines, path)
+
+    def _show_optimization_setup(self, preset_data, subtitle_lines, preset_path):
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Konfiguracja Optymalizacji")
+        dlg.geometry("500x300")
+        
+        # State
+        state = {
+            "img": None,
+            "rough_area": None
+        }
+
+        # UI
+        ttk.Label(dlg, text="Kreator Optymalizacji", font=("Arial", 12, "bold")).pack(pady=10)
+        
+        # Mode
+        f_mode = ttk.Frame(dlg)
+        f_mode.pack(fill=tk.X, padx=20, pady=5)
+        ttk.Label(f_mode, text="Tryb Dopasowania:").pack(side=tk.LEFT)
+        var_mode = tk.StringVar(value=preset_data.get('subtitle_mode', 'Full Lines'))
+        cb_mode = ttk.Combobox(f_mode, textvariable=var_mode, values=["Full Lines", "Partial"], state="readonly")
+        cb_mode.pack(side=tk.LEFT, padx=10, fill=tk.X, expand=True)
+
+        # Instructions
+        info_text = (
+            "Instrukcja:\n"
+            "1. Kliknij 'Zrób zrzut i wybierz obszar'.\n"
+            "2. Gdy pojawi się pełny ekran, zaznacz myszką prostokąt, w którym znajdują się napisy.\n"
+            "3. Po zaznaczeniu, kliknij 'Uruchom', aby rozpocząć analizę."
+        )
+        ttk.Label(dlg, text=info_text, foreground="#555", justify=tk.LEFT).pack(pady=10, padx=20, fill=tk.X)
+        
+        # Status
+        lbl_status = ttk.Label(dlg, text="Brak zrzutu ekranu.", foreground="red")
+        lbl_status.pack(pady=10)
+
+        btn_container = ttk.Frame(dlg)
+        btn_container.pack(fill=tk.X, pady=20, padx=20)
+        
+        btn_run = ttk.Button(btn_container, text="Uruchom", state=tk.DISABLED)
+        
+        def on_capture():
+            dlg.withdraw()
+            self.root.withdraw()
+            time.sleep(0.3)
+            
+            try:
+                img = capture_fullscreen()
+                if not img:
+                    messagebox.showerror("Błąd", "Nie udało się pobrać zrzutu.")
+                    return
+                
+                sel = AreaSelector(self.root, img) # Opens modal
+                
+                if sel.geometry:
+                    state["img"] = img
+                    state["rough_area"] = (
+                        sel.geometry['left'], 
+                        sel.geometry['top'], 
+                        sel.geometry['width'], 
+                        sel.geometry['height']
+                    )
+                    lbl_status.config(text=f"Zrzut gotowy. Obszar: {sel.geometry['width']}x{sel.geometry['height']}", foreground="green")
+                    btn_run.config(state=tk.NORMAL)
+                else:
+                    lbl_status.config(text="Anulowano wybór obszaru.", foreground="orange")
+                    
+            except Exception as e:
+                messagebox.showerror("Błąd", f"Zrzut ekranu: {e}")
+            finally:
+                self.root.deiconify()
+                dlg.deiconify()
+
+        def on_run():
+            if not state["img"] or not state["rough_area"]: return
+            dlg.destroy()
+            selected_mode = var_mode.get()
+            self._start_optimization_process(state["img"], state["rough_area"], subtitle_lines, preset_path, preset_data, selected_mode)
+
+        ttk.Button(btn_container, text="1. Zrób zrzut i wybierz obszar", command=on_capture).pack(fill=tk.X, pady=5)
+        btn_run.config(command=on_run)
+        btn_run.pack(fill=tk.X, pady=5)
+
+    def _start_optimization_process(self, img, rough_area, subtitle_lines, path, data, mode="Full Lines"):
             # 4. Uruchomienie algorytmu w wątku (z UI oczekiwania)
             wait_win = tk.Toplevel(self.root)
             wait_win.title("Przetwarzanie...")
@@ -985,7 +1047,7 @@ class LektorApp:
             def worker():
                 try:
                     optimizer = SettingsOptimizer(self.config_mgr)
-                    res = optimizer.optimize(img, rough_area, subtitle_lines)
+                    res = optimizer.optimize(img, rough_area, subtitle_lines, mode)
                     thread_context["result"] = res
                 except Exception as e:
                     thread_context["error"] = e
@@ -1003,10 +1065,9 @@ class LektorApp:
 
             check_thread()
 
-        except Exception as e:
-            self.root.deiconify()
-            print(f"Błąd optymalizacji: {e}")
-            messagebox.showerror("Błąd", f"Wystąpił błąd podczas optymalizacji: {e}")
+    def _unused_legacy_detect_method(self):
+        # Placeholder to replace original method body cleanly
+        pass
 
     def _on_optimization_finished(self, context, preset_path, preset_data):
         if context["error"]:
@@ -1072,6 +1133,17 @@ class LektorApp:
                                  del area['colors']
                              break
                  
+                 preset_data['areas'] = current_areas
+            elif dialog_res["target_id"] is not None:
+                # Update settings only (no area change)
+                 target_id = dialog_res["target_id"]
+                 for area in current_areas:
+                     if area.get('id') == target_id:
+                         if 'settings' not in area:
+                             area['settings'] = {}
+                         area['settings'].update(best_settings)
+                         if 'colors' in area: del area['colors']
+                         break
                  preset_data['areas'] = current_areas
 
             self.config_mgr.save_preset(preset_path, preset_data)

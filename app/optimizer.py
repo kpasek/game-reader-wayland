@@ -68,7 +68,8 @@ class SettingsOptimizer:
     def optimize(self, 
                  image: Image.Image, 
                  rough_area: Tuple[int, int, int, int], 
-                 subtitle_db: List[str]) -> Dict[str, Any]:
+                 subtitle_db: List[str],
+                 match_mode: str = "Full Lines") -> Dict[str, Any]:
         """
         Znajduje optymalne ustawienia OCR i matchingu dla zadanego wycinka ekranu (rough_area)
         i bazy napisów.
@@ -145,7 +146,7 @@ class SettingsOptimizer:
                     "contract": 0 
                 })
 
-                score, bbox = self._evaluate_settings(crop, settings, precomputed_db)
+                score, bbox = self._evaluate_settings(crop, settings, precomputed_db, match_mode)
                 if score >= 80:
                     candidates.append((score, settings, bbox))
                 
@@ -177,7 +178,7 @@ class SettingsOptimizer:
                 "text_thickening": 0 # W trybie binarnym zazwyczaj nie pogrubiamy, lub jest to osobny parametr (tutaj upraszczamy)
              })
 
-             score, bbox = self._evaluate_settings(crop, settings, precomputed_db)
+             score, bbox = self._evaluate_settings(crop, settings, precomputed_db, match_mode)
              if score >= 80:
                  candidates.append((score, settings, bbox))
 
@@ -234,7 +235,8 @@ class SettingsOptimizer:
     def _evaluate_settings(self, 
                            crop: Image.Image, 
                            settings: Dict[str, Any], 
-                           precomputed_db: Any) -> Tuple[float, Optional[Tuple[int, int, int, int]]]:
+                           precomputed_db: Any,
+                           match_mode: str = "Full Lines") -> Tuple[float, Optional[Tuple[int, int, int, int]]]:
         """
         Pomocnicza funkcja wykonująca jeden krok ewaluacji: Preprocess -> OCR -> Match.
         Zwraca (score, bbox) lub (0, None) w przypadku błędu/braku wyniku.
@@ -264,7 +266,7 @@ class SettingsOptimizer:
 
         # C. Matching
         try:
-            match_result = find_best_match(ocr_text, precomputed_db, mode="Full Lines")
+            match_result = find_best_match(ocr_text, precomputed_db, mode=match_mode)
         except Exception:
             return 0, None
 

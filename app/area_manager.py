@@ -28,6 +28,7 @@ class AreaSettingsDialog(tk.Toplevel):
         self.var_brightness = tk.IntVar(value=settings.get('brightness_threshold', 200))
         self.var_contrast = tk.DoubleVar(value=settings.get('contrast', 0.0))
         self.var_thickening = tk.IntVar(value=settings.get('text_thickening', 0))
+        self.var_use_colors = tk.BooleanVar(value=settings.get('use_colors', True))
 
         self.changed = False
         self._init_ui()
@@ -40,6 +41,9 @@ class AreaSettingsDialog(tk.Toplevel):
         lf_colors = ttk.Labelframe(main, text="Kolory Napisów", padding=10)
         lf_colors.pack(fill=tk.X, pady=5)
         
+        # Master Toggle
+        ttk.Checkbutton(lf_colors, text="Włącz filtrowanie kolorów", variable=self.var_use_colors).pack(anchor=tk.W, pady=(0, 5))
+
         row_c = ttk.Frame(lf_colors)
         row_c.pack(fill=tk.X)
         
@@ -74,8 +78,16 @@ class AreaSettingsDialog(tk.Toplevel):
         def add_param(label, widget):
             nonlocal r
             ttk.Label(grid, text=label).grid(row=r, column=0, sticky=tk.W, pady=5, padx=5)
-            widget.grid(row=r, column=1, sticky=tk.EW, pady=5, padx=5)
-            r += 1
+        f_scale = ttk.Frame(grid)
+        ttk.Scale(f_scale, from_=0.5, to=3.0, variable=self.var_scale, orient=tk.HORIZONTAL).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        lbl_scale = ttk.Label(f_scale, text="1.0")
+        def update_scale(*args): lbl_scale.config(text=f"{self.var_scale.get():.2f}")
+        self.var_scale.trace_add("write", update_scale)
+        update_scale()
+        lbl_scale.pack(side=tk.LEFT, padx=5)
+        add_param("Skala OCR:", f_scale)
+        # s_scale = tk.Spinbox(grid, from_=0.5, to=5.0, increment=0.25, textvariable=self.var_scale)
+        #     r += 1
 
         # Scale
         s_scale = tk.Spinbox(grid, from_=0.5, to=5.0, increment=0.25, textvariable=self.var_scale)
@@ -98,19 +110,31 @@ class AreaSettingsDialog(tk.Toplevel):
         # Contrast
         f_co = ttk.Frame(grid)
         ttk.Scale(f_co, from_=0.0, to=5.0, variable=self.var_contrast, orient=tk.HORIZONTAL).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        # Hack to show float with limited precision
-        lbl_cont = ttk.Label(f_co, text="0.0")
-        def update_lbl(*args): lbl_cont.config(text=f"{self.var_contrast.get():.1f}")
-        self.var_contrast.trace_add("write", update_lbl)
-        update_lbl()
-        lbl_cont.pack(side=tk.LEFT)
+        
+        lbl_contrast_val = ttk.Label(f_co, text="0.0")
+        def update_contrast_lbl(*args): 
+            try:
+                lbl_contrast_val.config(text=f"{self.var_contrast.get():.1f}")
+            except: pass
+        self.var_contrast.trace_add("write", update_contrast_lbl)
+        update_contrast_lbl()
+        lbl_contrast_val.pack(side=tk.LEFT, padx=5)
         add_param("Kontrast:", f_co)
 
         # Thickening
-        s_thick = tk.Spinbox(grid, from_=0, to=5, textvariable=self.var_thickening)
-        add_param("Pogrubienie:", s_thick)
+        f_thick = ttk.Frame(grid)
+        ttk.Scale(f_thick, from_=0, to=5, variable=self.var_thickening, orient=tk.HORIZONTAL).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        lbl_thick = ttk.Label(f_thick, text="0")
+        def update_thick(*args): 
+            try:
+                lbl_thick.config(text=f"{self.var_thickening.get():d}")
+            except: pass
+        self.var_thickening.trace_add("write", update_thick)
+        update_thick()
+        lbl_thick.pack(side=tk.LEFT, padx=5)
+        add_param("Pogrubienie:", f_thick)
 
-        # --- Buttons ---
+        # Buttons
         btn_row = ttk.Frame(self, padding=10)
         btn_row.pack(side=tk.BOTTOM, fill=tk.X)
         ttk.Button(btn_row, text="Zapisz", command=self._save).pack(side=tk.RIGHT, padx=5)
@@ -140,7 +164,7 @@ class AreaSettingsDialog(tk.Toplevel):
         try:
              time.sleep(0.2)
              img = capture_fullscreen()
-             if not img: 
+             if not img:
                  self.deiconify()
                  return
              
@@ -149,14 +173,17 @@ class AreaSettingsDialog(tk.Toplevel):
              
              if sel.selected_color:
                  self._add_color_manual(sel.selected_color)
-                 
+
         except Exception as e:
-            print(e)
+            print(f"Błąd pobierania koloru: {e}")
             
         self.deiconify()
 
     def _save(self):
         self.settings['subtitle_colors'] = self.colors
+        if hasattr(self, 'var_use_colors'):
+            self.settings['use_colors'] = self.var_use_colors.get()
+
         self.settings['color_tolerance'] = self.var_tolerance.get()
         self.settings['ocr_scale_factor'] = self.var_scale.get()
         self.settings['subtitle_mode'] = self.var_sub_mode.get()
