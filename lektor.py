@@ -1070,7 +1070,15 @@ class LektorApp:
                      # Update existing
                      for area in current_areas:
                          if area.get('id') == target_id:
-                             # area['rect'] = new_rect # Do NOT update rect when updating existing area to keep universality
+                             # Update rect if provided
+                             if optimized_area:
+                                 area['rect'] = {
+                                     'left': int(optimized_area[0]),
+                                     'top': int(optimized_area[1]),
+                                     'width': int(optimized_area[2]),
+                                     'height': int(optimized_area[3])
+                                 }
+                             
                              # Update or create settings dict
                              if 'settings' not in area:
                                  area['settings'] = {}
