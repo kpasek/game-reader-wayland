@@ -171,15 +171,11 @@ class AreaManagerWindow(tk.Toplevel):
         
         # Mode
         self.var_mode = tk.StringVar()
-        cb_mode = ttk.Combobox(pl, textvariable=self.var_mode, values=["Full Lines", "Partial"], state="readonly")
+        self.mode_mapping = {"Full Lines": "Pełne linie", "Partial": "Częściowe"}
+        self.rev_mode_mapping = {v: k for k, v in self.mode_mapping.items()}
+        cb_mode = ttk.Combobox(pl, textvariable=self.var_mode, values=list(self.mode_mapping.values()), state="readonly")
         cb_mode.bind("<<ComboboxSelected>>", self._on_field_change)
         add_row("Tryb dopasowania:", cb_mode)
-        
-        # Color Mode
-        self.var_cmode = tk.StringVar()
-        cb_cm = ttk.Combobox(pl, textvariable=self.var_cmode, values=["Light", "Dark", "Mixed"], state="readonly")
-        cb_cm.bind("<<ComboboxSelected>>", self._on_field_change)
-        add_row("Tryb koloru tła:", cb_cm)
         
         # Brightness
         f_br = ttk.Frame(pl)
@@ -249,8 +245,11 @@ class AreaManagerWindow(tk.Toplevel):
         # Tab OCR
         self.var_scale.set(settings.get('ocr_scale_factor', 1.0))
         self.var_thickening.set(settings.get('text_thickening', 0))
-        self.var_mode.set(settings.get('subtitle_mode', 'Full Lines'))
-        self.var_cmode.set(settings.get('text_color_mode', 'Light'))
+        
+        mode_val = settings.get('subtitle_mode', 'Full Lines')
+        self.var_mode.set(self.mode_mapping.get(mode_val, mode_val))
+        
+        # Removed var_cmode logic
         self.var_brightness.set(settings.get('brightness_threshold', 200))
         self.var_contrast.set(settings.get('contrast', 0.0))
         
@@ -264,7 +263,7 @@ class AreaManagerWindow(tk.Toplevel):
             
         self.ignore_updates = False
         
-        for tab in [self.tab_general, self.tab_ocr, self.tab_colors]:
+        for tab in [self.tab_general, self.tab_colors]:
              for child in tab.winfo_children():
                  try: child.config(state=tk.NORMAL)
                  except: pass
@@ -290,8 +289,11 @@ class AreaManagerWindow(tk.Toplevel):
         
         s['ocr_scale_factor'] = self.var_scale.get()
         s['text_thickening'] = self.var_thickening.get()
-        s['subtitle_mode'] = self.var_mode.get()
-        s['text_color_mode'] = self.var_cmode.get()
+        
+        disp_mode = self.var_mode.get()
+        s['subtitle_mode'] = self.rev_mode_mapping.get(disp_mode, disp_mode)
+        
+        # s['text_color_mode'] removed
         s['brightness_threshold'] = self.var_brightness.get()
         s['contrast'] = self.var_contrast.get()
         s['use_colors'] = self.var_use_colors.get()
@@ -342,7 +344,7 @@ class AreaManagerWindow(tk.Toplevel):
         self.var_hotkey.set("")
         self.lb_colors.delete(0, tk.END)
         
-        for tab in [self.tab_general, self.tab_ocr, self.tab_colors]:
+        for tab in [self.tab_general, self.tab_colors]:
              for child in tab.winfo_children():
                  try: child.config(state=tk.DISABLED)
                  except: pass
@@ -608,18 +610,34 @@ class AreaManagerWindow(tk.Toplevel):
                   if messagebox.askyesno("Wynik Testu", msg):
                        # Optimize
                        w2 = tk.Toplevel(self)
-                       tk.Label(w2, text="Szukam lepszych ustawień...").pack(padx=20, pady=20)
+                       lbl_status = tk.Label(w2, text="Pobieranie próbek obrazu (3 klatki)...")
+                       lbl_status.pack(padx=20, pady=20)
                        w2.update()
                        
-                       # Try optimizing on expanded area if it had better score, otherwise original
+                       # Capture multiple frames
+                       frames = [full_img] # First one we already have
+                       import time
+                       
+                       # Try to capture 2 more frames with delay
+                       self.withdraw()
+                       for i in range(2):
+                           time.sleep(0.5)
+                           f = capture_fullscreen()
+                           if f: frames.append(f)
+                       
+                       self.deiconify()
+                       lbl_status.config(text="Szukam najlepszych ustawień...")
+                       w2.update()
+                       
+                       # Try optimizing using all frames
                        target_rect = (ex, ey, ew, eh) if expanded_better else (ox, oy, ow, oh)
-                       res = optimizer.optimize(full_img, target_rect, self.subtitle_lines, mode)
+                       res = optimizer.optimize(frames, target_rect, self.subtitle_lines, mode)
                        w2.destroy()
                        
                        if res and res.get('score', 0) > final_score:
                             new_score = res['score']
                             if messagebox.askyesno("Znaleziono lepsze ustawienia", 
-                                                   f"Obecne: {display_score:.1f}%\nNowe: {new_score:.1f}%\n\nCzy chcesz zaktualizować?"):
+                                                   f"Obecne: {display_score:.1f}%\nNowe (średnia): {new_score:.1f}%\n\nCzy chcesz zaktualizować?"):
                                  area['settings'].update(res['settings'])
                                  # If we optimized on expanded area, we might need to update rect too?
                                  # Currently optimize() doesn't return new rect.

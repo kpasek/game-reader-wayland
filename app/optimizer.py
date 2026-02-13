@@ -65,8 +65,9 @@ class SettingsOptimizer:
             
         return hex_colors
 
+
     def optimize(self, 
-                 image: Image.Image, 
+                 images: Any, 
                  rough_area: Tuple[int, int, int, int], 
                  subtitle_db: List[str],
                  match_mode: str = "Full Lines") -> Dict[str, Any]:
@@ -74,163 +75,175 @@ class SettingsOptimizer:
         Znajduje optymalne ustawienia OCR i matchingu dla zadanego wycinka ekranu (rough_area)
         i bazy napisów.
         
-        Zwraca słownik z najlepszymi ustawieniami oraz wynikiem (score).
+        Args:
+            images: Pojedynczy obraz PIL.Image lub lista obrazów [PIL.Image].
+                    Jeśli podano listę, optymalizacja odbywa się wieloetapowo.
         """
         
-        # 1. Wstępne przygotowanie obrazu (crop)
+        # Normalizacja do listy
+        if not isinstance(images, list):
+            input_images = [images]
+        else:
+            input_images = images
+            
+        if not input_images:
+            return {}
+
+        first_image = input_images[0]
+
+        # 1. Wstępne przygotowanie obrazu (crop) dla pierwszego obrazu
         # rough_area = (left, top, width, height)
         rx, ry, rw, rh = rough_area
         
         # Zabezpieczenie przed wyjściem poza obraz
-        img_w, img_h = image.size
-        rx = max(0, rx)
-        ry = max(0, ry)
-        rw = min(rw, img_w - rx)
-        rh = min(rh, img_h - ry)
+        img_w, img_h = first_image.size
+        # ... (zachowanie logiki cropa dla cropów pomocniczych, ale tutaj musimy cropować każdego z osobna w pętli)
         
-        # Jeśli crop jest niepoprawny, zwróć błąd
-        if rw <= 0 or rh <= 0:
-            return {"error": "Invalid area", "score": 0, "settings": {}, "optimized_area": rough_area}
+        # Przygotowanie funkcji pomocniczej do cropowania
+        def create_crop(img):
+            cx = max(0, rx); cy = max(0, ry)
+            cw = min(rw, img.size[0] - cx); ch = min(rh, img.size[1] - cy)
+            if cw <= 0 or ch <= 0: return None
+            return img.crop((cx, cy, cx+cw, cy+ch))
 
-        crop = image.crop((rx, ry, rx + rw, ry + rh))
+        crop0 = create_crop(first_image)
+        if not crop0:
+            return {"error": "Invalid area", "score": 0, "settings": {}, "optimized_area": rough_area}
 
         # 2. Przygotowanie bazy napisów (raz na całą optymalizację)
         precomputed_db = precompute_subtitles(subtitle_db)
 
-        # 3. Wykrywanie potencjalnych kolorów napisów
-        detected_colors = self._extract_dominant_colors(crop, num_colors=3)
-        # Dodajemy biały jako obowiązkowy fallback, używamy set by uniknąć duplikatów
+        # 3. Wykrywanie potencjalnych kolorów napisów (tylko na pierwszym zrzucie)
+        detected_colors = self._extract_dominant_colors(crop0, num_colors=3)
         candidate_colors = set(detected_colors)
         candidate_colors.add("#FFFFFF")
-        # Konwertujemy z powrotem na listę dla deterministycznej iteracji (sortowanie opcjonalne, ale pomocne)
         candidate_colors_list = sorted(list(candidate_colors))
 
+        # Generowanie kandydatów ustawień
         candidates = []
-        overall_best = (0, {}, None)
 
-        # Wspólne ustawienia (niezmienne w pętli)
-        common_settings = {
-            "auto_remove_names": True,
-            "resolution": "1920x1080", # Można to ewentualnie parametryzować w przyszłości
-            "text_alignment": "None" 
+        # Wspólne parametry do permutacji
+        params = {
+            "scales": [0.5, 0.75, 1.0],
+            "color_tolerances": range(5, 45, 5),
+            "thickenings": [0, 1]
         }
 
-        # Zmienne iterowane (Wspólne)
-        scales = [0.5, 0.75, 1.0]
-
-        # ---------------------------------------------------------
-        # Branch A: Color-based (Color Filter)
-        # ---------------------------------------------------------
-        # Variables:
-        # - subtitle_colors: [Color] (Jeden kolor na raz)
-        # - color_tolerance: range(5, 45, 5) -> 5, 10, ..., 40
-        # - text_thickening: [0, 1]
-        # - ocr_scale_factor: scales
-        color_tolerances = range(5, 45, 5)
-        thickenings = [0, 1]
-
+        # Generujemy pełną listę wszystkich kombinacji ustawień do sprawdzenia
+        # Branch A: Color-based
         for color in candidate_colors_list:
-            for tol, thick, scale in itertools.product(color_tolerances, thickenings, scales):
-                
-                settings = self.base_preset.copy()
-                settings.update(common_settings)
-                settings.update({
-                    "subtitle_colors": [color], # Testujemy jeden konkretny kolor
+            for tol, thick, scale in itertools.product(params["color_tolerances"], params["thickenings"], params["scales"]):
+                s = self.base_preset.copy()
+                s.update({
+                    "auto_remove_names": True,
+                    "resolution": "1920x1080",
+                    "text_alignment": "None",
+                    "subtitle_colors": [color],
                     "color_tolerance": tol,
                     "text_thickening": thick,
                     "ocr_scale_factor": scale,
-                    # Wartości domyślne dla Branch B (ignorowane gdy subtitle_colors jest ustawione)
                     "text_color_mode": "Light", 
                     "brightness_threshold": 200, 
-                    "contrast": 0,
-                    "contract": 0 
+                    "contrast": 0
                 })
-
-                score, bbox = self._evaluate_settings(crop, settings, precomputed_db, match_mode)
-                if score >= 80:
-                    candidates.append((score, settings, bbox))
-                
-                if score > overall_best[0]:
-                    overall_best = (score, settings, bbox)
-
-        # ---------------------------------------------------------
-        # Branch B: Grayscale/Binary (No specific color)
-        # ---------------------------------------------------------
-        # Variables:
-        # - brightness_threshold: range(150, 230, 5) -> 150...225 (Użytkownik podał (150, 230, 5) co w Pythonie wyklucza 230)
-        # - contrast: [0.0, 0.2, 0.5, 1.0]
-        # - ocr_scale_factor: scales
+                candidates.append(s)
         
-        brightness_range = range(150, 230, 5)
-        contrasts = [0.0, 0.2, 0.5, 1.0]
-        text_color_modes = ["Light"] # Standardowo Light
+        # Branch B: Text Color Mode (Light/Dark/Mixed) - tylko jeśli nie znaleziono kolorów?
+        # W oryginalnym kodzie było to oddzielne, tutaj dla uproszczenia (i zgodnie z prośbą usunięcia z UI)
+        # możemy pominąć, lub dodać jako fallback. Skoro usuwamy z UI, to tutaj w optymalizatorze
+        # też wypadałoby się skupić na kolorach (subtitle_colors), chyba że użytkownik chce tryb jasny/ciemny bez kolorów.
+        # Ale skoro extract_dominant_colors zawsze coś zwraca (choćby biały), to Branch A pokrywa większość.
+        # Dodam jednak dla pewności defaultowy biały bez filtracji kolorem (czyli czyste OCR na progowaniu jasności)
+        # Tzw. legacy mode.
+        for mode in ["Light", "Dark"]:
+             for thick, scale in itertools.product(params["thickenings"], params["scales"]):
+                s = self.base_preset.copy()
+                s.update({
+                    "auto_remove_names": True,
+                    "subtitle_colors": [], # Pusta lista = tryb jasności/kontrastu
+                    "text_color_mode": mode,
+                    "text_thickening": thick,
+                    "ocr_scale_factor": scale,
+                    "brightness_threshold": 200,
+                    "contrast": 0
+                })
+                candidates.append(s)
 
-        for br, cont, scale, mode in itertools.product(brightness_range, contrasts, scales, text_color_modes):
-             settings = self.base_preset.copy()
-             settings.update(common_settings)
-             settings.update({
-                "subtitle_colors": [], # Pusta lista wymusza branch grayscale w OCR
-                "brightness_threshold": br,
-                "contrast": cont,
-                "contract": cont, # Dla wstecznej kompatybilności (literówka w OCR logic)
-                "ocr_scale_factor": scale,
-                "text_color_mode": mode,
-                "text_thickening": 0 # W trybie binarnym zazwyczaj nie pogrubiamy, lub jest to osobny parametr (tutaj upraszczamy)
-             })
 
-             score, bbox = self._evaluate_settings(crop, settings, precomputed_db, match_mode)
-             if score >= 80:
-                 candidates.append((score, settings, bbox))
+        # ETAP 1: Ewaluacja na pierwszym obrazie
+        survivors = []
+        best_score_st1 = 0
+        best_settings_st1 = None
 
-             if score > overall_best[0]:
-                 overall_best = (score, settings, bbox)
-        
-        # Wybór najlepszego kandydata
-        best_candidate = overall_best
-        
-        if candidates:
-            # 1. Filtrujemy tylko te z maksymalnym wynikiem
-            max_score = max(c[0] for c in candidates)
-            top_tier = [c for c in candidates if c[0] == max_score]
+        for settings in candidates:
+            score, bbox = self._evaluate_settings(crop0, settings, precomputed_db, match_mode)
+
+            if score > best_score_st1:
+                best_score_st1 = score
+                best_settings_st1 = settings
+                best_bbox_st1 = bbox
+
+            # Kryterium przejścia dalej: 100% (lub więcej dla exact match)
+            if score >= 100:
+                survivors.append((score, settings, bbox))
+
+        # Jeśli mamy więcej obrazów, filtrujemy
+        if len(input_images) > 1 and survivors:
+            finalists = survivors
             
-            # 2. Sortowanie wg kryteriów
-            def sort_key(item):
-                score, sett, _ = item
-                has_color = bool(sett.get('subtitle_colors'))
-                tolerance = sett.get('color_tolerance', 100)
-                scale = sett.get('ocr_scale_factor', 1.0)
-                brightness = sett.get('brightness_threshold', 255)
+            # Sprawdzamy kolejne obrazy
+            for idx, img in enumerate(input_images[1:], start=1):
+                crop_n = create_crop(img)
+                if not crop_n: continue
                 
-                # Priorytet: 
-                # 1. Kolor obecny (True) -> 0, Brak -> 1
-                # 2. Tolerance rosnąco (stricter is better for lower values)
-                # 3. Scale rosnąco
-                # 4. Brightness rosnąco
-                return (not has_color, tolerance, scale, brightness)
+                next_round = []
+                for prev_score, settings, _ in finalists:
+                    # Sprawdzamy czy nadal trzyma poziom
+                    score, bbox = self._evaluate_settings(crop_n, settings, precomputed_db, match_mode)
+                    
+                    if score >= 100:
+                        # Sumujemy score
+                        next_round.append((prev_score + score, settings, bbox))
+                
+                if not next_round:
+                    break
+                    
+                finalists = next_round
+            
+            if finalists:
+                # Sortujemy po sumarycznym score malejąco
+                finalists.sort(key=lambda x: x[0], reverse=True)
+                best_total_score, best_settings, best_bbox = finalists[0]
+                # Średni score na obraz
+                avg_score = best_total_score / len(input_images)
+                
+                if best_bbox:
+                    bx, by, bw, bh = best_bbox
+                    opt_rect = (rx + bx, ry + by, bw, bh)
+                else:
+                    opt_rect = rough_area
 
-            top_tier.sort(key=sort_key)
-            best_candidate = top_tier[0]
+                return {
+                    "score": avg_score, 
+                    "settings": best_settings, 
+                    "optimized_area": opt_rect 
+                }
 
-        best_score, best_settings, best_crop_rel = best_candidate
-
-        # 4. Obliczanie wynikowego, absolutnego obszaru
-        final_area = rough_area
-        if best_crop_rel:
-             # bbox format: (left, upper, right, lower) względem cropa
-             bl, bt, br_x, bb = best_crop_rel
-             
-             abs_x = rx + bl
-             abs_y = ry + bt
-             abs_w = br_x - bl
-             abs_h = bb - bt
-             
-             final_area = (abs_x, abs_y, abs_w, abs_h)
-
-        return {
-            "score": best_score,
-            "settings": best_settings,
-            "optimized_area": final_area
-        }
+        # Fallback jeśli tylko 1 obraz LUB brak survivors
+        if best_settings_st1:
+            if best_bbox_st1:
+                bx, by, bw, bh = best_bbox_st1
+                opt_rect = (rx + bx, ry + by, bw, bh)
+            else:
+                opt_rect = rough_area
+                
+            return {
+                "score": best_score_st1, 
+                "settings": best_settings_st1,
+                "optimized_area": opt_rect 
+            }
+            
+        return {"score": 0, "settings": {}, "optimized_area": rough_area}
 
     def _evaluate_settings(self, 
                            crop: Image.Image, 

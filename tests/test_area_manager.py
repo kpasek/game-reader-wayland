@@ -29,6 +29,7 @@ class MockVar:
     def __init__(self, value=None): self._val = value
     def set(self, val): self._val = val
     def get(self): return self._val
+    def trace_add(self, *args, **kwargs): pass
 
 mock_tk.Toplevel = MockToplevel
 mock_tk.Tk = MockToplevel
