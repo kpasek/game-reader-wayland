@@ -32,14 +32,17 @@ class CaptureWorker(threading.Thread):
     """Wątek PRODUCENTA: Robi zrzuty ekranu."""
 
     def __init__(self, stop_event: threading.Event, img_queue: queue.Queue,
-                 unified_area: Dict[str, int], interval: float):
+                 unified_area: Dict[str, int], interval: float, log_queue=None):
         super().__init__(daemon=True)
         self.stop_event = stop_event
         self.img_queue = img_queue
         self.unified_area = unified_area
         self.interval = interval
+        self.log_queue = log_queue
+        self.first_capture_done = False
 
     def run(self):
+        print("CaptureWorker thread started.")
         while not self.stop_event.is_set():
             loop_start = time.monotonic()
 
@@ -50,10 +53,19 @@ class CaptureWorker(threading.Thread):
 
     def capture(self):
         t0 = time.perf_counter()
-        full_img = capture_region(self.unified_area)
+        try:
+            full_img = capture_region(self.unified_area)
+        except Exception as e:
+            full_img = None
+            print(f"Capture Exception: {e}")
+            
         t_cap = (time.perf_counter() - t0) * 1000
 
         if full_img:
+            if not self.first_capture_done:
+                 self.first_capture_done = True
+                 print(f"CaptureWorker: First frame captured successfully ({t_cap:.1f}ms).")
+
             try:
                 if self.img_queue.full():
                     try:
@@ -63,6 +75,14 @@ class CaptureWorker(threading.Thread):
                 self.img_queue.put((full_img, t_cap), block=False)
             except queue.Full:
                 pass
+        else:
+            if not getattr(self, '_logged_fail', False):
+                 self._logged_fail = True
+                 msg = "CaptureWorker: Failed to grab screen (returned None/Empty)!"
+                 print(msg)
+                 if self.log_queue:
+                     self.log_queue.put({"time": "ERROR", "line_text": msg})
+
 
 
 class ReaderThread(threading.Thread):
@@ -291,17 +311,27 @@ class ReaderThread(threading.Thread):
 
         # Scale areas
         valid_areas = []
+        print(f"DEBUG: Processing {len(areas_config)} areas from config.")
         for area in areas_config:
             r = area.get('rect')
-            if not r: continue
+            if not r: 
+                print(f"DEBUG: Area {area.get('id')} has no rect.")
+                continue
             
             # Scale rect
             scaled_list = self._scale_monitor_areas([r], preset.get('resolution'))
             if scaled_list:
                 area['rect'] = scaled_list[0]
                 valid_areas.append(area)
+            else:
+                print(f"DEBUG: Scaling returned empty for area {area.get('id')}")
 
-        if not valid_areas: return
+        if not valid_areas: 
+            print("ERROR: No valid areas found. ReaderThread exiting.")
+            if self.log_queue: self.log_queue.put({"time": "ERROR", "line_text": "Nie znaleziono aktywnych obszarów. Sprawdź konfigurację."})
+            return
+        
+        print(f"DEBUG: Valid areas: {len(valid_areas)}")
         
         # Initialize enabled continuous areas from config
         self.enabled_continuous_areas = set()
@@ -332,12 +362,14 @@ class ReaderThread(threading.Thread):
         audio_dir = preset.get('audio_dir', '')
         audio_ext = preset.get('audio_ext', '.mp3')
 
-        capture_worker = CaptureWorker(self.stop_event, self.img_queue, unified_area, interval)
+        capture_worker = CaptureWorker(self.stop_event, self.img_queue, unified_area, interval, log_queue=self.log_queue)
         capture_worker.start()
 
-        if self.log_queue and self.save_logs:
-            self.log_queue.put({"time": "INFO", "line_text": f"Start Reader. Logs enabled."})
+        if self.log_queue:
+             self.log_queue.put({"time": "INFO", "line_text": f"Reader started. Areas: {len(valid_areas)}. Logging enabled."})
+
         if self.save_logs:
+            if self.log_queue: self.log_queue.put({"time": "INFO", "line_text": f"Saving logs to session_log.txt"})
             with open("session_log.txt", "a", encoding='utf-8') as f:
                 f.write(f"\n=== SESSION START {datetime.now()} ===\n")
                 f.write("Time | Monitor | Capture(ms) | Pre(ms) | OCR(ms) | Match(ms) | Text | MatchResult\n")
