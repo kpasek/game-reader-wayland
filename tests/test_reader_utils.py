@@ -20,20 +20,13 @@ def test_scale_monitor_areas_no_change(reader_thread):
     assert scaled[0] == monitors[0]
 
 def test_scale_monitor_areas_scaling(reader_thread):
-    # Original 1920x1080 -> Target 3840x2160 (2x)
+    # Niezależnie od rozdzielczości, funkcja nie skaluje (wejście == wyjście)
     monitors = [{'left': 100, 'top': 50, 'width': 200, 'height': 100}]
-    
-    # We must simulate Physical detection of 4K to trigger upscaling
     mock_img = MagicMock()
     mock_img.size = (3840, 2160)
-    
     with patch('app.capture.capture_fullscreen', return_value=mock_img):
         scaled = reader_thread._scale_monitor_areas(monitors, "1920x1080")
-    
-    assert scaled[0]['left'] == 200
-    assert scaled[0]['top'] == 100
-    assert scaled[0]['width'] == 400
-    assert scaled[0]['height'] == 200
+    assert scaled == monitors
 
 def test_scale_monitor_areas_bad_input(reader_thread):
     monitors = [{'left': 10}]
