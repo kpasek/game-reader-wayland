@@ -1178,7 +1178,14 @@ class LektorApp:
             area_options.append(aname)
             area_map[aname] = aid
             
-        selected_option = tk.StringVar(value=area_options[0])
+        # Default to Area #1 if available
+        default_val = area_options[0]
+        for name, aid in area_map.items():
+            if aid == 1:
+                default_val = name
+                break
+                
+        selected_option = tk.StringVar(value=default_val)
         cb = ttk.Combobox(content, textvariable=selected_option, values=area_options, state="readonly", font=("Arial", 10))
         cb.pack(fill="x", pady=5)
         

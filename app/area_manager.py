@@ -433,6 +433,12 @@ class AreaManagerWindow(tk.Toplevel):
         finally:
             self.deiconify()
 
+    def _get_root(self):
+        w = self
+        while w.master:
+             w = w.master
+        return w
+
     def _add_color_manual(self, color):
         if self.current_selection_idx < 0: return
         area = self.areas[self.current_selection_idx]
