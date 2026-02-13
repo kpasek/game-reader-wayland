@@ -390,32 +390,14 @@ class ReaderThread(threading.Thread):
                 except queue.Empty:
                     pass
             
-            # DEBUG: Save first capture to verify we see the screen
-            if not getattr(self, '_debug_capture_saved', False):
-                 if hasattr(full_img, 'save'):
-                     try:
-                        # Draw the crop area on the full image for debugging
-                        debug_viz = full_img.copy()
-                        from PIL import ImageDraw
-                        draw = ImageDraw.Draw(debug_viz)
-                        
-                        # Draw Unified Area
-                        ua = self.current_unified_area
-                        u_rect = [ua['left'], ua['top'], ua['left']+ua['width'], ua['top']+ua['height']]
-                        draw.rectangle(u_rect, outline="red", width=5)
-                        draw.text((ua['left']+10, ua['top']+10), "Unified Area (Crop)", fill="red")
-                        
-                        # Draw Individual Areas
-                        for i, area in enumerate(valid_areas):
-                             r = area['rect']
-                             draw.rectangle([r['left'], r['top'], r['left']+r['width'], r['top']+r['height']], outline="blue", width=3)
-                             draw.text((r['left']+5, r['top']+5), f"Area {i}", fill="blue")
-
-                        debug_viz.save("debug_full_capture_viz.png")
-                        print("DEBUG: Saved debug_full_capture_viz.png with RED rectangle showing crop area.")
+            # Zapisz pierwszy zrzut ekranu tylko jeśli włączony jest tryb DEBUG w ustawieniach
+            if not getattr(self, '_debug_capture_saved', False) and self.config_manager.settings.get('debug', False):
+                if hasattr(full_img, 'save'):
+                    try:
+                        full_img.save("debug_first_capture.png")
                         self._debug_capture_saved = True
-                     except Exception as e:
-                        print(f"DEBUG: Failed to save viz capture: {e}")
+                    except Exception:
+                        pass
 
             for idx, area_obj in enumerate(valid_areas):
                 t_start_proc = time.perf_counter()
