@@ -61,5 +61,17 @@ class TestAreaCalculation(unittest.TestCase):
         result = calculate_merged_area(rects, 100, 100)
         self.assertEqual(result, (0, 0, 0, 0))
 
+    def test_left_margin_expansion(self):
+        # Specific test for "shifted right" bug report.
+        # Rect at x=100. Margin should move it LEFT to < 100.
+        rects = [(100, 100, 100, 100)]
+        # u_w = 100. margin 5% -> 5.
+        # Expect x = 95.
+        
+        result = calculate_merged_area(rects, 1000, 1000, 0.05)
+        self.assertEqual(result[0], 95, "Left coordinate should decrease (move left)")
+        self.assertEqual(result[1], 95, "Top coordinate should decrease (move up)")
+        self.assertEqual(result[2], 110, "Width should increase by 2x margin")
+
 if __name__ == '__main__':
     unittest.main()

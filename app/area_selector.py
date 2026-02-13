@@ -45,6 +45,9 @@ class AreaSelector(tk.Toplevel):
 
         self.bg_img = ImageTk.PhotoImage(self.display_img)
 
+        # self.cv = tk.Canvas(self, cursor="cross", highlightthickness=0)
+        # self.cv.pack(fill=tk.BOTH, expand=True)
+        # self.cv.create_image(0, 0, image=self.bg_img, anchor=tk.NW)
         self.cv = tk.Canvas(self, cursor="cross", highlightthickness=0)
         self.cv.pack(fill=tk.BOTH, expand=True)
         self.cv.create_image(0, 0, image=self.bg_img, anchor=tk.NW)
