@@ -13,6 +13,7 @@ from app.capture import capture_fullscreen
 from app.optimizer import SettingsOptimizer
 from app.matcher import precompute_subtitles
 from app.ocr import find_text_bounds
+from app.geometry_utils import calculate_merged_area
 
 class AreaManagerWindow(tk.Toplevel):
     def __init__(self, parent, areas: List[Dict[str, Any]], on_save_callback, subtitle_lines: List[str] = None):
@@ -644,24 +645,10 @@ class AreaManagerWindow(tk.Toplevel):
                             if not valid_rects: valid_rects = [base]
                             
                             # Union logic (suma zbiorów)
-                            min_x = min(r[0] for r in valid_rects)
-                            min_y = min(r[1] for r in valid_rects)
-                            max_x = max(r[0] + r[2] for r in valid_rects)
-                            max_y = max(r[1] + r[3] for r in valid_rects)
-                            
-                            u_w = max_x - min_x
-                            u_h = max_y - min_y
-                            
-                            # 5% Margin
-                            mx = int(u_w * 0.05)
-                            my = int(u_h * 0.05)
-                            
-                            # Bounds check against first image
                             fw, fh = valid_images[0].size
-                            fx = max(0, min_x - mx)
-                            fy = max(0, min_y - my)
-                            real_w = min(fw - fx, u_w + 2 * mx)
-                            real_h = min(fh - fy, u_h + 2 * my)
+                            
+                            # Use utility function for robust calculation with clamping
+                            fx, fy, real_w, real_h = calculate_merged_area(valid_rects, fw, fh, 0.05)
                             
                             target_rect_final = (fx, fy, real_w, real_h)
                             
@@ -758,6 +745,10 @@ class OptimizationCaptureWindow(tk.Toplevel):
         super().__init__(parent)
         self.title("Optymalizacja Ustawień")
         self.geometry("500x400")
+        
+        # Shortcuts
+        self.bind("<F4>", lambda e: self._add_with_selection())
+        
         self.on_start = on_start
         self.area_manager = area_manager
         self.frames = []
@@ -780,7 +771,7 @@ class OptimizationCaptureWindow(tk.Toplevel):
         btn_box.pack(side=tk.LEFT, fill=tk.Y, padx=5)
         
         # "Dodaj kolejny zrzut" preferred by user
-        self.btn_add_area = ttk.Button(btn_box, text="Dodaj kolejny zrzut (Wycinek)", command=self._add_with_selection)
+        self.btn_add_area = ttk.Button(btn_box, text="Dodaj kolejny zrzut [F4]", command=self._add_with_selection)
         self.btn_add_area.pack(fill=tk.X, pady=2)
 
         # Removed Add Full Screen button as per request

@@ -44,6 +44,7 @@ from app.area_manager import AreaManagerWindow, OptimizationCaptureWindow
 from app.capture import capture_fullscreen
 from app.help import HelpWindow
 from app.optimizer import SettingsOptimizer
+from app.geometry_utils import calculate_merged_area
 
 # Global events/queues
 stop_event = threading.Event()
@@ -960,22 +961,9 @@ class LektorApp:
                  return
 
             # Combine rects logic (Union + 5%)
-            min_x = min(r[0] for r in valid_rects)
-            min_y = min(r[1] for r in valid_rects)
-            max_x = max(r[0] + r[2] for r in valid_rects)
-            max_y = max(r[1] + r[3] for r in valid_rects)
-            
-            u_w = max_x - min_x
-            u_h = max_y - min_y
-            
-            mx = int(u_w * 0.05)
-            my = int(u_h * 0.05)
-            
             fw, fh = valid_images[0].size
-            fx = max(0, min_x - mx)
-            fy = max(0, min_y - my)
-            real_w = min(fw - fx, u_w + 2 * mx)
-            real_h = min(fh - fy, u_h + 2 * my)
+            # Use utility with margin factor 0.05
+            fx, fy, real_w, real_h = calculate_merged_area(valid_rects, fw, fh, 0.05)
             
             target_rect = (fx, fy, real_w, real_h)
             mode = preset_data.get('subtitle_mode', 'Full Lines')
