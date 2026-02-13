@@ -852,8 +852,14 @@ class LektorApp:
         data = self.config_mgr.load_preset(path)
         if 'areas' not in data: self.config_mgr._migrate_legacy_areas(data)
         
+        # Load subtitles for testing inside manager
+        txt_path = data.get('text_file_path')
+        subs = []
+        if txt_path and os.path.exists(txt_path):
+             subs = self.config_mgr.load_text_lines(txt_path)
+        
         # Open Manager
-        AreaManagerWindow(self.root, data['areas'], self._save_areas_callback)
+        AreaManagerWindow(self.root, data['areas'], self._save_areas_callback, subs)
 
     def _save_areas_callback(self, new_areas):
         path = self.var_preset_full_path.get()

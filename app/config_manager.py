@@ -251,7 +251,30 @@ class ConfigManager:
 
     def save_preset(self, path: str, data: Dict[str, Any]):
         try:
-            save_data = data.copy()
+            import copy
+            # Use deepcopy to ensure we detach from any referenced objects like Tkinter variables
+            # Also it helps to detect circular references or non-serializable objects early (pickle/copy error)
+            # However deepcopy might fail on Tkinter vars too. But we assume data SHOULD be clean dicts.
+            
+            # Helper to recursively sanitize - useful if deepcopy fails or to ensure clean JSON
+            def sanitize(obj):
+                if isinstance(obj, dict):
+                    return {k: sanitize(v) for k, v in obj.items() if not k.startswith('_')} # Ignore internal keys
+                elif isinstance(obj, list):
+                    return [sanitize(x) for x in obj]
+                elif isinstance(obj, (str, int, float, bool, type(None))):
+                    return obj
+                else:
+                    # Try to convert custom types or ignore
+                    try:
+                         # Attempt to convert simple types like numpy int/float if present
+                         if hasattr(obj, 'item'): 
+                             return obj.item()
+                         return str(obj)
+                    except:
+                         return str(obj)
+
+            save_data = sanitize(data)
             base_dir = os.path.dirname(os.path.abspath(path))
 
             for key in ['audio_dir', 'text_file_path']:

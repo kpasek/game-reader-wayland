@@ -10,14 +10,17 @@ except ImportError:
 
 from app.area_selector import AreaSelector, ColorSelector
 from app.capture import capture_fullscreen
+from app.optimizer import SettingsOptimizer
+from app.matcher import precompute_subtitles
 
 
 class AreaManagerWindow(tk.Toplevel):
-    def __init__(self, parent, areas: List[Dict[str, Any]], on_save_callback):
+    def __init__(self, parent, areas: List[Dict[str, Any]], on_save_callback, subtitle_lines: List[str] = None):
         super().__init__(parent)
         self.title("Zarządzanie Obszarami")
         self.geometry("1000x700")
         self.areas = [a.copy() for a in areas]
+        self.subtitle_lines = subtitle_lines
         
         # Migration: Move top-level colors provided by legacy code to settings
         for a in self.areas:
@@ -62,6 +65,11 @@ class AreaManagerWindow(tk.Toplevel):
         action_frame = ttk.Frame(left_frame, padding=(0, 20, 0, 0))
         action_frame.pack(fill=tk.X, side=tk.BOTTOM)
         ttk.Button(action_frame, text="Zapisz i Zamknij", command=self._save_and_close).pack(fill=tk.X, pady=5)
+        
+        # Test Button
+        self.btn_test = ttk.Button(action_frame, text="🧪 Przetestuj Ustawienia", command=self._test_current_settings)
+        self.btn_test.pack(fill=tk.X, pady=5)
+        
         ttk.Button(action_frame, text="Anuluj", command=self.destroy).pack(fill=tk.X)
 
         # Right side: Full Editor (Notebook)
@@ -192,6 +200,7 @@ class AreaManagerWindow(tk.Toplevel):
 
     def _init_tab_colors(self, parent):
         self.var_use_colors = tk.BooleanVar()
+        self.chk_use_colors = ttk.Checkbutton(parent, text="Używaj filtrowania kolorów", variable=self.var_use_colors, command=self._on_field_change)
         self.chk_use_colors.pack(anchor=tk.W, pady=10)
         
         row = ttk.Frame(parent)
@@ -495,6 +504,85 @@ class AreaManagerWindow(tk.Toplevel):
         if self.current_selection_idx >= 0:
             self.areas[self.current_selection_idx]['hotkey'] = ""
             self.var_hotkey.set("")
+
+    def _test_current_settings(self):
+        if self.current_selection_idx < 0: return
+        if not self.subtitle_lines:
+             messagebox.showerror("Błąd", "Brak załadowanych napisów (plik tekstowy).")
+             return
+             
+        area = self.areas[self.current_selection_idx]
+        rect = area.get('rect')
+        if not rect:
+             messagebox.showerror("Błąd", "Obszar nie ma zdefiniowanych współrzędnych.")
+             return
+             
+        # Hide and capture
+        self.withdraw()
+        self.update()
+        import time
+        time.sleep(0.3)
+        
+        try:
+             img = capture_fullscreen()
+             if not img:
+                 self.deiconify()
+                 return
+                 
+             # Prepare crop
+             ox = rect['left']; oy = rect['top']
+             ow = rect['width']; oh = rect['height']
+             img_w, img_h = img.size
+             cx = max(0, ox); cy = max(0, oy)
+             cw = min(ow, img_w - cx); ch = min(oh, img_h - cy)
+             
+             if cw <= 0 or ch <= 0:
+                  self.deiconify()
+                  messagebox.showerror("Błąd", "Nieprawidłowe wymiary obszaru.")
+                  return
+                  
+             crop = img.crop((cx, cy, cx+cw, cy+ch))
+             
+             # Evaluate
+             settings = area.get('settings', {})
+             pre_db = precompute_subtitles(self.subtitle_lines)
+             optimizer = SettingsOptimizer()
+             
+             mode = settings.get('subtitle_mode', 'Full Lines')
+             score, _ = optimizer._evaluate_settings(crop, settings, pre_db, mode)
+             
+             msg = f"Wynik dopasowania (Score): {score:.1f}"
+             if score >= 101:
+                  msg += "\n\nPerfekcyjne dopasowanie (Exact Match)!"
+                  messagebox.showinfo("Wynik Testu", msg)
+             elif score >= 80:
+                  msg += "\n\nDobry wynik."
+                  messagebox.showinfo("Wynik Testu", msg)
+             else:
+                  msg += "\n\nSłaby wynik. Czy chcesz uruchomić optymalizator dla tego zrzutu?"
+                  if messagebox.askyesno("Wynik Testu", msg):
+                       # Optimize
+                       w2 = tk.Toplevel(self)
+                       tk.Label(w2, text="Szukam lepszych ustawień...").pack(padx=20, pady=20)
+                       w2.update()
+                       
+                       res = optimizer.optimize(img, (ox, oy, ow, oh), self.subtitle_lines, mode)
+                       w2.destroy()
+                       
+                       if res and res.get('score', 0) > score:
+                            new_score = res['score']
+                            if messagebox.askyesno("Znaleziono lepsze ustawienia", 
+                                                   f"Obecne: {score:.1f}\nNowe: {new_score:.1f}\n\nCzy chcesz zaktualizować ustawienia dla tego obszaru?"):
+                                 area['settings'].update(res['settings'])
+                                 self._load_details(self.current_selection_idx)
+                                 messagebox.showinfo("Zaktualizowano", "Nowe ustawienia zostały przyjęte.")
+                       else:
+                            messagebox.showinfo("Info", "Nie znaleziono lepszych ustawień.")
+                            
+        except Exception as e:
+             messagebox.showerror("Błąd", f"Podczas testu wystąpił błąd: {e}")
+        finally:
+             self.deiconify()
 
     def _save_and_close(self):
         import copy
