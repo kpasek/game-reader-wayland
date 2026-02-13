@@ -40,7 +40,7 @@ from app.player import PlayerThread
 from app.log import LogWindow
 from app.settings import SettingsDialog
 from app.area_selector import AreaSelector, ColorSelector
-from app.area_manager import AreaManagerWindow
+from app.area_manager import AreaManagerWindow, OptimizationCaptureWindow
 from app.capture import capture_fullscreen
 from app.help import HelpWindow
 from app.optimizer import SettingsOptimizer
@@ -950,88 +950,42 @@ class LektorApp:
         self._show_optimization_setup(data, subtitle_lines, path)
 
     def _show_optimization_setup(self, preset_data, subtitle_lines, preset_path):
-        dlg = tk.Toplevel(self.root)
-        dlg.title("Konfiguracja Optymalizacji")
-        dlg.geometry("500x350")
-        
-        # State
-        state = {
-            "img": None,
-            "rough_area": None
-        }
+        def on_wizard_finish(frames_data):
+            # frames_data: list of {'image': PIL, 'rect': (x,y,w,h) or None}
+            valid_images = [f['image'] for f in frames_data]
+            valid_rects = [f['rect'] for f in frames_data if f['rect']]
 
-        # UI
-        ttk.Label(dlg, text="Kreator Optymalizacji", font=("Arial", 12, "bold")).pack(pady=10)
-        
-        # Mode
-        f_mode = ttk.Frame(dlg)
-        f_mode.pack(fill=tk.X, padx=20, pady=5)
-        ttk.Label(f_mode, text="Tryb Dopasowania:").pack(side=tk.LEFT)
-        var_mode = tk.StringVar(value=preset_data.get('subtitle_mode', 'Full Lines'))
-        cb_mode = ttk.Combobox(f_mode, textvariable=var_mode, values=["Full Lines", "Partial"], state="readonly")
-        cb_mode.pack(side=tk.LEFT, padx=10, fill=tk.X, expand=True)
+            if not valid_rects:
+                 messagebox.showerror("Błąd", "Nie zdefiniowano żadnego obszaru (Wycinka).")
+                 return
 
-        # Instructions
-        info_text = (
-            "Instrukcja:\n"
-            "1. Kliknij 'Zrób zrzut i wybierz obszar'.\n"
-            "2. Gdy pojawi się pełny ekran, zaznacz myszką prostokąt, w którym znajdują się napisy.\n"
-            "3. Po zaznaczeniu, kliknij 'Uruchom', aby rozpocząć analizę."
-        )
-        ttk.Label(dlg, text=info_text, foreground="#555", justify=tk.LEFT).pack(pady=10, padx=20, fill=tk.X)
-        
-        # Status
-        lbl_status = ttk.Label(dlg, text="Brak zrzutu ekranu.", foreground="red")
-        lbl_status.pack(pady=10)
-
-        btn_container = ttk.Frame(dlg)
-        btn_container.pack(fill=tk.X, pady=20, padx=20)
-        
-        btn_run = ttk.Button(btn_container, text="Uruchom", state=tk.DISABLED)
-        
-        def on_capture():
-            dlg.withdraw()
-            self.root.withdraw()
-            time.sleep(0.3)
+            # Combine rects logic (Union + 5%)
+            min_x = min(r[0] for r in valid_rects)
+            min_y = min(r[1] for r in valid_rects)
+            max_x = max(r[0] + r[2] for r in valid_rects)
+            max_y = max(r[1] + r[3] for r in valid_rects)
             
-            try:
-                img = capture_fullscreen()
-                if not img:
-                    messagebox.showerror("Błąd", "Nie udało się pobrać zrzutu.")
-                    return
-                
-                sel = AreaSelector(self.root, img) # Opens modal
-                
-                if sel.geometry:
-                    state["img"] = img
-                    state["rough_area"] = (
-                        sel.geometry['left'], 
-                        sel.geometry['top'], 
-                        sel.geometry['width'], 
-                        sel.geometry['height']
-                    )
-                    lbl_status.config(text=f"Zrzut gotowy. Obszar: {sel.geometry['width']}x{sel.geometry['height']}", foreground="green")
-                    btn_run.config(state=tk.NORMAL)
-                else:
-                    lbl_status.config(text="Anulowano wybór obszaru.", foreground="orange")
-                    
-            except Exception as e:
-                messagebox.showerror("Błąd", f"Zrzut ekranu: {e}")
-            finally:
-                self.root.deiconify()
-                dlg.deiconify()
+            u_w = max_x - min_x
+            u_h = max_y - min_y
+            
+            mx = int(u_w * 0.05)
+            my = int(u_h * 0.05)
+            
+            fw, fh = valid_images[0].size
+            fx = max(0, min_x - mx)
+            fy = max(0, min_y - my)
+            real_w = min(fw - fx, u_w + 2 * mx)
+            real_h = min(fh - fy, u_h + 2 * my)
+            
+            target_rect = (fx, fy, real_w, real_h)
+            mode = preset_data.get('subtitle_mode', 'Full Lines')
+            
+            self._start_optimization_process(valid_images, target_rect, subtitle_lines, preset_path, preset_data, mode)
 
-        def on_run():
-            if not state["img"] or not state["rough_area"]: return
-            dlg.destroy()
-            selected_mode = var_mode.get()
-            self._start_optimization_process(state["img"], state["rough_area"], subtitle_lines, preset_path, preset_data, selected_mode)
+        # Open shared Wizard
+        OptimizationCaptureWindow(self.root, on_wizard_finish)
 
-        ttk.Button(btn_container, text="1. Zrób zrzut i wybierz obszar", command=on_capture).pack(fill=tk.X, pady=5)
-        btn_run.config(command=on_run)
-        btn_run.pack(fill=tk.X, pady=5)
-
-    def _start_optimization_process(self, img, rough_area, subtitle_lines, path, data, mode="Full Lines"):
+    def _start_optimization_process(self, images, rough_area, subtitle_lines, path, data, mode="Full Lines"):
             # 4. Uruchomienie algorytmu w wątku (z UI oczekiwania)
             wait_win = tk.Toplevel(self.root)
             wait_win.title("Przetwarzanie...")
@@ -1051,7 +1005,8 @@ class LektorApp:
             def worker():
                 try:
                     optimizer = SettingsOptimizer(self.config_mgr)
-                    res = optimizer.optimize(img, rough_area, subtitle_lines, mode)
+                    # optimizer.optimize supports list of images now
+                    res = optimizer.optimize(images, rough_area, subtitle_lines, mode)
                     thread_context["result"] = res
                 except Exception as e:
                     thread_context["error"] = e
@@ -1328,7 +1283,7 @@ class LektorApp:
                  dialog.deiconify()
                  self.root.deiconify()
                  
-        tk.Button(btn_frame, text="Przetestuj z nowym zrzutem", command=on_test).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="Testuj ustawienia", command=on_test).pack(side="left", padx=5)
         
         dialog.transient(self.root)
         dialog.wait_visibility()

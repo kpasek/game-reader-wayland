@@ -68,7 +68,7 @@ class AreaManagerWindow(tk.Toplevel):
         ttk.Button(action_frame, text="Zapisz i Zamknij", command=self._save_and_close).pack(fill=tk.X, pady=5)
         
         # Test Button
-        self.btn_test = ttk.Button(action_frame, text="🧪 Przetestuj Ustawienia", command=self._test_current_settings)
+        self.btn_test = ttk.Button(action_frame, text="🧪 Testuj ustawienia", command=self._test_current_settings)
         self.btn_test.pack(fill=tk.X, pady=5)
         
         ttk.Button(action_frame, text="Anuluj", command=self.destroy).pack(fill=tk.X)
@@ -766,11 +766,12 @@ class OptimizationCaptureWindow(tk.Toplevel):
         btn_box = ttk.Frame(self.list_frame)
         btn_box.pack(side=tk.LEFT, fill=tk.Y, padx=5)
         
-        self.btn_add_scr = ttk.Button(btn_box, text="Dodaj zrzut", command=self._add_screenshot)
-        self.btn_add_scr.pack(fill=tk.X, pady=2)
-
-        self.btn_add_area = ttk.Button(btn_box, text="Dodaj i zaznacz", command=self._add_with_selection)
+        # "Dodaj kolejny zrzut" preferred by user
+        self.btn_add_area = ttk.Button(btn_box, text="Dodaj kolejny zrzut (Wycinek)", command=self._add_with_selection)
         self.btn_add_area.pack(fill=tk.X, pady=2)
+
+        self.btn_add_scr = ttk.Button(btn_box, text="Dodaj cały ekran", command=self._add_screenshot)
+        self.btn_add_scr.pack(fill=tk.X, pady=2)
         
         self.btn_rem = ttk.Button(btn_box, text="Usuń", command=self._remove_screenshot)
         self.btn_rem.pack(fill=tk.X, pady=2)
@@ -787,7 +788,10 @@ class OptimizationCaptureWindow(tk.Toplevel):
         import time
         time.sleep(0.3)
         
-        img = capture_fullscreen()
+        try:
+            img = capture_fullscreen()
+        except:
+            img = None
         
         self.deiconify()
         if self.area_manager: self.area_manager.deiconify()
@@ -802,7 +806,10 @@ class OptimizationCaptureWindow(tk.Toplevel):
         import time
         time.sleep(0.3)
         
-        img = capture_fullscreen()
+        try:
+            img = capture_fullscreen()
+        except:
+            img = None
         
         if not img:
             self.deiconify()
@@ -810,8 +817,16 @@ class OptimizationCaptureWindow(tk.Toplevel):
             return
             
         # Select area
-        sel = AreaSelector(self.area_manager, img) # Parent area manager or root
-        self.area_manager.wait_window(sel)
+        try:
+            # Pass None as parent to avoid issues with withdrawn windows
+            sel = AreaSelector(None, img) 
+            self.wait_window(sel)
+        except Exception as e:
+            # Fallback
+            print(f"Error opening selector: {e}")
+            self.deiconify()
+            if self.area_manager: self.area_manager.deiconify()
+            return
         
         self.deiconify()
         if self.area_manager: self.area_manager.deiconify()
