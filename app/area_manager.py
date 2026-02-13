@@ -12,7 +12,7 @@ from app.area_selector import AreaSelector, ColorSelector
 from app.capture import capture_fullscreen
 from app.optimizer import SettingsOptimizer
 from app.matcher import precompute_subtitles
-
+from app.ocr import find_text_bounds
 
 class AreaManagerWindow(tk.Toplevel):
     def __init__(self, parent, areas: List[Dict[str, Any]], on_save_callback, subtitle_lines: List[str] = None):
@@ -58,6 +58,7 @@ class AreaManagerWindow(tk.Toplevel):
         btn_frame = ttk.Frame(left_frame)
         btn_frame.pack(fill=tk.X)
         ttk.Button(btn_frame, text="+ Dodaj", command=self._add_area).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(btn_frame, text="Duplikuj", command=self._duplicate_area).pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.btn_remove = ttk.Button(btn_frame, text="- Usuń", command=self._remove_area, state=tk.DISABLED)
         self.btn_remove.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
@@ -79,17 +80,12 @@ class AreaManagerWindow(tk.Toplevel):
         self.notebook = ttk.Notebook(self.right_frame)
         self.notebook.pack(fill=tk.BOTH, expand=True)
         
-        # Tab 1: Ogólne (Type, Rect, Hotkey)
+        # Tab 1: Ogólne (Type, Rect, Hotkey + OCR)
         self.tab_general = ttk.Frame(self.notebook, padding=15)
         self.notebook.add(self.tab_general, text="Ogólne")
         self._init_tab_general(self.tab_general)
         
-        # Tab 2: Obraz i OCR (Scale, Brightness, etc.)
-        self.tab_ocr = ttk.Frame(self.notebook, padding=15)
-        self.notebook.add(self.tab_ocr, text="Obraz i OCR")
-        self._init_tab_ocr(self.tab_ocr)
-        
-        # Tab 3: Kolory (Colors List)
+        # Tab 2: Kolory (Colors List)
         self.tab_colors = ttk.Frame(self.notebook, padding=15)
         self.notebook.add(self.tab_colors, text="Kolory")
         self._init_tab_colors(self.tab_colors)
@@ -121,7 +117,7 @@ class AreaManagerWindow(tk.Toplevel):
         ttk.Label(f_rect, text="Pozycja i Rozmiar:", font=("Arial", 10, "bold")).pack(anchor=tk.W)
         self.lbl_rect = ttk.Label(f_rect, text="Brak zdefiniowanego obszaru", foreground="#555")
         self.lbl_rect.pack(anchor=tk.W, pady=5)
-        ttk.Button(f_rect, text="[ ] Zaznacz obszar na ekranie", command=self._select_area_on_screen).pack(anchor=tk.W, pady=5)
+        ttk.Button(f_rect, text="Ręcznie zaznacz obszar", command=self._select_area_on_screen).pack(anchor=tk.W, pady=5)
         
         # Hotkey
         ttk.Separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=15)
@@ -139,7 +135,10 @@ class AreaManagerWindow(tk.Toplevel):
         self.btn_record.pack(side=tk.LEFT, padx=5)
         ttk.Button(h_row, text="X", width=3, command=self._clear_hotkey).pack(side=tk.LEFT)
 
-    def _init_tab_ocr(self, parent):
+        # OCR Settings
+        ttk.Separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=15)
+        ttk.Label(parent, text="Ustawienia Obrazu i OCR:", font=("Arial", 10, "bold")).pack(anchor=tk.W, pady=(0, 10))
+
         pl = ttk.Frame(parent)
         pl.pack(fill=tk.BOTH, expand=True)
         pl.columnconfigure(1, weight=1)
@@ -154,7 +153,8 @@ class AreaManagerWindow(tk.Toplevel):
         # Scale
         f_scale = ttk.Frame(pl)
         self.var_scale = tk.DoubleVar()
-        ttk.Scale(f_scale, from_=0.5, to=3.0, variable=self.var_scale, command=lambda v: self._on_field_change()).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        # Scale OCR set from 0.1 to 1.0 per request
+        ttk.Scale(f_scale, from_=0.1, to=1.0, variable=self.var_scale, command=lambda v: self._on_field_change()).pack(side=tk.LEFT, fill=tk.X, expand=True)
         l_sc = ttk.Label(f_scale, text="1.0")
         l_sc.pack(side=tk.LEFT, padx=5)
         self.var_scale.trace_add("write", lambda *a: l_sc.config(text=f"{self.var_scale.get():.2f}"))
@@ -505,6 +505,23 @@ class AreaManagerWindow(tk.Toplevel):
             self.areas[self.current_selection_idx]['hotkey'] = ""
             self.var_hotkey.set("")
 
+    def _duplicate_area(self):
+        if self.current_selection_idx < 0: return
+        area_copy = self.areas[self.current_selection_idx].copy()
+        if 'settings' in area_copy:
+             area_copy['settings'] = area_copy['settings'].copy()
+             if 'subtitle_colors' in area_copy['settings']:
+                 area_copy['settings']['subtitle_colors'] = list(area_copy['settings']['subtitle_colors'])
+        if 'rect' in area_copy:
+             area_copy['rect'] = area_copy['rect'].copy()
+             
+        self.areas.append(area_copy)
+        self._refresh_list()
+        self.lb_areas.selection_clear(0, tk.END)
+        self.lb_areas.selection_set(tk.END)
+        self.current_selection_idx = len(self.areas) - 1
+        self._load_details(self.current_selection_idx)
+
     def _test_current_settings(self):
         if self.current_selection_idx < 0: return
         if not self.subtitle_lines:
@@ -524,65 +541,123 @@ class AreaManagerWindow(tk.Toplevel):
         time.sleep(0.3)
         
         try:
-             img = capture_fullscreen()
-             if not img:
+             full_img = capture_fullscreen()
+             if not full_img:
                  self.deiconify()
                  return
                  
-             # Prepare crop
              ox = rect['left']; oy = rect['top']
              ow = rect['width']; oh = rect['height']
-             img_w, img_h = img.size
-             cx = max(0, ox); cy = max(0, oy)
-             cw = min(ow, img_w - cx); ch = min(oh, img_h - cy)
+             img_w, img_h = full_img.size
              
-             if cw <= 0 or ch <= 0:
-                  self.deiconify()
-                  messagebox.showerror("Błąd", "Nieprawidłowe wymiary obszaru.")
-                  return
-                  
-             crop = img.crop((cx, cy, cx+cw, cy+ch))
+             # Calculate expanded rect (20% padding)
+             # Clamp padding to image bounds
+             # Actually, expand by 20% of width/height
+             x_pad = int(ow * 0.2)
+             y_pad = int(oh * 0.2)
              
-             # Evaluate
+             ex = max(0, ox - x_pad)
+             ey = max(0, oy - y_pad)
+             ew = min(img_w - ex, ow + 2 * x_pad)
+             eh = min(img_h - ey, oh + 2 * y_pad)
+             
+             # Crops
+             normal_crop = full_img.crop((ox, oy, ox+ow, oy+oh))
+             expanded_crop = full_img.crop((ex, ey, ex+ew, ey+eh))
+             
+             # Evaluate original
              settings = area.get('settings', {})
              pre_db = precompute_subtitles(self.subtitle_lines)
              optimizer = SettingsOptimizer()
-             
              mode = settings.get('subtitle_mode', 'Full Lines')
-             score, _ = optimizer._evaluate_settings(crop, settings, pre_db, mode)
              
-             msg = f"Wynik dopasowania (Score): {score:.1f}"
-             if score >= 101:
+             score_original, _ = optimizer._evaluate_settings(normal_crop, settings, pre_db, mode)
+             
+             # Evaluate expanded
+             # We use the SAME settings on expanded crop to see if we missed text
+             score_expanded, _ = optimizer._evaluate_settings(expanded_crop, settings, pre_db, mode)
+             
+             # Logic: If expanded score is significantly better OR (if both are good, check bounds)
+             # Actually, if we expand, we might catch garbage which lowers score.
+             # But if we catch the FULL text which was cut off, score should improve.
+             
+             final_score = score_original
+             expanded_better = False
+             
+             if score_expanded > score_original + 5: # Threshold for "better"
+                 expanded_better = True
+                 final_score = score_expanded
+                 
+             display_score = min(final_score, 100)
+             msg = f"Wynik dopasowania (Score): {display_score:.1f}%"
+             
+             if final_score >= 101:
                   msg += "\n\nPerfekcyjne dopasowanie (Exact Match)!"
                   messagebox.showinfo("Wynik Testu", msg)
-             elif score >= 80:
+                  # If expanded was perfect and original wasn't, we should update rect
+                  if expanded_better:
+                      self._propose_rect_update(expanded_crop, ex, ey, area)
+                      
+             elif final_score >= 80:
                   msg += "\n\nDobry wynik."
                   messagebox.showinfo("Wynik Testu", msg)
+                  if expanded_better:
+                      self._propose_rect_update(expanded_crop, ex, ey, area)
              else:
-                  msg += "\n\nSłaby wynik. Czy chcesz uruchomić optymalizator dla tego zrzutu?"
+                  msg += "\n\nSłaby wynik. Czy chcesz uruchomić optymalizator?"
                   if messagebox.askyesno("Wynik Testu", msg):
                        # Optimize
                        w2 = tk.Toplevel(self)
                        tk.Label(w2, text="Szukam lepszych ustawień...").pack(padx=20, pady=20)
                        w2.update()
                        
-                       res = optimizer.optimize(img, (ox, oy, ow, oh), self.subtitle_lines, mode)
+                       # Try optimizing on expanded area if it had better score, otherwise original
+                       target_rect = (ex, ey, ew, eh) if expanded_better else (ox, oy, ow, oh)
+                       res = optimizer.optimize(full_img, target_rect, self.subtitle_lines, mode)
                        w2.destroy()
                        
-                       if res and res.get('score', 0) > score:
+                       if res and res.get('score', 0) > final_score:
                             new_score = res['score']
                             if messagebox.askyesno("Znaleziono lepsze ustawienia", 
-                                                   f"Obecne: {score:.1f}\nNowe: {new_score:.1f}\n\nCzy chcesz zaktualizować ustawienia dla tego obszaru?"):
+                                                   f"Obecne: {display_score:.1f}%\nNowe: {new_score:.1f}%\n\nCzy chcesz zaktualizować?"):
                                  area['settings'].update(res['settings'])
+                                 # If we optimized on expanded area, we might need to update rect too?
+                                 # Currently optimize() doesn't return new rect.
+                                 # But we can check bounds on the optimized settings
+                                 if expanded_better:
+                                      self._propose_rect_update(expanded_crop, ex, ey, area)
+                                 
                                  self._load_details(self.current_selection_idx)
                                  messagebox.showinfo("Zaktualizowano", "Nowe ustawienia zostały przyjęte.")
                        else:
                             messagebox.showinfo("Info", "Nie znaleziono lepszych ustawień.")
-                            
+
         except Exception as e:
              messagebox.showerror("Błąd", f"Podczas testu wystąpił błąd: {e}")
         finally:
              self.deiconify()
+
+    def _propose_rect_update(self, image, offset_x, offset_y, area):
+         """Helper to check bounds and ask user to update rect"""
+         bounds = find_text_bounds(image)
+         if bounds:
+             bx, by, bw, bh = bounds
+             # Absolute coords
+             abs_x = offset_x + bx
+             abs_y = offset_y + by
+             
+             # Ask user
+             if messagebox.askyesno("Korekta Obszaru", 
+                                    f"Wykryto tekst w szerszym obszarze.\n"
+                                    f"Nowy wymiar: {bw}x{bh} (stary: {area['rect']['width']}x{area['rect']['height']})\n"
+                                    "Czy zaktualizować granice obszaru?"):
+                  area['rect']['left'] = abs_x
+                  area['rect']['top'] = abs_y
+                  area['rect']['width'] = bw
+                  area['rect']['height'] = bh
+                  # Update settings from OCR might be needed too? No, just rect.
+                  self._load_details(self.current_selection_idx)
+
 
     def _save_and_close(self):
         import copy

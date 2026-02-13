@@ -302,3 +302,46 @@ def remove_background(image: Image.Image, hex_colors: List[str], tolerance: int 
 
     # Zwracamy wynik jako RGB (Białe napisy na czarnym tle)
     return final_mask.convert('RGB')
+def find_text_bounds(image: Image.Image, config_str: str = "") -> Optional[Tuple[int, int, int, int]]:
+    """
+    Zwraca bbox (x, y, w, h) całego wykrytego tekstu na obrazie,
+    lub None, jeśli tekst nie został znaleziony.
+    """
+    try:
+        # Domyślny config string jeśli pusty
+        if not config_str:
+             # Używamy prostego configu, bo nie mamy dostępu do complex logic z recognize_text tutaj łatwo
+             # Ale spróbujmy użyć logic podobnej do recognize_text
+             pass
+
+        # Determnistic config construction similar to recognize_text but simpler
+        cfg = f"--psm 6 -l {OCR_LANGUAGE}"
+        if HAS_CONFIG_FILE:
+             cfg += f" {CONFIG_FILE_PATH}"
+        
+        data = pytesseract.image_to_data(image, output_type=Output.DICT, config=cfg)
+        n_boxes = len(data['level'])
+        
+        min_x, min_y = float('inf'), float('inf')
+        max_x, max_y = float('-inf'), float('-inf')
+        found = False
+        
+        for i in range(n_boxes):
+            # level 5 to słowa
+            if int(data['level'][i]) == 5 and int(data['conf'][i]) > 0: 
+                text = data['text'][i].strip()
+                if not text: continue
+                
+                (x, y, w, h) = (data['left'][i], data['top'][i], data['width'][i], data['height'][i])
+                min_x = min(min_x, x)
+                min_y = min(min_y, y)
+                max_x = max(max_x, x + w)
+                max_y = max(max_y, y + h)
+                found = True
+        
+        if found:
+            return (int(min_x), int(min_y), int(max_x - min_x), int(max_y - min_y))
+        return None
+    except Exception as e:
+        print(f"Błąd find_text_bounds: {e}", file=sys.stderr)
+        return None

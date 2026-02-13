@@ -58,7 +58,7 @@ class LektorApp:
     def __init__(self, root: tk.Tk, autostart_preset: Optional[str], game_cmd: list):
         self.root = root
         self.root.title(f"Lektor {APP_VERSION}")
-        self.root.geometry("800x500")
+        self.root.geometry("730x430")
 
         self.config_mgr = ConfigManager()
         self.game_cmd = game_cmd
@@ -952,7 +952,7 @@ class LektorApp:
     def _show_optimization_setup(self, preset_data, subtitle_lines, preset_path):
         dlg = tk.Toplevel(self.root)
         dlg.title("Konfiguracja Optymalizacji")
-        dlg.geometry("500x300")
+        dlg.geometry("500x350")
         
         # State
         state = {
@@ -1086,7 +1086,8 @@ class LektorApp:
         score = result.get('score', 0)
         
         if score < 50:
-            messagebox.showwarning("Wynik", f"Nie znaleziono dobrych ustawień (Score: {score:.1f}).\nSpróbuj zmienić obszar lub klatkę z gry. Najlepsze co mamy to: {score}")
+            display_score = min(score, 100)
+            messagebox.showwarning("Wynik", f"Nie znaleziono dobrych ustawień (Score: {display_score:.1f}%).\nSpróbuj zmienić obszar lub klatkę z gry. Najlepsze co mamy to: {display_score:.1f}%")
             return
 
         best_settings = result.get('settings', {})
@@ -1126,7 +1127,7 @@ class LektorApp:
                      # Update existing
                      for area in current_areas:
                          if area.get('id') == target_id:
-                             area['rect'] = new_rect
+                             # area['rect'] = new_rect # Do NOT update rect when updating existing area to keep universality
                              # Update or create settings dict
                              if 'settings' not in area:
                                  area['settings'] = {}
@@ -1176,7 +1177,8 @@ class LektorApp:
         def add_text_row(label, value):
             add_row_custom(label, lambda p: tk.Label(p, text=str(value), anchor="w", font=("Arial", 10, "bold"), wraplength=200, justify="left"))
 
-        add_text_row("Wynik (Score):", f"{score:.1f} / 100")
+        display_score = min(score, 100)
+        add_text_row("Wynik (Score):", f"{display_score:.1f}%")
         
         # Area info
         if optimized_area:
