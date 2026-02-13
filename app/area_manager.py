@@ -418,10 +418,7 @@ class AreaManagerWindow(tk.Toplevel):
             # Explicit root + no wait_window() on sel
             root = self._get_root()
             sel = AreaSelector(root, img, existing_regions=self.areas) 
-            try:
-                 sel.wait_window()
-            except:
-                 pass
+            # AreaSelector is blocking in init, so no need to wait here.
             
             if sel.geometry:
                 self.areas[self.current_selection_idx]['rect'] = sel.geometry
@@ -478,10 +475,7 @@ class AreaManagerWindow(tk.Toplevel):
             # Use root as parent
             root = self._get_root()
             sel = ColorSelector(root, img)
-            # wait_window was likely called in init for ColorSelector too? 
-            # Checking ColorSelector... Yes, it has wait_window() in init.
-            # So no wait_window needed here.
-            # But let's verify.
+            # wColorSelector is also blocking in init
             
             if sel.selected_color:
                 self._add_color_manual(sel.selected_color)
@@ -823,10 +817,8 @@ class OptimizationCaptureWindow(tk.Toplevel):
             # Pass root as parent. If root is invalid, None (default) is used.
             sel = AreaSelector(root, img)
             
-            # Use wait_window() on the selector itself.
-            # When called without arguments (or with itself), it waits until the window is destroyed.
-            # This avoids dependency on other windows' state for the wait loop.
-            sel.wait_window()
+            # REMOVED sel.wait_window() because AreaSelector calls it in __init__
+            # Calling it again here on a destroyed widget caused "bad window path".
             
         except Exception as e:
             # Fallback
