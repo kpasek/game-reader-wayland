@@ -928,6 +928,8 @@ class LektorApp:
 
         # Check subtitles first
         data = self.config_mgr.load_preset(path)
+        if 'areas' not in data: self.config_mgr._migrate_legacy_areas(data)
+        
         txt_path = data.get('text_file_path')
         if not txt_path or not os.path.exists(txt_path):
              messagebox.showerror("Błąd", "Nie znaleziono pliku napisów w ustawieniach presetu.")
@@ -1057,7 +1059,7 @@ class LektorApp:
                 else:
                     wait_win.destroy()
                     self.root.deiconify()
-                    self._on_optimization_finished(thread_context, path, data)
+                    self._on_optimization_finished(thread_context, path, data, subtitle_lines)
 
             check_thread()
 
@@ -1065,7 +1067,7 @@ class LektorApp:
         # Placeholder to replace original method body cleanly
         pass
 
-    def _on_optimization_finished(self, context, preset_path, preset_data):
+    def _on_optimization_finished(self, context, preset_path, preset_data, subtitle_lines):
         if context["error"]:
             messagebox.showerror("Błąd", f"Błąd podczas optymalizacji: {context['error']}")
             return
@@ -1086,9 +1088,9 @@ class LektorApp:
         
         # Select result dialog
         current_areas = preset_data.get('areas', [])
-        dialog_res = self._show_custom_result_dialog(score, best_settings, optimized_area, current_areas)
+        dialog_res = self._show_custom_result_dialog(score, best_settings, optimized_area, current_areas, subtitle_lines)
         
-        if dialog_res["confirmed"]:
+        if dialog_res and dialog_res["confirmed"]:
             # 5. Kopia zapasowa
             bkp = self.config_mgr.backup_preset(preset_path)
             if bkp:
@@ -1148,10 +1150,10 @@ class LektorApp:
             self.on_preset_selected_from_combo(None)
             messagebox.showinfo("Gotowe", "Ustawienia zostały zaktualizowane.")
 
-    def _show_custom_result_dialog(self, score, settings, optimized_area, existing_areas):
+    def _show_custom_result_dialog(self, score, settings, optimized_area, existing_areas, subtitle_lines=None):
         dialog = tk.Toplevel(self.root)
         dialog.title(f"Wynik Optymalizacji")
-        dialog.geometry("450x650")
+        dialog.geometry("450x700")
         
         content = tk.Frame(dialog, padx=20, pady=20)
         content.pack(fill="both", expand=True)
@@ -1203,7 +1205,7 @@ class LektorApp:
         tk.Label(content, text="\nZastosuj ustawienia do:", font=("Arial", 11, "bold")).pack(pady=(15, 5), anchor="w")
         
         area_options = ["Utwórz nowy obszar"]
-        area_map = {} # "Display Name" -> ID (int) or None
+        area_map = {} 
         
         for a in existing_areas:
             aid = a.get('id')
@@ -1236,8 +1238,89 @@ class LektorApp:
         def on_no():
             dialog.destroy()
             
-        tk.Button(btn_frame, text="Zastosuj", command=on_yes, width=15, height=2, bg="#e0ffe0").pack(side="left", padx=20, expand=True)
-        tk.Button(btn_frame, text="Anuluj", command=on_no, width=15, height=2).pack(side="right", padx=20, expand=True)
+        tk.Button(btn_frame, text="Zastosuj", command=on_yes, width=15, height=2, bg="#e0ffe0").pack(side="left", padx=5, expand=True)
+        tk.Button(btn_frame, text="Anuluj", command=on_no, width=10, height=2).pack(side="right", padx=5, expand=True)
+        
+        def on_test():
+             if not subtitle_lines:
+                 messagebox.showerror("Błąd", "Brak danych tekstowych do weryfikacji.")
+                 return
+                 
+             dialog.withdraw()
+             self.root.withdraw()
+             time.sleep(0.3)
+             
+             try:
+                 img = capture_fullscreen()
+                 if not img:
+                      messagebox.showerror("Błąd", "Nie udało się wykonać zrzutu ekranu.")
+                      dialog.deiconify()
+                      self.root.deiconify()
+                      return
+                 
+                 # Show Progress
+                 p_win = tk.Toplevel(self.root)
+                 p_win.title("Weryfikacja...")
+                 tk.Label(p_win, text="Sprawdzanie aktualnych ustawień...").pack(padx=20, pady=20)
+                 p_win.update()
+                 
+                 from app.matcher import precompute_subtitles
+                 pre_db = precompute_subtitles(subtitle_lines)
+                 
+                 ox, oy, ow, oh = optimized_area
+                 img_w, img_h = img.size
+                 cx = max(0, ox); cy = max(0, oy)
+                 cw = min(ow, img_w - cx); ch = min(oh, img_h - cy)
+                 
+                 crop = img.crop((cx, cy, cx+cw, cy+ch))
+                 
+                 optimizer = SettingsOptimizer()
+                 cur_score, _ = optimizer._evaluate_settings(crop, settings, pre_db, settings.get('subtitle_mode', 'Full Lines'))
+                 
+                 p_win.destroy()
+                 
+                 msg = f"Wynik na nowym zrzucie: {cur_score:.1f}"
+                 better_res = None
+                 
+                 if cur_score < 101:
+                      if messagebox.askyesno("Wynik", f"{msg}\n\nCzy chcesz spróbować znaleźć LEPSZE ustawienia dla tego zrzutu?"):
+                           # Optimize
+                           w2 = tk.Toplevel(self.root)
+                           tk.Label(w2, text="Szukam lepszych ustawień...").pack(padx=20, pady=20)
+                           w2.update()
+                           
+                           res = optimizer.optimize(img, (ox, oy, ow, oh), subtitle_lines, settings.get('subtitle_mode', 'Full Lines'))
+                           w2.destroy()
+                           
+                           if res and res.get('score', 0) > cur_score:
+                                better_res = res
+                                msg += f"\n\nZnaleziono lepsze: {res['score']:.1f}"
+                           else:
+                                msg += "\n\nNie znaleziono lepszych."
+                 else:
+                      msg += "\n\nIdealne dopasowanie (Exact Match)."
+                      
+                 if better_res:
+                      if messagebox.askyesno("Lepszy wynik", msg + "\n\nCzy chcesz użyć NOWYCH ustawień?"):
+                           dialog.destroy()
+                           self.root.deiconify()
+                           # Recursive reopen with new settings
+                           self._show_custom_result_dialog(better_res['score'], better_res['settings'], better_res['optimized_area'], existing_areas, subtitle_lines)
+                           return
+                 else:
+                      messagebox.showinfo("Info", msg)
+                 
+                 dialog.deiconify()
+                 self.root.deiconify()
+
+             except Exception as e:
+                 messagebox.showerror("Błąd", str(e))
+                 try: p_win.destroy() 
+                 except: pass
+                 dialog.deiconify()
+                 self.root.deiconify()
+                 
+        tk.Button(btn_frame, text="Przetestuj z nowym zrzutem", command=on_test).pack(side="left", padx=5)
         
         dialog.transient(self.root)
         dialog.wait_visibility()

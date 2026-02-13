@@ -272,6 +272,14 @@ class SettingsOptimizer:
 
         if match_result:
             _, score = match_result
+            
+            # Check for exact match (Score 101)
+            # precomputed_db[1] is the exact_map (cleaned_text -> index)
+            from app.text_processing import clean_text
+            cleaned_ocr = clean_text(ocr_text)
+            if cleaned_ocr in precomputed_db[1]:
+                 score = 101
+                 
             return score, bbox
         
         return 0, bbox

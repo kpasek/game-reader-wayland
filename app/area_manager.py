@@ -371,6 +371,12 @@ class AreaManagerWindow(tk.Toplevel):
             self.current_selection_idx = len(self.areas) - 1
         self._refresh_list()
 
+    def _on_list_select(self, event):
+        sel = self.lb_areas.curselection()
+        if not sel: return
+        self.current_selection_idx = sel[0]
+        self._refresh_list() 
+
     def _add_default_area(self):
          self.areas.append({
                 "id": 1,
