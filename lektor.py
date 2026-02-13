@@ -238,7 +238,7 @@ class LektorApp:
         preset_menu.add_command(label="Zmień plik napisów", command=lambda: self.change_path('text_file_path'))
         preset_menu.add_command(label="Importuj preset (Game Reader)", command=self.import_preset_dialog)
         preset_menu.add_separator()
-        preset_menu.add_command(label="Wykryj optymalne ustawienia", command=self.detect_optimal_settings)
+        # Removed 'Wykryj optymalne ustawienia' as requested
         menubar.add_cascade(label="Lektor", menu=preset_menu)
 
         # Removed main area menu as requested
@@ -281,11 +281,10 @@ class LektorApp:
         grp_act.pack(fill=tk.X, pady=5)
         
         # Big Buttons for main actions
-        btn_areas = tk.Button(grp_act, text="Zarządzaj Obszarami", command=self.open_area_manager, bg="#e0e0e0", relief="raised", height=2)
+        btn_areas = tk.Button(grp_act, text="Zarządzaj Obszarami", command=self.open_area_manager, bg="#e0e0e0", relief="raised")
         btn_areas.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
-        btn_detect = tk.Button(grp_act, text="Wykryj Ustawienia", command=self.detect_optimal_settings, bg="#d0f0ff", relief="raised", height=2)
-        btn_detect.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        # Removed 'Wykryj Ustawienia' button as requested
 
         # Removed old subtitle colors section
         # grp_sub = ttk.LabelFrame(panel, text="Kolory napisów", padding=10) ...
@@ -960,10 +959,10 @@ class LektorApp:
                  messagebox.showerror("Błąd", "Nie zdefiniowano żadnego obszaru (Wycinka).")
                  return
 
-            # Combine rects logic (Union + 5%)
+            # Combine rects logic (Union + 2%)
             fw, fh = valid_images[0].size
-            # Use utility with margin factor 0.05
-            fx, fy, real_w, real_h = calculate_merged_area(valid_rects, fw, fh, 0.05)
+            # Use utility with margin factor 0.02
+            fx, fy, real_w, real_h = calculate_merged_area(valid_rects, fw, fh, 0.02)
             
             target_rect = (fx, fy, real_w, real_h)
             mode = preset_data.get('subtitle_mode', 'Full Lines')
@@ -1204,8 +1203,8 @@ class LektorApp:
         def on_no():
             dialog.destroy()
             
-        tk.Button(btn_frame, text="Zastosuj", command=on_yes, width=15, height=2, bg="#e0ffe0").pack(side="left", padx=5, expand=True)
-        tk.Button(btn_frame, text="Anuluj", command=on_no, width=10, height=2).pack(side="right", padx=5, expand=True)
+        tk.Button(btn_frame, text="Zastosuj", command=on_yes, width=15, bg="#e0ffe0").pack(side="left", padx=5, expand=True)
+        tk.Button(btn_frame, text="Anuluj", command=on_no, width=10).pack(side="right", padx=5, expand=True)
         
         def on_test():
              if not subtitle_lines:

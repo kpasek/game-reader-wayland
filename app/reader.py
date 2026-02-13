@@ -2,6 +2,7 @@ import threading
 import time
 import os
 import queue
+import copy
 from collections import deque
 from datetime import datetime
 from typing import Optional, Tuple, Dict, Any, List
@@ -270,7 +271,8 @@ class ReaderThread(threading.Thread):
         precomputed_data = precompute_subtitles(raw_subtitles, min_line_len) if raw_subtitles else ([], {})
 
         # --- LOAD AREAS ---
-        areas_config = preset.get('areas', [])
+        # USE DEEPCOPY to prevent modifying the original preset with scaled rects
+        areas_config = copy.deepcopy(preset.get('areas', []))
         monitors = [] # List of rects for unified calc
         
         # If old config (no 'areas'), usage fallback (should be migrated but just in case)

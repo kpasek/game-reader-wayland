@@ -55,6 +55,11 @@ class AreaManagerWindow(tk.Toplevel):
         self.lb_areas = tk.Listbox(left_frame, width=30)
         self.lb_areas.pack(fill=tk.BOTH, expand=True, pady=5)
         self.lb_areas.bind('<<ListboxSelect>>', self._on_list_select)
+        self.lb_areas.bind('<Double-Button-1>', self._rename_area_dialog)
+        
+        self.context_menu = tk.Menu(self.lb_areas, tearoff=0)
+        self.context_menu.add_command(label="Kreator Optymalizacji...", command=self._open_optimizer)
+        self.lb_areas.bind("<Button-3>", self._show_context_menu)
 
         btn_frame = ttk.Frame(left_frame)
         btn_frame.pack(fill=tk.X)
@@ -322,7 +327,11 @@ class AreaManagerWindow(tk.Toplevel):
             t = "Stały" if typ_raw == 'continuous' else "Wyzwalany"
             if typ_raw not in ['continuous', 'manual']: t = typ_raw
             
-            display = f"#{area.get('id', i+1)} [{t}]"
+            display = f"#{area.get('id', i+1)}"
+            if area.get('name'):
+                display += f" {area.get('name')}"
+            
+            display += f" [{t}]"
 
             if typ_raw == 'continuous' and area.get('id') != 1:
                 state = "ON" if area.get('enabled', False) else "OFF"
@@ -386,6 +395,21 @@ class AreaManagerWindow(tk.Toplevel):
         if self.current_selection_idx >= len(self.areas):
             self.current_selection_idx = len(self.areas) - 1
         self._refresh_list()
+
+    def _rename_area_dialog(self, event=None):
+        sel = self.lb_areas.curselection()
+        if sel:
+             self.current_selection_idx = sel[0]
+        
+        if self.current_selection_idx < 0 or self.current_selection_idx >= len(self.areas):
+            return
+
+        area = self.areas[self.current_selection_idx]
+        from tkinter import simpledialog
+        name = simpledialog.askstring("Nazwa obszaru", f"Podaj nazwę dla obszaru #{area.get('id')}:", initialvalue=area.get('name', ''), parent=self)
+        if name is not None:
+             area['name'] = name.strip()
+             self._refresh_list()
 
     def _on_list_select(self, event):
         sel = self.lb_areas.curselection()
@@ -739,6 +763,86 @@ class AreaManagerWindow(tk.Toplevel):
         except Exception as e:
             messagebox.showerror("Błąd zapisu", f"Nie udało się zapisać obszarów: {e}")
             print(f"Save error: {e}")
+
+    def _show_context_menu(self, event):
+        try:
+             idx = self.lb_areas.nearest(event.y)
+             self.lb_areas.selection_clear(0, tk.END)
+             self.lb_areas.selection_set(idx)
+             self.lb_areas.activate(idx)
+             self._on_list_select(None)
+             self.context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+             self.context_menu.grab_release()
+
+    def _open_optimizer(self):
+        if self.current_selection_idx < 0: return
+        if not self.subtitle_lines:
+             messagebox.showwarning("Błąd", "Brak załadowanych napisów (plik txt) w presecie.\nNie można uruchomić optymalizacji.")
+             return
+             
+        OptimizationCaptureWindow(self, self._run_optimizer, area_manager=self)
+
+    def _run_optimizer(self, frames):
+        if not frames: return
+        
+        last_frame = frames[-1]
+        rough_area = last_frame.get('rect') 
+        if not rough_area: return
+
+        subtitle_db = self.subtitle_lines
+        
+        prog = tk.Toplevel(self)
+        prog.title("Optymalizacja...")
+        prog.geometry("300x100")
+        ttk.Label(prog, text="Trwa analiza... Proszę czekać.", font=("Arial", 10)).pack(pady=20)
+        prog.update()
+
+        def task():
+            try:
+                optimizer = SettingsOptimizer()
+                current_area = self.areas[self.current_selection_idx]
+                settings = current_area.get('settings', {})
+                mode = settings.get('subtitle_mode', 'Full Lines')
+                
+                imgs = [f['image'] for f in frames]
+
+                result = optimizer.optimize(imgs, rough_area, subtitle_db, match_mode=mode)
+                self.after(0, lambda: self._on_opt_finished(result, prog))
+            except Exception as e:
+                print(f"Optimization error: {e}")
+                self.after(0, prog.destroy)
+
+        threading.Thread(target=task, daemon=True).start()
+
+    def _on_opt_finished(self, result, prog_win):
+        prog_win.destroy()
+        if not result or result.get('error'):
+             messagebox.showerror("Błąd", f"Optymalizacja nie powiodła się: {result.get('error')}")
+             return
+             
+        score = result.get('score', 0)
+        msg = f"Znaleziono ustawienia (Score: {score:.1f}%).\nCzy chcesz je zastosować?"
+        if messagebox.askyesno("Wynik", msg, parent=self):
+             self._apply_opt_result(result)
+
+    def _apply_opt_result(self, result):
+        if self.current_selection_idx < 0: return
+        area = self.areas[self.current_selection_idx]
+        
+        opt_rect = result.get('optimized_area')
+        if opt_rect and isinstance(opt_rect, (list, tuple)):
+            area['rect'] = {'left': opt_rect[0], 'top': opt_rect[1], 'width': opt_rect[2], 'height': opt_rect[3]}
+            
+        new_settings = result.get('settings', {})
+        if 'settings' not in area: area['settings'] = {}
+        
+        for k, v in new_settings.items():
+             area['settings'][k] = v
+        
+        self._load_details(self.current_selection_idx)
+        messagebox.showinfo("Sukces", "Ustawienia zostały zaktualizowane.")
+
 
 class OptimizationCaptureWindow(tk.Toplevel):
     def __init__(self, parent, on_start, area_manager=None):

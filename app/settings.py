@@ -103,16 +103,7 @@ class SettingsDialog(tk.Toplevel):
 
         self._add_slider(grp_ocr, "Częstotliwość skanowania (s):", self.app.var_capture_interval, 0.3, 1.0,
                          "capture_interval", fmt="{:.2f}s")
-        self._add_slider(grp_ocr, "Czułość jasności (Wykrywanie napisów):", self.app.var_brightness_threshold, 0, 255,
-                         "brightness_threshold")
-        self._add_slider(grp_ocr, "Próg podobieństwa w %", self.app.var_similarity, 0, 20,
-                         "similarity")
-        self._add_slider(grp_ocr, "Podbicie kontrastu", self.app.var_contrast, -1, 2,
-                         "contrast")
-        self._add_slider(grp_ocr, "Tolerancja koloru napisów", self.app.var_tolerance, 1, 60,
-                         "color_tolerance")
-        self._add_slider(grp_ocr, "Pogrubienie napisów", self.app.var_text_thickening, 0, 3,
-                         "text_thickening", resolution=1)
+        # Removed global OCR params (brightness, similarity, contrast, tolerance, thickening) as they are per-area now.
         ttk.Checkbutton(grp_ocr, text="DEBUG: Pokaż obszar wykrytych napisów", variable=self.app.var_show_debug,
                         command=lambda: self.app._save_preset_val("show_debug", self.app.var_show_debug.get())).pack(
             anchor=tk.W, pady=2)
@@ -142,32 +133,7 @@ class SettingsDialog(tk.Toplevel):
             side=tk.LEFT, padx=5)
 
     def _fill_dialogs_tab(self, pnl):
-        # 1. Konfiguracja Dopasowania (Matcher)
-        grp_match = ttk.LabelFrame(pnl, text="Algorytm Dopasowania (Matcher)", padding=10)
-        grp_match.pack(fill=tk.X, pady=10, padx=10)
-
-        f_mode = ttk.Frame(grp_match)
-        f_mode.pack(fill=tk.X, pady=5)
-        ttk.Label(f_mode, text="Tryb dopasowania:").pack(side=tk.LEFT)
-        cb_mode = ttk.Combobox(f_mode, textvariable=self.app.var_subtitle_mode, values=["Full Lines", "Start of Line" ,"Partial Lines"],
-                               state="readonly")
-        cb_mode.pack(side=tk.LEFT, padx=(5, 20))
-        cb_mode.bind("<<ComboboxSelected>>",
-                     lambda e: self.app._save_preset_val("subtitle_mode", self.app.var_subtitle_mode.get()))
-
-        # Nowe parametry Matchera
-        self._add_slider(grp_match, "Min Score (Krótkie):", self.app.var_match_score_short, 50, 100,
-                         "match_score_short", fmt="{:.0f}", resolution=5)
-        self._add_slider(grp_match, "Min Score (Długie):", self.app.var_match_score_long, 50, 100, "match_score_long",
-                         fmt="{:.0f}", resolution=5)
-        self._add_slider(grp_match, "Max różnica długości (Ratio):", self.app.var_match_len_diff, 0.0, 1.0,
-                         "match_len_diff_ratio", fmt="{:.2f}", resolution=0.05)
-        self._add_slider(grp_match, "Min długość dla dopasowania częściowego:", self.app.var_partial_min_len, 0, 50,
-                         "partial_mode_min_len", fmt="{:.0f}", resolution=1)
-
-        self._add_slider(grp_match, "Ignoruj linie krótsze niż:", self.app.var_min_line_len, 0, 20, "min_line_length",
-                         fmt="{:.0f}", resolution=1)
-
+        # 1. Konfiguracja Dopasowania (Matcher) - REMOVED (Per-area now)
         # 2. Audio Speedup
         grp_audio = ttk.LabelFrame(pnl, text="Odtwarzanie Audio (Kolejkowanie)", padding=10)
         grp_audio.pack(fill=tk.X, pady=10, padx=10)
