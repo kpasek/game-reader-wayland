@@ -228,58 +228,19 @@ class ReaderThread(threading.Thread):
              else:
                  original_res_str = "1920x1080" # Default fallback
         
-        # original_res_str logic bypassed in favor of Forced 4K standard
-        # if original_res_str:
-
-
-        # --- FIX FOR "ALWAYS 4K NORMALIZED" LOGIC ---
-        # User confirmed that areas are saved normalized to 4K (3840x2160).
-        # Therefore, we should treat the source resolution as 3840x2160 by default, 
-        # unless explicit override is needed. This prevents issues where 'resolution' field 
-        # in preset is outdated (e.g. 1920x1080) but coordinates are 4K-based.
+        # Restore original logic: Respect the preset's resolution string if available
+        if original_res_str:
+            try:
+                parts = original_res_str.lower().split('x')
+                if len(parts) == 2:
+                    orig_w, orig_h = int(parts[0]), int(parts[1])
+            except:
+                pass
         
-        orig_w, orig_h = 3840, 2160
-        # --------------------------------------------
-
-        print(f"DEBUG: _scale_monitor_areas. Orig(Forced 4K): {orig_w}x{orig_h}, Dest: {dest_w}x{dest_h}, Target: {self.target_resolution}")
-
-        # --- EXPLICIT OVERRIDE REMOVED ---
-        # We must trust 'dest_w' derived from _physical_res (screenshot size).
-        # If Spectacle returns 3840px image on a 150% scaled screen (logical 2560),
-        # we MUST use 3840 as dest, otherwise we scale down coords and crop top-left.
-        # if self.target_resolution:
-        #    dest_w, dest_h = self.target_resolution
-        # ---------------------------------------
-
-        # Fallback Logic if Physical Capture failed
-        if not dest_w or not dest_h:
-             if orig_w and orig_h:
-                 # Assume same as preset
-                 dest_w, dest_h = orig_w, orig_h
-             elif self.target_resolution:
-                 # Only use target if we really don't know original
-                 dest_w, dest_h = self.target_resolution
-             else:
-                 return monitors
-        
-        # HiDPI Heuristic Logic (Causing issues with valid scaling, removing)
-        # The previous logic below was detecting 3840 > 2560 and assuming it was 
-        # a HiDPI bug, thus forcing dest=orig and effectively disabling scaling.
-        # We need scaling to happen (3840 -> 2560).
-        
-        # if (orig_w > dest_w) ... [REMOVED]
-        
-        if not orig_w or not orig_h: return monitors
-        
-        if (orig_w, orig_h) == (dest_w, dest_h): 
-             print("DEBUG: Resolution Match - No Scaling needed.")
-             return monitors
-        
-        sx, sy = dest_w / orig_w, dest_h / orig_h
-        print(f"DEBUG: Applying Scale Factors: X={sx:.3f}, Y={sy:.3f}")
-        return [{'left': int(m['left'] * sx), 'top': int(m['top'] * sy),
-                 'width': int(m['width'] * sx), 'height': int(m['height'] * sy)} for m in monitors]
-
+        # --- BEZWZGLĘDNE PRZESKALOWANIE Z 4K DO ROZDZIELCZOŚCI DOCELWEJ ---
+        print(f"DEBUG: _scale_monitor_areas. NO SCALING – using preset coordinates 1:1!")
+        return monitors
+                 
     def _images_are_similar(self, img1: Image.Image, img2: Image.Image, similarity: float) -> bool:
         if similarity == 0: return False
         if img1 is None or img2 is None: return False
@@ -346,10 +307,22 @@ class ReaderThread(threading.Thread):
             preset_res = preset.get('resolution')
             print(f"DEBUG: Scaling Area {area.get('id')} Input: {r} | PresetRes: {preset_res}")
             
+            # Additional bounds check log
+            rx, ry, rw, rh = r.get('left'), r.get('top'), r.get('width'), r.get('height')
+            if rx+rw > 2560 or ry+rh > 1600:
+                 print(f"DEBUG: WARNING - Area {area.get('id')} coords EXCEED 2560x1600! MaxX={rx+rw}, MaxY={ry+rh}")
+
             scaled_list = self._scale_monitor_areas([r], preset_res)
             if scaled_list:
                 area['rect'] = scaled_list[0]
-                print(f"DEBUG: Scaling Area {area.get('id')} Output: {area['rect']}")
+                sr = area['rect']
+                print(f"DEBUG: Scaling Area {area.get('id')} Output: {sr}")
+                
+                # Check if output is also out of bounds
+                srx, sry, srw, srh = sr.get('left'), sr.get('top'), sr.get('width'), sr.get('height')
+                if srx+srw > 2560 or sry+srh > 1600: # Assuming 2560x1600 as max for now
+                     print(f"DEBUG: CRITICAL - Scaled Area OUT OF BOUNDS! MaxX={srx+srw}, MaxY={sry+srh}")
+
                 valid_areas.append(area)
             else:
                 print(f"DEBUG: Scaling returned empty for area {area.get('id')}")

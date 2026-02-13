@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!.vnenv/bin/python
 import sys
 import os
 import queue
@@ -862,23 +862,45 @@ class LektorApp:
         # Open Manager
         AreaManagerWindow(self.root, data['areas'], self._save_areas_callback, subs)
 
+    def _normalize_area_to_4k(self, rect, img_w, img_h):
+        """
+        Przeskalowuje podany rect (dict) do bazy 4K (3840x2160) na podstawie rozmiaru obrazu img_w, img_h.
+        """
+        sx = 3840 / img_w
+        sy = 2160 / img_h
+        return {
+            'left': int(rect['left'] * sx),
+            'top': int(rect['top'] * sy),
+            'width': int(rect['width'] * sx),
+            'height': int(rect['height'] * sy)
+        }
+
+    def _normalize_areas_list_to_4k(self, areas, img_w, img_h):
+        """
+        Przeskalowuje wszystkie recty w liście obszarów do bazy 4K.
+        """
+        return [dict(a, rect=self._normalize_area_to_4k(a['rect'], img_w, img_h)) if 'rect' in a else a for a in areas]
+
     def _save_areas_callback(self, new_areas):
         path = self.var_preset_full_path.get()
         if path:
             data = self.config_mgr.load_preset(path)
-            data['areas'] = new_areas
+            # Pobierz rozmiar ostatniego zrzutu ekranu (lub domyślny, jeśli nie ma)
+            try:
+                img = capture_fullscreen()
+                img_w, img_h = img.size
+            except Exception:
+                img_w, img_h = 3840, 2160  # fallback, jeśli nie uda się pobrać
+            # Przeskaluj do 4K
+            norm_areas = self._normalize_areas_list_to_4k(new_areas, img_w, img_h)
+            data['areas'] = norm_areas
             self.config_mgr.save_preset(path, data)
             self._restart_hotkeys()
             self.refresh_color_canvas() # Update in case Area 1 colors changed in manager
-            
             # Restart reader to apply changes (geometry, enabled state, etc.)
             if self.is_running:
                 print("Obszary zmienione, restartuję czytanie...")
                 self.stop_reading()
-                # Give it a moment using `after` isn't ideal for straight restart logic, 
-                # but direct restart is simpler.
-                # However, stop_reading signals flag. Thread needs to die.
-                # We can use a short delay to restart.
                 self.root.after(200, self.start_reading)
 
     def set_area_1_direct(self):
