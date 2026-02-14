@@ -783,37 +783,86 @@ class AreaManagerWindow(tk.Toplevel):
              
         OptimizationCaptureWindow(self, self._run_optimizer, area_manager=self)
 
+
     def _run_optimizer(self, frames, mode="Full Lines", initial_color=None):
-        if not frames: return
-        
-        last_frame = frames[-1]
-        rough_area = last_frame.get('rect') 
-        if not rough_area: return
+        if not frames:
+            return
 
         subtitle_db = self.subtitle_lines
-        
+
+        results = []
+        errors = []
+
         prog = tk.Toplevel(self)
         prog.title("Optymalizacja...")
-        prog.geometry("300x100")
-        ttk.Label(prog, text="Trwa analiza... Proszę czekać.", font=("Arial", 10)).pack(pady=20)
+        prog.geometry("350x120")
+        status_label = ttk.Label(prog, text="Trwa analiza... Proszę czekać.", font=("Arial", 10))
+        status_label.pack(pady=20)
         prog.update()
+
 
         def task():
             try:
                 optimizer = SettingsOptimizer()
-                # current_area = self.areas[self.current_selection_idx]
-                # settings = current_area.get('settings', {})
-                # mode = settings.get('subtitle_mode', 'Full Lines') # Overridden by argument
-                
-                imgs = [f['image'] for f in frames]
-
-                result = optimizer.optimize(imgs, rough_area, subtitle_db, match_mode=mode, initial_color=initial_color)
-                self.after(0, lambda: self._on_opt_finished(result, prog))
+                # Zbierz wszystkie obrazy i sprawdź, czy mają rect (obszar)
+                valid_images = []
+                rects = []
+                for f in frames:
+                    if f.get('image') is not None:
+                        valid_images.append(f['image'])
+                    if f.get('rect') is not None:
+                        rects.append(f['rect'])
+                if not valid_images:
+                    errors.append("Brak obrazów do optymalizacji.")
+                    self.after(0, lambda: self._on_multi_opt_finished([], errors, prog))
+                    return
+                # Ustal wspólny rect (obszar) - bierzemy pierwszy z listy lub domyślny
+                rough_area = rects[0] if rects else None
+                if not rough_area:
+                    errors.append("Brak obszaru (rect) do optymalizacji.")
+                    self.after(0, lambda: self._on_multi_opt_finished([], errors, prog))
+                    return
+                status_label.config(text=f"Optymalizacja {len(valid_images)} zrzutów...")
+                prog.update()
+                result = optimizer.optimize(valid_images, rough_area, subtitle_db, match_mode=mode, initial_color=initial_color)
+                results = [(0, result)]
             except Exception as e:
-                print(f"Optimization error: {e}")
-                self.after(0, prog.destroy)
+                errors.append(f"Błąd optymalizacji: {e}")
+                results = []
+            finally:
+                self.after(0, lambda: self._on_multi_opt_finished(results, errors, prog))
 
         threading.Thread(target=task, daemon=True).start()
+
+    def _on_multi_opt_finished(self, results, errors, prog_win):
+        prog_win.destroy()
+        if not results:
+            msg = "Nie udało się przeprowadzić optymalizacji."
+            if errors:
+                msg += "\n" + "\n".join(errors)
+            messagebox.showerror("Błąd", msg)
+            return
+
+        summary = []
+        for idx, result in results:
+            if not result or result.get('error'):
+                summary.append(f"Zrzut #{idx+1}: Błąd: {result.get('error') if result else 'Brak wyniku'}")
+            else:
+                score = result.get('score', 0)
+                summary.append(f"Zrzut #{idx+1}: Score: {score:.1f}%")
+
+        msg = "Wyniki optymalizacji:\n" + "\n".join(summary)
+        if errors:
+            msg += "\n\nBłędy:\n" + "\n".join(errors)
+
+        # Zapytaj, czy zastosować najlepszy wynik (najwyższy score)
+        best = max((r for r in results if r[1] and not r[1].get('error')), key=lambda x: x[1].get('score', 0), default=None)
+        if best:
+            idx, best_result = best
+            if messagebox.askyesno("Wynik", msg + "\n\nCzy chcesz zastosować najlepsze ustawienia zrzutu #{0}?".format(idx+1), parent=self):
+                self._apply_opt_result(best_result)
+        else:
+            messagebox.showinfo("Wynik", msg)
 
     def _on_opt_finished(self, result, prog_win):
         prog_win.destroy()
