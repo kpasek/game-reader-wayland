@@ -41,24 +41,20 @@ class SettingsDialog(tk.Toplevel):
         if not hasattr(self.app, 'var_match_len_diff'): self.app.var_match_len_diff = tk.DoubleVar()
         if not hasattr(self.app, 'var_partial_min_len'): self.app.var_partial_min_len = tk.IntVar()
 
+
     def _build_ui(self):
         tabs = ttk.Notebook(self)
         tabs.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        # --- TABS ---
-        tab_ocr = ttk.Frame(tabs)
-        tab_dialogs = ttk.Frame(tabs)
+        # Jeden tab: Ustawienia
+        tab_main = ttk.Frame(tabs)
         tab_hk = ttk.Frame(tabs)
 
-        tabs.add(tab_ocr, text="Ustawienia OCR")
-        tabs.add(tab_dialogs, text="Ustawienia Dialogów")
+        tabs.add(tab_main, text="Ustawienia")
         tabs.add(tab_hk, text="Skróty klawiszowe")
 
-        # Helper do scrollowania dla obu głównych tabów
-        self._setup_scroll_frame(tab_ocr, self._fill_ocr_tab)
-        self._setup_scroll_frame(tab_dialogs, self._fill_dialogs_tab)
-
-        # Tab skrótów bez scrolla
+        # Jeden scrollowany panel z całością ustawień
+        self._setup_scroll_frame(tab_main, self._fill_main_tab)
         self._fill_hk_tab(tab_hk)
 
         # Przyciski
@@ -90,20 +86,18 @@ class SettingsDialog(tk.Toplevel):
 
     # ================= ZAWARTOSC TABÓW =================
 
-    def _fill_ocr_tab(self, pnl):
+
+    def _fill_main_tab(self, pnl):
         # 1. Konfiguracja Obrazu (Filtry)
         grp_img = ttk.LabelFrame(pnl, text="Filtry Obrazu", padding=10)
         grp_img.pack(fill=tk.X, pady=10, padx=10)
 
-        # 2. Parametry OCR
+        # 2. Parametry OCR (bez skali)
         grp_ocr = ttk.LabelFrame(pnl, text="Parametry OCR", padding=10)
         grp_ocr.pack(fill=tk.X, pady=10, padx=10)
 
-        self._add_slider(grp_ocr, "Skala OCR:", self.app.var_ocr_scale, 0.1, 1.0, "ocr_scale_factor", fmt="{:.2f}")
-
-        self._add_slider(grp_ocr, "Częstotliwość skanowania (s):", self.app.var_capture_interval, 0.3, 1.0,
-                         "capture_interval", fmt="{:.2f}s")
-        # Removed global OCR params (brightness, similarity, contrast, tolerance, thickening) as they are per-area now.
+        self._add_slider(grp_ocr, "Częstotliwość skanowania (s):", self.app.var_capture_interval, 0.3, 1.0, "capture_interval", fmt="{:.2f}s")
+            # Usunięto suwak Skala OCR
         ttk.Checkbutton(grp_ocr, text="DEBUG: Pokaż obszar wykrytych napisów", variable=self.app.var_show_debug,
                         command=lambda: self.app._save_preset_val("show_debug", self.app.var_show_debug.get())).pack(
             anchor=tk.W, pady=2)
@@ -131,6 +125,36 @@ class SettingsDialog(tk.Toplevel):
                       lambda e: self.app._save_preset_val("text_color_mode", self.app.var_text_color.get()))
         ttk.Label(f_color, text="(Light = Jasne napisy)", font=("Arial", 8, "italic"), foreground="gray").pack(
             side=tk.LEFT, padx=5)
+
+        # 4. Audio, Filtracja i Logi (z dawnego _fill_dialogs_tab)
+        grp_audio = ttk.LabelFrame(pnl, text="Odtwarzanie Audio (Kolejkowanie)", padding=10)
+        grp_audio.pack(fill=tk.X, pady=10, padx=10)
+        self._add_slider(grp_audio, "Przyspieszenie (Kolejka > 0):", self.app.var_audio_speed, 1.0, 1.7,
+                         "audio_speed_inc", fmt="{:.2f}")
+
+        grp_flt = ttk.LabelFrame(pnl, text="Filtracja i Inne", padding=10)
+        grp_flt.pack(fill=tk.X, pady=10, padx=10)
+        f_r = ttk.Frame(grp_flt)
+        f_r.pack(fill=tk.X)
+        ttk.Label(f_r, text="Regex:").pack(side=tk.LEFT)
+        cb_regex = ttk.Combobox(f_r, textvariable=self.app.var_regex_mode, values=list(self.app.regex_map.keys()),
+                                state="readonly", width=25)
+        cb_regex.pack(side=tk.LEFT, padx=5)
+        cb_regex.bind("<<ComboboxSelected>>", self.app.on_regex_changed)
+        ent_regex = ttk.Entry(f_r, textvariable=self.app.var_custom_regex)
+        ent_regex.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        mode = self.app.var_regex_mode.get()
+        ent_regex.config(state="normal" if mode == "Własny (Regex)" else "disabled")
+        self.app.ent_regex = ent_regex  # Hack referencyjny
+        ent_regex.bind("<FocusOut>", lambda e: self.app.config_mgr.update_setting('last_custom_regex',
+                                                                                  self.app.var_custom_regex.get()))
+        ttk.Checkbutton(grp_flt, text="Usuwaj imiona (Smart)", variable=self.app.var_auto_names,
+                        command=lambda: self.app._save_preset_val("auto_remove_names",
+                                                                  self.app.var_auto_names.get())).pack(anchor=tk.W,
+                                                                                                       pady=2)
+        ttk.Checkbutton(grp_flt, text="Zapisuj logi do pliku", variable=self.app.var_save_logs,
+                        command=lambda: self.app._save_preset_val("save_logs", self.app.var_save_logs.get())).pack(
+            anchor=tk.W, pady=2)
 
     def _fill_dialogs_tab(self, pnl):
         # 1. Konfiguracja Dopasowania (Matcher) - REMOVED (Per-area now)

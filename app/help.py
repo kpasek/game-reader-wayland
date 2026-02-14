@@ -25,11 +25,6 @@ class HelpWindow(tk.Toplevel):
 
             ("PARAMETRY OCR\n", 'h1'),
 
-            ("1. Skala OCR (0.1 - 1.0)\n", 'h2'),
-            ("Określa, jak bardzo obraz jest skalowany przed odczytem. OCR (Tesseract) działa najlepiej, gdy litery mają określoną wysokość w pikselach.\n",
-             'normal'),
-            ("• Przykład: ", 'bold'),
-            ("Dla ekranu 4K (3840x2160) ustaw 0.3 - 0.4. Dla FullHD (1920x1080) ustaw 0.9 - 1.0.\n", 'normal'),
 
             ("2. Częstotliwość skanowania\n", 'h2'),
             ("Czas w sekundach między kolejnymi zrzutami ekranu.\n", 'normal'),
