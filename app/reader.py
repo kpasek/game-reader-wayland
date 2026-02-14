@@ -42,15 +42,12 @@ class CaptureWorker(threading.Thread):
         self.first_capture_done = False
 
     def run(self):
-        print("CaptureWorker thread started.")
         frame_count = 0
         while not self.stop_event.is_set():
             loop_start = time.monotonic()
             
             # Heartbeat log every 10 frames
             frame_count += 1
-            if frame_count % 10 == 0:
-                 print(f"DEBUG: CaptureWorker loop #{frame_count}")
 
             self.capture()
 
@@ -63,14 +60,12 @@ class CaptureWorker(threading.Thread):
             full_img = capture_region(self.unified_area)
         except Exception as e:
             full_img = None
-            print(f"Capture Exception: {e}")
             
         t_cap = (time.perf_counter() - t0) * 1000
 
         if full_img:
             if not self.first_capture_done:
-                 self.first_capture_done = True
-                 print(f"CaptureWorker: First frame captured successfully ({t_cap:.1f}ms).")
+                self.first_capture_done = True
 
             try:
                 if self.img_queue.full():
@@ -83,11 +78,10 @@ class CaptureWorker(threading.Thread):
                 pass
         else:
             if not getattr(self, '_logged_fail', False):
-                 self._logged_fail = True
-                 msg = "CaptureWorker: Failed to grab screen (returned None/Empty)!"
-                 print(msg)
-                 if self.log_queue:
-                     self.log_queue.put({"time": "ERROR", "line_text": msg})
+                self._logged_fail = True
+                msg = "CaptureWorker: Failed to grab screen (returned None/Empty)!"
+                if self.log_queue:
+                    self.log_queue.put({"time": "ERROR", "line_text": msg})
 
 
 
@@ -144,12 +138,10 @@ class ReaderThread(threading.Thread):
 
         if area_id in self.enabled_continuous_areas:
             self.enabled_continuous_areas.remove(area_id)
-            print(f"Area {area_id} DISABLED")
             if self.log_queue:
                 self.log_queue.put({"time": "INFO", "line_text": f"Area #{area_id} deactivated."})
         else:
             self.enabled_continuous_areas.add(area_id)
-            print(f"Area {area_id} ENABLED")
             if self.log_queue:
                 self.log_queue.put({"time": "INFO", "line_text": f"Area #{area_id} activated."})
         
@@ -215,14 +207,14 @@ class ReaderThread(threading.Thread):
         
         # FIX: If preset lacks resolution, try to infer or default to standard 4K if coordinates seem high
         if not original_res_str:
-             print("DEBUG: Preset has no resolution defined! attempting heuristic or default.")
+            # print("DEBUG: Preset has no resolution defined! attempting heuristic or default.")
              # Check if any area has coords > 2560 or > 1440
              max_x = max([m.get('left',0) + m.get('width',0) for m in monitors]) if monitors else 0
              max_y = max([m.get('top',0) + m.get('height',0) for m in monitors]) if monitors else 0
              
              if max_x > 2560 or max_y > 1440:
                  original_res_str = "3840x2160"
-                 print("DEBUG: Heuristic detected 4K coordinates. Assuming source is 3840x2160.")
+                # print("DEBUG: Heuristic detected 4K coordinates. Assuming source is 3840x2160.")
              elif max_x > 1920 or max_y > 1080:
                  original_res_str = "2560x1440"
              else:
@@ -238,7 +230,7 @@ class ReaderThread(threading.Thread):
                 pass
         
         # --- BEZWZGLĘDNE PRZESKALOWANIE Z 4K DO ROZDZIELCZOŚCI DOCELWEJ ---
-        print(f"DEBUG: _scale_monitor_areas. NO SCALING – using preset coordinates 1:1!")
+        # print(f"DEBUG: _scale_monitor_areas. NO SCALING – using preset coordinates 1:1!")
         return monitors
                  
     def _images_are_similar(self, img1: Image.Image, img2: Image.Image, similarity: float) -> bool:
@@ -296,43 +288,40 @@ class ReaderThread(threading.Thread):
 
         # Scale areas
         valid_areas = []
-        print(f"DEBUG: Processing {len(areas_config)} areas from config.")
+        # print(f"DEBUG: Processing {len(areas_config)} areas from config.")
         for area in areas_config:
             r = area.get('rect')
             if not r: 
-                print(f"DEBUG: Area {area.get('id')} has no rect.")
+                # print(f"DEBUG: Area {area.get('id')} has no rect.")
                 continue
             
             # Scale rect
             preset_res = preset.get('resolution')
-            print(f"DEBUG: Scaling Area {area.get('id')} Input: {r} | PresetRes: {preset_res}")
+            # print(f"DEBUG: Scaling Area {area.get('id')} Input: {r} | PresetRes: {preset_res}")
             
             # Additional bounds check log
             rx, ry, rw, rh = r.get('left'), r.get('top'), r.get('width'), r.get('height')
             if rx+rw > 2560 or ry+rh > 1600:
-                 print(f"DEBUG: WARNING - Area {area.get('id')} coords EXCEED 2560x1600! MaxX={rx+rw}, MaxY={ry+rh}")
+                pass
+                # print(f"DEBUG: WARNING - Area {area.get('id')} coords EXCEED 2560x1600! MaxX={rx+rw}, MaxY={ry+rh}")
 
             scaled_list = self._scale_monitor_areas([r], preset_res)
             if scaled_list:
                 area['rect'] = scaled_list[0]
                 sr = area['rect']
-                print(f"DEBUG: Scaling Area {area.get('id')} Output: {sr}")
-                
-                # Check if output is also out of bounds
                 srx, sry, srw, srh = sr.get('left'), sr.get('top'), sr.get('width'), sr.get('height')
-                if srx+srw > 2560 or sry+srh > 1600: # Assuming 2560x1600 as max for now
-                     print(f"DEBUG: CRITICAL - Scaled Area OUT OF BOUNDS! MaxX={srx+srw}, MaxY={sry+srh}")
-
+                if srx+srw > 2560 or sry+srh > 1600:
+                    pass
                 valid_areas.append(area)
             else:
-                print(f"DEBUG: Scaling returned empty for area {area.get('id')}")
+                pass
 
-        if not valid_areas: 
-            print("ERROR: No valid areas found. ReaderThread exiting.")
-            if self.log_queue: self.log_queue.put({"time": "ERROR", "line_text": "Nie znaleziono aktywnych obszarów. Sprawdź konfigurację."})
+        if not valid_areas:
+            if self.log_queue:
+                self.log_queue.put({"time": "ERROR", "line_text": "Nie znaleziono aktywnych obszarów. Sprawdź konfigurację."})
             return
         
-        print(f"DEBUG: Valid areas: {len(valid_areas)}")
+        # print(f"DEBUG: Valid areas: {len(valid_areas)}")
         
         # Initialize enabled continuous areas from config
         self.enabled_continuous_areas = set()
@@ -350,7 +339,7 @@ class ReaderThread(threading.Thread):
         max_r = max(m['left'] + m['width'] for m in monitors)
         max_b = max(m['top'] + m['height'] for m in monitors)
         unified_area = {'left': min_l, 'top': min_t, 'width': max_r - min_l, 'height': max_b - min_t}
-        print(f"DEBUG: Unified Area: {unified_area}")
+        # print(f"DEBUG: Unified Area: {unified_area}")
 
         self.current_unified_area = {
             'left': min_l,
@@ -376,7 +365,7 @@ class ReaderThread(threading.Thread):
                 f.write(f"\n=== SESSION START {datetime.now()} ===\n")
                 f.write("Time | Monitor | Capture(ms) | Pre(ms) | OCR(ms) | Match(ms) | Text | MatchResult\n")
 
-        print(f"ReaderThread started.")
+        # print(f"ReaderThread started.")
 
         while not self.stop_event.is_set():
             try:
@@ -433,9 +422,6 @@ class ReaderThread(threading.Thread):
 
                 last_crop = self.last_monitor_crops.get(idx)
                 if self._images_are_similar(crop, last_crop, similarity):
-                    # Throttle "no change" logs
-                    if idx == 0 and time.time() % 2 < 0.2: 
-                        print("DEBUG: No change detected (Skipping OCR)")
                     continue
                 self.last_monitor_crops[idx] = crop.copy()
 
@@ -448,10 +434,6 @@ class ReaderThread(threading.Thread):
                 merged_preset = preset.copy()
                 merged_preset.update(area_settings)
 
-                # DEBUG LOGGING FOR SETTINGS
-                if idx == 0 and time.time() % 5 < 0.2:
-                     print(f"DEBUG: Processing Area {area_id}. Colors: {merged_preset.get('subtitle_colors')}, Tol: {merged_preset.get('color_tolerance')}, Bright: {merged_preset.get('brightness_threshold')}")
-                
                 area_ctx = AreaConfigContext(merged_preset)
                 current_subtitle_mode = merged_preset.get('subtitle_mode', 'Full Lines')
 
@@ -462,7 +444,6 @@ class ReaderThread(threading.Thread):
                 processed, has_content, crop_bbox = preprocess_image(crop, area_ctx)
 
                 if not has_content:
-                    # print("images has no content")
                     continue
 
                 t_pre = (time.perf_counter() - t_pre_start) * 1000
@@ -473,11 +454,9 @@ class ReaderThread(threading.Thread):
                 t_ocr = (time.perf_counter() - t_ocr_start) * 1000
 
                 if not text:
-                    # print("images has no text")
                     continue
 
                 if len(text) < 2 or text in self.last_ocr_texts:
-                    # print("last ocr filter")
                     continue
 
                 if has_content and crop_bbox and self.debug_queue:
