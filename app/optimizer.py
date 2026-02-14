@@ -126,8 +126,9 @@ class SettingsOptimizer:
         candidates = []
 
         # Wspólne parametry do permutacji
+        # Zmiana: Testy zawsze w pełnej skali (1.0), aby wykluczyć błędy przy skalowaniu
         params = {
-            "scales": [0.5, 0.75, 1.0],
+            "scales": [1.0], 
             "color_tolerances": range(5, 45, 5),
             "thickenings": [0, 1]
         }

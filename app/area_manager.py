@@ -877,6 +877,9 @@ class OptimizationCaptureWindow(tk.Toplevel):
         # "Dodaj kolejny zrzut" preferred by user
         self.btn_add_area = ttk.Button(btn_box, text="Dodaj kolejny zrzut [F4]", command=self._add_with_selection)
         self.btn_add_area.pack(fill=tk.X, pady=2)
+        
+        self.btn_import = ttk.Button(btn_box, text="Importuj z pliku...", command=self._import_screenshot)
+        self.btn_import.pack(fill=tk.X, pady=2)
 
         # Removed Add Full Screen button as per request
         
@@ -889,13 +892,18 @@ class OptimizationCaptureWindow(tk.Toplevel):
         
         # Match Mode
         ttk.Label(opt_frame, text="Sposób dopasowania:").pack(anchor=tk.W)
-        self.var_match_mode = tk.StringVar(value="Full Lines")
-        modes = ["Full Lines", "Starts With", "Partial"]
+        self.var_match_mode = tk.StringVar(value="Pełne zdania")
+        self.mode_map = {
+            "Pełne zdania": "Full Lines", 
+            "Zaczyna się od": "Starts With",
+            "Częściowe": "Partial"
+        }
+        modes = list(self.mode_map.keys())
         cb_mode = ttk.Combobox(opt_frame, textvariable=self.var_match_mode, values=modes, state="readonly")
         cb_mode.pack(fill=tk.X, pady=(0, 5))
         
         # Color Picker
-        ttk.Label(opt_frame, text="Wymuś kolor (opcjonalne):").pack(anchor=tk.W)
+        ttk.Label(opt_frame, text="Wymuś kolor (Wymagane dla szarych napisów):").pack(anchor=tk.W)
         self.var_color = tk.StringVar(value="")
         
         col_frame = ttk.Frame(opt_frame)
@@ -1016,6 +1024,69 @@ class OptimizationCaptureWindow(tk.Toplevel):
             # Assume cancel means cancel add.
             pass
 
+    def _import_screenshot(self):
+        from tkinter import filedialog, simpledialog
+        from PIL import Image
+        
+        path = filedialog.askopenfilename(title="Wybierz zrzut ekranu", 
+                                          filetypes=[("Obrazy", "*.png *.jpg *.jpeg *.bmp"), ("Wszystkie", "*.*")], parent=self)
+        if not path:
+             return
+        
+        try:
+            # 1. Wczytaj obraz
+            pil_img = Image.open(path).convert('RGB')
+            w, h = pil_img.size
+            
+            # 2. Pytanie o rozdzielczość
+            res_val = f"{w}x{h}"
+            user_res = simpledialog.askstring("Rozdzielczość oryginału", 
+                                             f"Podaj oryginalną rozdzielczość gry (szer x wys).\n"
+                                             "Wpisz np. 1920x1080",
+                                             initialvalue=res_val,
+                                             parent=self)
+            
+            target_res = (w, h)
+            if user_res:
+                try:
+                    parts = user_res.lower().split('x')
+                    if len(parts) == 2:
+                        target_res = (int(parts[0].strip()), int(parts[1].strip()))
+                except:
+                    pass
+            
+            # 3. Selekcja obszaru na zaimportowanym obrazie
+            root = self._get_root()
+            self.withdraw()
+            if self.area_manager: self.area_manager.withdraw()
+            
+            self.update_idletasks()
+            
+            try:
+                # AreaSelector otworzy się na pełny ekran z tym obrazem jako tło
+                sel = AreaSelector(root, pil_img) # Blokuje aż do zamknięcia
+                
+                if sel.geometry:
+                    r = sel.geometry
+                    rect_tuple = (r['left'], r['top'], r['width'], r['height'])
+                    
+                    self.frames.append({"image": pil_img, "rect": rect_tuple})
+                    
+                    # Formatting info for listbox
+                    info = f"Import ({target_res[0]}x{target_res[1]}) - Obszar: {rect_tuple}"
+                    self.lb_screens.insert(tk.END, info)
+                else:
+                    messagebox.showinfo("Anulowano", "Nie zaznaczono obszaru napisów. Obraz pominięty.")
+                    
+            finally:
+                self.deiconify()
+                if self.area_manager: self.area_manager.deiconify()
+
+        except Exception as e:
+            messagebox.showerror("Błąd", f"Błąd importu: {e}")
+            self.deiconify()
+            if self.area_manager: self.area_manager.deiconify()
+
     def _get_root(self):
         w = self
         while w.master:
@@ -1039,7 +1110,9 @@ class OptimizationCaptureWindow(tk.Toplevel):
             messagebox.showerror("Błąd", "Dodaj przynajmniej jeden zrzut ekranu.")
             return
             
-        mode = self.var_match_mode.get()
+        disp_mode = self.var_match_mode.get()
+        mode = self.mode_map.get(disp_mode, "Full Lines")
+        
         color = self.var_color.get() if self.var_color.get() else None
         
         self.on_start(self.frames, mode=mode, initial_color=color)
