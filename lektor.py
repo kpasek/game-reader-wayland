@@ -999,7 +999,7 @@ class LektorApp:
             # 4. Uruchomienie algorytmu w wątku (z UI oczekiwania)
             wait_win = tk.Toplevel(self.root)
             wait_win.title("Przetwarzanie...")
-            wait_win.geometry("400x200")
+            wait_win.geometry("500x150")
             wait_win.resizable(False, False)
             
             lbl = ttk.Label(wait_win, text="Trwa analiza obrazu i szukanie optymalnych ustawień.\nMoże to potrwać dłuższą chwilę...", justify="center")

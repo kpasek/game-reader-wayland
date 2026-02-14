@@ -904,12 +904,12 @@ class OptimizationCaptureWindow(tk.Toplevel):
         
         # Color Picker
         ttk.Label(opt_frame, text="Wymuś kolor (Wymagane dla szarych napisów):").pack(anchor=tk.W)
-        self.var_color = tk.StringVar(value="")
+        self.var_color = tk.StringVar(value="#FFFFFF")
         
         col_frame = ttk.Frame(opt_frame)
         col_frame.pack(fill=tk.X)
         
-        self.lbl_color_preview = tk.Label(col_frame, text="Brak", bg="#eeeeee", relief="sunken", width=10)
+        self.lbl_color_preview = tk.Label(col_frame, text="", bg="#FFFFFF", relief="sunken", width=10)
         self.lbl_color_preview.pack(side=tk.LEFT, padx=(0, 5))
         
         ttk.Button(col_frame, text="Wybierz...", command=self._pick_color).pack(side=tk.LEFT)
@@ -1025,65 +1025,50 @@ class OptimizationCaptureWindow(tk.Toplevel):
             pass
 
     def _import_screenshot(self):
-        from tkinter import filedialog, simpledialog
+        from tkinter import filedialog
         from PIL import Image
         
-        path = filedialog.askopenfilename(title="Wybierz zrzut ekranu", 
+        # Allow multiple selection
+        paths = filedialog.askopenfilenames(title="Wybierz zrzut ekranu", 
                                           filetypes=[("Obrazy", "*.png *.jpg *.jpeg *.bmp"), ("Wszystkie", "*.*")], parent=self)
-        if not path:
+        if not paths:
              return
         
+        # Hide window once for all imports
+        root = self._get_root()
+        self.withdraw()
+        if self.area_manager: self.area_manager.withdraw()
+        self.update_idletasks()
+        
         try:
-            # 1. Wczytaj obraz
-            pil_img = Image.open(path).convert('RGB')
-            w, h = pil_img.size
-            
-            # 2. Pytanie o rozdzielczość
-            res_val = f"{w}x{h}"
-            user_res = simpledialog.askstring("Rozdzielczość oryginału", 
-                                             f"Podaj oryginalną rozdzielczość gry (szer x wys).\n"
-                                             "Wpisz np. 1920x1080",
-                                             initialvalue=res_val,
-                                             parent=self)
-            
-            target_res = (w, h)
-            if user_res:
+            for path in paths:
                 try:
-                    parts = user_res.lower().split('x')
-                    if len(parts) == 2:
-                        target_res = (int(parts[0].strip()), int(parts[1].strip()))
-                except:
+                    # 1. Wczytaj obraz
+                    pil_img = Image.open(path).convert('RGB')
+                    w, h = pil_img.size
+                    target_res = (w, h)
+                    
+                    # 2. Selekcja obszaru na zaimportowanym obrazie
+                    # AreaSelector otworzy się na pełny ekran z tym obrazem jako tło
+                    sel = AreaSelector(root, pil_img) # Blokuje aż do zamknięcia
+                    
+                    if sel.geometry:
+                        r = sel.geometry
+                        rect_tuple = (r['left'], r['top'], r['width'], r['height'])
+                        
+                        self.frames.append({"image": pil_img, "rect": rect_tuple})
+                        
+                        # Formatting info for listbox
+                        info = f"Import ({target_res[0]}x{target_res[1]}) - Obszar: {rect_tuple}"
+                        self.lb_screens.insert(tk.END, info)
+                except Exception as ex:
+                    print(f"Błąd importu pliku {path}: {ex}")
+                    # Continue to next file
                     pass
-            
-            # 3. Selekcja obszaru na zaimportowanym obrazie
-            root = self._get_root()
-            self.withdraw()
-            if self.area_manager: self.area_manager.withdraw()
-            
-            self.update_idletasks()
-            
-            try:
-                # AreaSelector otworzy się na pełny ekran z tym obrazem jako tło
-                sel = AreaSelector(root, pil_img) # Blokuje aż do zamknięcia
-                
-                if sel.geometry:
-                    r = sel.geometry
-                    rect_tuple = (r['left'], r['top'], r['width'], r['height'])
                     
-                    self.frames.append({"image": pil_img, "rect": rect_tuple})
-                    
-                    # Formatting info for listbox
-                    info = f"Import ({target_res[0]}x{target_res[1]}) - Obszar: {rect_tuple}"
-                    self.lb_screens.insert(tk.END, info)
-                else:
-                    messagebox.showinfo("Anulowano", "Nie zaznaczono obszaru napisów. Obraz pominięty.")
-                    
-            finally:
-                self.deiconify()
-                if self.area_manager: self.area_manager.deiconify()
-
         except Exception as e:
             messagebox.showerror("Błąd", f"Błąd importu: {e}")
+        finally:
             self.deiconify()
             if self.area_manager: self.area_manager.deiconify()
 
