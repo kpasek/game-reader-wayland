@@ -116,11 +116,13 @@ class SettingsOptimizer:
 
         # 3. Wykrywanie potencjalnych kolorów napisów (tylko na pierwszym zrzucie)
         detected_colors = self._extract_dominant_colors(crop0, num_colors=3)
-        candidate_colors = set(detected_colors)
+        # Jeśli użytkownik wybrał kolor, używamy tylko tego koloru jako kandydata
         if initial_color:
-            candidate_colors.add(initial_color)
-        candidate_colors.add("#FFFFFF")
-        candidate_colors_list = sorted(list(candidate_colors))
+            candidate_colors_list = [initial_color]
+        else:
+            candidate_colors = set(detected_colors)
+            candidate_colors.add("#FFFFFF")
+            candidate_colors_list = sorted(list(candidate_colors))
 
         # Generowanie kandydatów ustawień
         candidates = []
@@ -179,6 +181,9 @@ class SettingsOptimizer:
         best_score_st1 = 0
         best_settings_st1 = None
 
+        # Zamiast sztywnego progu 100%, zbieramy najlepszych kandydatów
+        ranked_candidates = []
+
         for settings in candidates:
             score, bbox = self._evaluate_settings(crop0, settings, precomputed_db, match_mode)
 
@@ -186,10 +191,14 @@ class SettingsOptimizer:
                 best_score_st1 = score
                 best_settings_st1 = settings
                 best_bbox_st1 = bbox
+            
+            # Dodajemy wszystko co ma jakikolwiek sens (> 10%) - próg znacznie obniżony
+            if score > 10:
+                ranked_candidates.append((score, settings, bbox))
 
-            # Kryterium przejścia dalej: 100% (lub więcej dla exact match)
-            if score >= 100:
-                survivors.append((score, settings, bbox))
+        # Sortujemy i bierzemy znacznie szerszą grupę kandydatów (TOP 50)
+        ranked_candidates.sort(key=lambda x: x[0], reverse=True)
+        survivors = ranked_candidates[:50]
 
         # Jeśli mamy więcej obrazów, filtrujemy
         if len(input_images) > 1 and survivors:
@@ -205,14 +214,18 @@ class SettingsOptimizer:
                     # Sprawdzamy czy nadal trzyma poziom
                     score, bbox = self._evaluate_settings(crop_n, settings, precomputed_db, match_mode)
                     
-                    if score >= 100:
-                        # Sumujemy score
-                        next_round.append((prev_score + score, settings, bbox))
+                    # Sumujemy score
+                    # Próg przeżycia bardzo niski, aby nie odrzucać zbyt szybko (niektóre klatki mogą być trudne)
+                    if score > 5: 
+                         total = prev_score + score
+                         next_round.append((total, settings, bbox))
                 
                 if not next_round:
                     break
                     
-                finalists = next_round
+                # Zostawiamy tylko najlepszych, żeby nie puchło, ale limit większy (20)
+                next_round.sort(key=lambda x: x[0], reverse=True)
+                finalists = next_round[:20] 
             
             if finalists:
                 # Sortujemy po sumarycznym score malejąco
@@ -221,19 +234,7 @@ class SettingsOptimizer:
                 # Średni score na obraz
                 avg_score = best_total_score / len(input_images)
                 
-                # Use rough_area as the optimized area to preserve the user's intent (margin)
-                # Using the tight bbox (detect_text_bounds) removes the margin we carefully added.
                 opt_rect = rough_area
-                
-                # Update: If the detected area is significantly different or shifted, 
-                # we might inform the user, but overwriting the margin with a tight fit
-                # causes the "Shifted Right/Down" illusion when content changes slightly.
-                # However, if we really want to use the refined area, we must ensure 'bx, by' 
-                # are relative to 'rough_area' correctly. They seem to be.
-                # But 'bbox' comes from 'preprocess_image' which adds padding=4.
-                
-                # FIX: Always return the rough_area (Input + Margin) to respect the expansion.
-                # The text detection inside it is just for OCR validation.
 
                 return {
                     "score": avg_score, 
@@ -297,8 +298,12 @@ class SettingsOptimizer:
             
             # Check for exact match (Score 101)
             # precomputed_db[1] is the exact_map (cleaned_text -> index)
-            from app.text_processing import clean_text
-            cleaned_ocr = clean_text(ocr_text)
+            from app.text_processing import clean_text, smart_remove_name
+            
+            # Musimy usunąć imię tak samo jak robi to matcher
+            ocr_no_name = smart_remove_name(ocr_text)
+            cleaned_ocr = clean_text(ocr_no_name)
+            
             if cleaned_ocr in precomputed_db[1]:
                  score = 101
                  
