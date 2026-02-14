@@ -652,7 +652,7 @@ class AreaManagerWindow(tk.Toplevel):
              else:
                   msg += "\n\nSłaby wynik. Czy chcesz uruchomić optymalizator?"
                   if messagebox.askyesno("Wynik Testu", msg):
-                       def run_opt_callback(frames_data):
+                       def run_opt_callback(frames_data, mode="Full Lines", initial_color=None):
                             # Collect rects
                             # Base rect is either expanded or original
                             base = (ex, ey, ew, eh) if expanded_better else (ox, oy, ow, oh)
@@ -683,7 +683,7 @@ class AreaManagerWindow(tk.Toplevel):
                             w_prog.update()
                             
                             try:
-                                res = optimizer.optimize(valid_images, target_rect_final, self.subtitle_lines, mode)
+                                res = optimizer.optimize(valid_images, target_rect_final, self.subtitle_lines, mode, initial_color=initial_color)
                             except Exception as ex:
                                 w_prog.destroy()
                                 messagebox.showerror("Błąd Optymalizacji", str(ex))
@@ -783,7 +783,7 @@ class AreaManagerWindow(tk.Toplevel):
              
         OptimizationCaptureWindow(self, self._run_optimizer, area_manager=self)
 
-    def _run_optimizer(self, frames):
+    def _run_optimizer(self, frames, mode="Full Lines", initial_color=None):
         if not frames: return
         
         last_frame = frames[-1]
@@ -801,13 +801,13 @@ class AreaManagerWindow(tk.Toplevel):
         def task():
             try:
                 optimizer = SettingsOptimizer()
-                current_area = self.areas[self.current_selection_idx]
-                settings = current_area.get('settings', {})
-                mode = settings.get('subtitle_mode', 'Full Lines')
+                # current_area = self.areas[self.current_selection_idx]
+                # settings = current_area.get('settings', {})
+                # mode = settings.get('subtitle_mode', 'Full Lines') # Overridden by argument
                 
                 imgs = [f['image'] for f in frames]
 
-                result = optimizer.optimize(imgs, rough_area, subtitle_db, match_mode=mode)
+                result = optimizer.optimize(imgs, rough_area, subtitle_db, match_mode=mode, initial_color=initial_color)
                 self.after(0, lambda: self._on_opt_finished(result, prog))
             except Exception as e:
                 print(f"Optimization error: {e}")
@@ -848,7 +848,7 @@ class OptimizationCaptureWindow(tk.Toplevel):
     def __init__(self, parent, on_start, area_manager=None):
         super().__init__(parent)
         self.title("Optymalizacja Ustawień")
-        self.geometry("500x400")
+        self.geometry("500x600")
         
         # Shortcuts
         self.bind("<F4>", lambda e: self._add_with_selection())
@@ -883,11 +883,76 @@ class OptimizationCaptureWindow(tk.Toplevel):
         self.btn_rem = ttk.Button(btn_box, text="Usuń", command=self._remove_screenshot)
         self.btn_rem.pack(fill=tk.X, pady=2)
         
+        # Options Frame
+        opt_frame = ttk.LabelFrame(main_f, text="Ustawienia Wstępne", padding=10)
+        opt_frame.pack(fill=tk.X, pady=5)
+        
+        # Match Mode
+        ttk.Label(opt_frame, text="Sposób dopasowania:").pack(anchor=tk.W)
+        self.var_match_mode = tk.StringVar(value="Full Lines")
+        modes = ["Full Lines", "Starts With", "Partial"]
+        cb_mode = ttk.Combobox(opt_frame, textvariable=self.var_match_mode, values=modes, state="readonly")
+        cb_mode.pack(fill=tk.X, pady=(0, 5))
+        
+        # Color Picker
+        ttk.Label(opt_frame, text="Wymuś kolor (opcjonalne):").pack(anchor=tk.W)
+        self.var_color = tk.StringVar(value="")
+        
+        col_frame = ttk.Frame(opt_frame)
+        col_frame.pack(fill=tk.X)
+        
+        self.lbl_color_preview = tk.Label(col_frame, text="Brak", bg="#eeeeee", relief="sunken", width=10)
+        self.lbl_color_preview.pack(side=tk.LEFT, padx=(0, 5))
+        
+        ttk.Button(col_frame, text="Wybierz...", command=self._pick_color).pack(side=tk.LEFT)
+        ttk.Button(col_frame, text="X", width=3, command=self._clear_color).pack(side=tk.LEFT, padx=2)
+
         # Start
         ttk.Button(main_f, text="Uruchom Optymalizację", command=self._start_opt).pack(pady=10, fill=tk.X)
         self.status = ttk.Label(main_f, text="")
         self.status.pack(pady=5)
     
+    def _pick_color(self):
+        # Store root reference
+        root = self._get_root()
+        
+        self.withdraw()
+        if self.area_manager: self.area_manager.withdraw()
+        
+        # Ensure UI updates before sleeping
+        self.update()
+        import time
+        time.sleep(0.3)
+        
+        try:
+            img = capture_fullscreen()
+        except:
+            img = None
+        
+        if not img:
+            self.deiconify()
+            if self.area_manager: self.area_manager.deiconify()
+            return
+            
+        try:
+            sel = ColorSelector(root, img)
+            
+            if sel.selected_color:
+                hex_color = sel.selected_color
+                self.var_color.set(hex_color)
+                self.lbl_color_preview.config(bg=hex_color, text="")
+                
+        except Exception as e:
+            print(f"Error picking color: {e}")
+            
+        finally:
+            self.deiconify()
+            if self.area_manager: self.area_manager.deiconify()
+
+    def _clear_color(self):
+        self.var_color.set("")
+        self.lbl_color_preview.config(bg="#eeeeee", text="Brak")
+
     # Removed _add_screenshot method
 
     def _add_with_selection(self):
@@ -974,5 +1039,8 @@ class OptimizationCaptureWindow(tk.Toplevel):
             messagebox.showerror("Błąd", "Dodaj przynajmniej jeden zrzut ekranu.")
             return
             
-        self.on_start(self.frames)
+        mode = self.var_match_mode.get()
+        color = self.var_color.get() if self.var_color.get() else None
+        
+        self.on_start(self.frames, mode=mode, initial_color=color)
         self.destroy()

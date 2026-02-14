@@ -973,7 +973,7 @@ class LektorApp:
         self._show_optimization_setup(data, subtitle_lines, path)
 
     def _show_optimization_setup(self, preset_data, subtitle_lines, preset_path):
-        def on_wizard_finish(frames_data):
+        def on_wizard_finish(frames_data, mode="Full Lines", initial_color=None):
             # frames_data: list of {'image': PIL, 'rect': (x,y,w,h) or None}
             valid_images = [f['image'] for f in frames_data]
             valid_rects = [f['rect'] for f in frames_data if f['rect']]
@@ -988,14 +988,14 @@ class LektorApp:
             fx, fy, real_w, real_h = calculate_merged_area(valid_rects, fw, fh, 0.02)
             
             target_rect = (fx, fy, real_w, real_h)
-            mode = preset_data.get('subtitle_mode', 'Full Lines')
+            # mode passed from wizard, override preset default if needed
             
-            self._start_optimization_process(valid_images, target_rect, subtitle_lines, preset_path, preset_data, mode)
+            self._start_optimization_process(valid_images, target_rect, subtitle_lines, preset_path, preset_data, mode, initial_color)
 
         # Open shared Wizard
         OptimizationCaptureWindow(self.root, on_wizard_finish)
 
-    def _start_optimization_process(self, images, rough_area, subtitle_lines, path, data, mode="Full Lines"):
+    def _start_optimization_process(self, images, rough_area, subtitle_lines, path, data, mode="Full Lines", initial_color=None):
             # 4. Uruchomienie algorytmu w wątku (z UI oczekiwania)
             wait_win = tk.Toplevel(self.root)
             wait_win.title("Przetwarzanie...")
@@ -1016,7 +1016,7 @@ class LektorApp:
                 try:
                     optimizer = SettingsOptimizer(self.config_mgr)
                     # optimizer.optimize supports list of images now
-                    res = optimizer.optimize(images, rough_area, subtitle_lines, mode)
+                    res = optimizer.optimize(images, rough_area, subtitle_lines, mode, initial_color=initial_color)
                     thread_context["result"] = res
                 except Exception as e:
                     thread_context["error"] = e

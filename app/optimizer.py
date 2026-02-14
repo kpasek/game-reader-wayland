@@ -70,7 +70,8 @@ class SettingsOptimizer:
                  images: Any, 
                  rough_area: Tuple[int, int, int, int], 
                  subtitle_db: List[str],
-                 match_mode: str = "Full Lines") -> Dict[str, Any]:
+                 match_mode: str = "Full Lines",
+                 initial_color: str = None) -> Dict[str, Any]:
         """
         Znajduje optymalne ustawienia OCR i matchingu dla zadanego wycinka ekranu (rough_area)
         i bazy napisów.
@@ -116,6 +117,8 @@ class SettingsOptimizer:
         # 3. Wykrywanie potencjalnych kolorów napisów (tylko na pierwszym zrzucie)
         detected_colors = self._extract_dominant_colors(crop0, num_colors=3)
         candidate_colors = set(detected_colors)
+        if initial_color:
+            candidate_colors.add(initial_color)
         candidate_colors.add("#FFFFFF")
         candidate_colors_list = sorted(list(candidate_colors))
 
