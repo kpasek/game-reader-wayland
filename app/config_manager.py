@@ -41,6 +41,9 @@ DEFAULT_PRESET_CONTENT = {
 }
 
 
+import shutil
+import datetime
+
 class ConfigManager:
     """Zarządza ładowaniem i zapisywaniem głównej konfiguracji aplikacji oraz presetów."""
 
@@ -49,6 +52,21 @@ class ConfigManager:
         self.preset_path = preset_path
         self.settings = DEFAULT_CONFIG.copy()
         self.load_app_config()
+
+    def backup_preset(self, path: str) -> Optional[str]:
+        """Tworzy kopię zapasową pliku preset z timestampem."""
+        if not path or not os.path.exists(path):
+            return None
+        
+        try:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_path = f"{path}.{timestamp}.bak"
+            shutil.copy2(path, backup_path)
+            print(f"Utworzono kopię zapasową ustawień: {backup_path}")
+            return backup_path
+        except Exception as e:
+            print(f"Błąd tworzenia kopii zapasowej: {e}")
+            return None
 
     def import_gr_preset(self, import_path: str, target_preset_path: str) -> bool:
         """
@@ -233,7 +251,34 @@ class ConfigManager:
 
     def save_preset(self, path: str, data: Dict[str, Any]):
         try:
-            save_data = data.copy()
+            # Helper to recursively sanitize preventing recursion loops
+            def sanitize(obj, memo=None):
+                if memo is None:
+                    memo = set()
+                
+                obj_id = id(obj)
+                if obj_id in memo:
+                    return f"<Circular Reference {type(obj).__name__}>"
+                
+                if isinstance(obj, dict):
+                    memo.add(obj_id)
+                    res = {k: sanitize(v, memo) for k, v in obj.items() if isinstance(k, str) and not k.startswith('_')}
+                    memo.remove(obj_id)
+                    return res
+                elif isinstance(obj, list):
+                    memo.add(obj_id)
+                    res = [sanitize(x, memo) for x in obj]
+                    memo.remove(obj_id)
+                    return res
+                elif isinstance(obj, (str, int, float, bool, type(None))):
+                    return obj
+                else:
+                    # Try to convert custom types (int64 etc)
+                    if hasattr(obj, 'item'): 
+                         return obj.item()
+                    return str(obj)
+
+            save_data = sanitize(data)
             base_dir = os.path.dirname(os.path.abspath(path))
 
             for key in ['audio_dir', 'text_file_path']:

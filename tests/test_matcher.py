@@ -45,7 +45,7 @@ def test_find_best_match_partial_lines(precomputed_data):
     matcher_config = {
         'partial_mode_min_len': 10
     }
-    match = find_best_match(ocr_text, precomputed_data, "Partial Lines", matcher_config=matcher_config)
+    match = find_best_match(ocr_text, precomputed_data, "Partial", matcher_config=matcher_config)
     assert match is not None
     idx, score = match
     assert idx == 3 

@@ -30,6 +30,9 @@ try:
     HAS_PYNPUT = True
 except ImportError:
     HAS_PYNPUT = False
+    
+STANDARD_WIDTH = 3840
+STANDARD_HEIGHT = 2160
 
 from app.config_manager import ConfigManager
 from app.reader import ReaderThread
@@ -37,9 +40,11 @@ from app.player import PlayerThread
 from app.log import LogWindow
 from app.settings import SettingsDialog
 from app.area_selector import AreaSelector, ColorSelector
-from app.area_manager import AreaManagerWindow
+from app.area_manager import AreaManagerWindow, OptimizationCaptureWindow
 from app.capture import capture_fullscreen
 from app.help import HelpWindow
+from app.optimizer import SettingsOptimizer
+from app.geometry_utils import calculate_merged_area
 
 # Global events/queues
 stop_event = threading.Event()
@@ -54,7 +59,7 @@ class LektorApp:
     def __init__(self, root: tk.Tk, autostart_preset: Optional[str], game_cmd: list):
         self.root = root
         self.root.title(f"Lektor {APP_VERSION}")
-        self.root.geometry("800x500")
+        self.root.geometry("730x500")
 
         self.config_mgr = ConfigManager()
         self.game_cmd = game_cmd
@@ -232,14 +237,16 @@ class LektorApp:
         preset_menu.add_command(label="Zmień folder audio", command=lambda: self.change_path('audio_dir'))
         preset_menu.add_command(label="Zmień plik napisów", command=lambda: self.change_path('text_file_path'))
         preset_menu.add_command(label="Importuj preset (Game Reader)", command=self.import_preset_dialog)
+        preset_menu.add_separator()
+        # Removed 'Wykryj optymalne ustawienia' as requested
         menubar.add_cascade(label="Lektor", menu=preset_menu)
 
-        main_area_menu = tk.Menu(menubar, tearoff=0)
-        main_area_menu.add_command(label="Zarządzaj Obszarami...", command=self.open_area_manager)
-        main_area_menu.add_separator()
-        main_area_menu.add_command(label="Ustaw główny obszar (1)", command=self.set_area_1_direct)
-
-        menubar.add_cascade(label="Obszary", menu=main_area_menu)
+        # Removed main area menu as requested
+        # main_area_menu = tk.Menu(menubar, tearoff=0)
+        # main_area_menu.add_command(label="Zarządzaj Obszarami...", command=self.open_area_manager)
+        # main_area_menu.add_separator()
+        # main_area_menu.add_command(label="Ustaw główny obszar (1)", command=self.set_area_1_direct)
+        # menubar.add_cascade(label="Obszary", menu=main_area_menu)
 
         help_menu = tk.Menu(menubar, tearoff=0)
         help_menu.add_command(label="Podgląd logów", command=self.show_logs)
@@ -269,22 +276,19 @@ class LektorApp:
         self.btn_settings = ttk.Button(f_res, text="⚙ Ustawienia", command=self.open_settings)
         self.btn_settings.pack(side=tk.LEFT, padx=5)
 
-        # Kolory napisów
-        grp_sub = ttk.LabelFrame(panel, text="Kolory napisów", padding=10)
-        grp_sub.pack(fill=tk.X, pady=(5, 5))  # Padding żeby oddzielić od reszty
+        # Actions Panel (Replaces Colors Panel)
+        grp_act = ttk.LabelFrame(panel, text="Akcje", padding=10)
+        grp_act.pack(fill=tk.X, pady=5)
+        
+        # Big Buttons for main actions
+        btn_areas = tk.Button(grp_act, text="Zarządzaj Obszarami", command=self.open_area_manager, bg="#e0e0e0", relief="raised")
+        btn_areas.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
-        # Przycisk po lewej
-        self.btn_pick_color = ttk.Button(grp_sub, text="Dodaj biały", command=self.add_white_subtitle_color)
-        self.btn_pick_color.pack(side=tk.LEFT, padx=(0, 10))
-        self.btn_pick_color = ttk.Button(grp_sub, text="Wybierz kolor", command=self.add_subtitle_color)
-        self.btn_pick_color.pack(side=tk.LEFT, padx=(0, 10))
+        btn_detect = tk.Button(grp_act, text="Wykryj Ustawienia", command=self.detect_optimal_settings, bg="#e0e0e0", relief="raised")
+        btn_detect.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
-        # Canvas (lista kolorów) po prawej
-        # highlightthickness=0 usuwa brzydką ramkę wokół canvasu
-        self.color_canvas = tk.Canvas(grp_sub, height=24, bg="#f0f0f0", highlightthickness=0)
-        self.color_canvas.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        # Bindowanie kliknięcia w kolor
-        self.color_canvas.bind("<Button-1>", self.on_color_click)
+        # Removed old subtitle colors section
+        # grp_sub = ttk.LabelFrame(panel, text="Kolory napisów", padding=10) ...
 
         # --- AUDIO ---
         grp_aud = ttk.LabelFrame(panel, text="Kontrola Audio", padding=10)
@@ -849,26 +853,54 @@ class LektorApp:
         data = self.config_mgr.load_preset(path)
         if 'areas' not in data: self.config_mgr._migrate_legacy_areas(data)
         
+        # Load subtitles for testing inside manager
+        txt_path = data.get('text_file_path')
+        subs = []
+        if txt_path and os.path.exists(txt_path):
+             subs = self.config_mgr.load_text_lines(txt_path)
+        
         # Open Manager
-        AreaManagerWindow(self.root, data['areas'], self._save_areas_callback)
+        AreaManagerWindow(self.root, data['areas'], self._save_areas_callback, subs)
+
+    def _normalize_area_to_4k(self, rect, img_w, img_h):
+        """
+        Przeskalowuje podany rect (dict) do bazy 4K (3840x2160) na podstawie rozmiaru obrazu img_w, img_h.
+        """
+        sx = 3840 / img_w
+        sy = 2160 / img_h
+        return {
+            'left': int(rect['left'] * sx),
+            'top': int(rect['top'] * sy),
+            'width': int(rect['width'] * sx),
+            'height': int(rect['height'] * sy)
+        }
+
+    def _normalize_areas_list_to_4k(self, areas, img_w, img_h):
+        """
+        Przeskalowuje wszystkie recty w liście obszarów do bazy 4K.
+        """
+        return [dict(a, rect=self._normalize_area_to_4k(a['rect'], img_w, img_h)) if 'rect' in a else a for a in areas]
 
     def _save_areas_callback(self, new_areas):
         path = self.var_preset_full_path.get()
         if path:
             data = self.config_mgr.load_preset(path)
-            data['areas'] = new_areas
+            # Pobierz rozmiar ostatniego zrzutu ekranu (lub domyślny, jeśli nie ma)
+            try:
+                img = capture_fullscreen()
+                img_w, img_h = img.size
+            except Exception:
+                img_w, img_h = 3840, 2160  # fallback, jeśli nie uda się pobrać
+            # Przeskaluj do 4K
+            norm_areas = self._normalize_areas_list_to_4k(new_areas, img_w, img_h)
+            data['areas'] = norm_areas
             self.config_mgr.save_preset(path, data)
             self._restart_hotkeys()
             self.refresh_color_canvas() # Update in case Area 1 colors changed in manager
-            
             # Restart reader to apply changes (geometry, enabled state, etc.)
             if self.is_running:
                 print("Obszary zmienione, restartuję czytanie...")
                 self.stop_reading()
-                # Give it a moment using `after` isn't ideal for straight restart logic, 
-                # but direct restart is simpler.
-                # However, stop_reading signals flag. Thread needs to die.
-                # We can use a short delay to restart.
                 self.root.after(200, self.start_reading)
 
     def set_area_1_direct(self):
@@ -913,6 +945,377 @@ class LektorApp:
             messagebox.showerror("Błąd", f"Wybór obszaru: {e}")
         finally:
             self.root.deiconify()
+
+    def detect_optimal_settings(self):
+        """
+        Uruchamia proces automatycznego wykrywania ustawień (Threaded).
+        """
+        path = self.var_preset_full_path.get()
+        if not path or not os.path.exists(path):
+            messagebox.showinfo("Info", "Najpierw wybierz lub stwórz preset.")
+            return
+
+        # Check subtitles first
+        data = self.config_mgr.load_preset(path)
+        if 'areas' not in data: self.config_mgr._migrate_legacy_areas(data)
+        
+        txt_path = data.get('text_file_path')
+        if not txt_path or not os.path.exists(txt_path):
+             messagebox.showerror("Błąd", "Nie znaleziono pliku napisów w ustawieniach presetu.")
+             return
+                
+        subtitle_lines = self.config_mgr.load_text_lines(txt_path)
+        if not subtitle_lines:
+             messagebox.showerror("Błąd", "Plik napisów jest pusty.")
+             return
+
+        # Open Setup Dialog
+        self._show_optimization_setup(data, subtitle_lines, path)
+
+    def _show_optimization_setup(self, preset_data, subtitle_lines, preset_path):
+        def on_wizard_finish(frames_data):
+            # frames_data: list of {'image': PIL, 'rect': (x,y,w,h) or None}
+            valid_images = [f['image'] for f in frames_data]
+            valid_rects = [f['rect'] for f in frames_data if f['rect']]
+
+            if not valid_rects:
+                 messagebox.showerror("Błąd", "Nie zdefiniowano żadnego obszaru (Wycinka).")
+                 return
+
+            # Combine rects logic (Union + 2%)
+            fw, fh = valid_images[0].size
+            # Use utility with margin factor 0.02
+            fx, fy, real_w, real_h = calculate_merged_area(valid_rects, fw, fh, 0.02)
+            
+            target_rect = (fx, fy, real_w, real_h)
+            mode = preset_data.get('subtitle_mode', 'Full Lines')
+            
+            self._start_optimization_process(valid_images, target_rect, subtitle_lines, preset_path, preset_data, mode)
+
+        # Open shared Wizard
+        OptimizationCaptureWindow(self.root, on_wizard_finish)
+
+    def _start_optimization_process(self, images, rough_area, subtitle_lines, path, data, mode="Full Lines"):
+            # 4. Uruchomienie algorytmu w wątku (z UI oczekiwania)
+            wait_win = tk.Toplevel(self.root)
+            wait_win.title("Przetwarzanie...")
+            wait_win.geometry("400x200")
+            wait_win.resizable(False, False)
+            
+            lbl = ttk.Label(wait_win, text="Trwa analiza obrazu i szukanie optymalnych ustawień.\nMoże to potrwać dłuższą chwilę...", justify="center")
+            lbl.pack(pady=20)
+            
+            pbar = ttk.Progressbar(wait_win, mode='indeterminate')
+            pbar.pack(fill=tk.X, padx=30, pady=10)
+            pbar.start(15)
+
+            # Thread context
+            thread_context = {"result": None, "error": None}
+
+            def worker():
+                try:
+                    optimizer = SettingsOptimizer(self.config_mgr)
+                    # optimizer.optimize supports list of images now
+                    res = optimizer.optimize(images, rough_area, subtitle_lines, mode)
+                    thread_context["result"] = res
+                except Exception as e:
+                    thread_context["error"] = e
+
+            t = threading.Thread(target=worker, daemon=True)
+            t.start()
+            
+            def check_thread():
+                if t.is_alive():
+                    self.root.after(100, check_thread)
+                else:
+                    wait_win.destroy()
+                    self.root.deiconify()
+                    self._on_optimization_finished(thread_context, path, data, subtitle_lines)
+
+            check_thread()
+
+    def _unused_legacy_detect_method(self):
+        # Placeholder to replace original method body cleanly
+        pass
+
+    def _on_optimization_finished(self, context, preset_path, preset_data, subtitle_lines):
+        if context["error"]:
+            messagebox.showerror("Błąd", f"Błąd podczas optymalizacji: {context['error']}")
+            return
+
+        result = context["result"]
+        if not result:
+             messagebox.showerror("Błąd", "Brak wyników z optymalizatora.")
+             return
+
+        score = result.get('score', 0)
+        
+        if score < 50:
+            display_score = min(score, 100)
+            messagebox.showwarning("Wynik", f"Nie znaleziono dobrych ustawień (Score: {display_score:.1f}%).\nSpróbuj zmienić obszar lub klatkę z gry. Najlepsze co mamy to: {display_score:.1f}%")
+            return
+
+        best_settings = result.get('settings', {})
+        optimized_area = result.get('optimized_area')
+        
+        # Select result dialog
+        current_areas = preset_data.get('areas', [])
+        dialog_res = self._show_custom_result_dialog(score, best_settings, optimized_area, current_areas, subtitle_lines)
+        
+        if dialog_res and dialog_res["confirmed"]:
+            # 5. Kopia zapasowa
+            bkp = self.config_mgr.backup_preset(preset_path)
+            if bkp:
+                print(f"Kopia zapasowa: {bkp}")
+            
+            # 6. Zapis
+            preset_data.update(best_settings)
+            
+            if optimized_area:
+                 ox, oy, ow, oh = optimized_area
+                 new_rect = {'left': ox, 'top': oy, 'width': ow, 'height': oh}
+                 
+                 target_id = dialog_res["target_id"]
+                 
+                 if target_id is None:
+                     # Create new
+                     existing_ids = [a.get('id', 0) for a in current_areas]
+                     new_id = (max(existing_ids) if existing_ids else 0) + 1
+                     current_areas.append({
+                         "id": new_id, 
+                         "type": "continuous", 
+                         "rect": new_rect, 
+                         "hotkey": "", 
+                         "settings": best_settings
+                     })
+                 else:
+                     # Update existing
+                     for area in current_areas:
+                         if area.get('id') == target_id:
+                             # Update rect if provided
+                             if optimized_area:
+                                 area['rect'] = {
+                                     'left': int(optimized_area[0]),
+                                     'top': int(optimized_area[1]),
+                                     'width': int(optimized_area[2]),
+                                     'height': int(optimized_area[3])
+                                 }
+                             
+                             # Update or create settings dict
+                             if 'settings' not in area:
+                                 area['settings'] = {}
+                             area['settings'].update(best_settings)
+                             
+                             # Remove legacy top-level colors if present to avoid confusion
+                             if 'colors' in area:
+                                 del area['colors']
+                             break
+                 
+                 preset_data['areas'] = current_areas
+            elif dialog_res["target_id"] is not None:
+                # Update settings only (no area change)
+                 target_id = dialog_res["target_id"]
+                 for area in current_areas:
+                     if area.get('id') == target_id:
+                         if 'settings' not in area:
+                             area['settings'] = {}
+                         area['settings'].update(best_settings)
+                         if 'colors' in area: del area['colors']
+                         break
+                 preset_data['areas'] = current_areas
+
+            self.config_mgr.save_preset(preset_path, preset_data)
+            
+            # Przeładowanie GUI
+            self.on_preset_selected_from_combo(None)
+            messagebox.showinfo("Gotowe", "Ustawienia zostały zaktualizowane.")
+
+    def _show_custom_result_dialog(self, score, settings, optimized_area, existing_areas, subtitle_lines=None):
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"Wynik Optymalizacji")
+        dialog.geometry("450x700")
+        
+        content = tk.Frame(dialog, padx=20, pady=20)
+        content.pack(fill="both", expand=True)
+
+        tk.Label(content, text="Znaleziono optymalne ustawienia", font=("Arial", 12, "bold")).pack(pady=(0, 15))
+        
+        def add_row_custom(label, widget_creator_func):
+            f = tk.Frame(content)
+            f.pack(fill="x", pady=3)
+            tk.Label(f, text=label, width=22, anchor="w", fg="#555").pack(side="left", anchor="n")
+            w = widget_creator_func(f)
+            w.pack(side="left", fill='x', expand=True, anchor="w")
+
+        def add_text_row(label, value):
+            add_row_custom(label, lambda p: tk.Label(p, text=str(value), anchor="w", font=("Arial", 10, "bold"), wraplength=200, justify="left"))
+
+        display_score = min(score, 100)
+        add_text_row("Wynik (Score):", f"{display_score:.1f}%")
+        
+        # Area info
+        if optimized_area:
+            ox, oy, ow, oh = optimized_area
+            area_str = f"X: {ox}, Y: {oy}, Wymiary: {ow}x{oh}"
+            add_text_row("Wykryty obszar:", area_str)
+
+        add_text_row("Jasność (Threshold):", settings.get('brightness_threshold', '-'))
+        add_text_row("Kontrast:", settings.get('contrast', '-'))
+        add_text_row("Skala OCR:", settings.get('ocr_scale_factor', '-'))
+        add_text_row("Tryb koloru:", settings.get('text_color_mode', '-'))
+        
+        # Colors with swatches
+        cols = settings.get('subtitle_colors', [])
+        
+        def create_color_widget(parent):
+            if not cols:
+                 return tk.Label(parent, text="Brak (Grayscale)", font=("Arial", 10, "bold"), anchor="w")
+            
+            f_cols = tk.Frame(parent)
+            for c in cols:
+                row = tk.Frame(f_cols)
+                row.pack(fill="x", pady=1)
+                tk.Label(row, relief="solid", borderwidth=1, bg=c, width=3, height=1).pack(side="left", padx=(0, 5))
+                tk.Label(row, text=c, font=("Arial", 10, "bold")).pack(side="left")
+            return f_cols
+
+        add_row_custom("Kolory:", create_color_widget)
+        add_text_row("Tolerancja:", settings.get('color_tolerance', '-'))
+
+        # Area Selection
+        tk.Label(content, text="\nZastosuj ustawienia do:", font=("Arial", 11, "bold")).pack(pady=(15, 5), anchor="w")
+        
+        area_options = ["Utwórz nowy obszar"]
+        area_map = {} 
+        
+        for a in existing_areas:
+            aid = a.get('id')
+            aname = f"Obszar {aid}"
+            if a.get('type'):
+                aname += f" ({a.get('type')})"
+            area_options.append(aname)
+            area_map[aname] = aid
+            
+        # Default to Area #1 if available
+        default_val = area_options[0]
+        for name, aid in area_map.items():
+            if aid == 1:
+                default_val = name
+                break
+                
+        selected_option = tk.StringVar(value=default_val)
+        cb = ttk.Combobox(content, textvariable=selected_option, values=area_options, state="readonly", font=("Arial", 10))
+        cb.pack(fill="x", pady=5)
+        
+        tk.Label(content, text="\nCzy chcesz zapisać te ustawienia?", font=("Arial", 11)).pack(pady=20)
+        
+        btn_frame = tk.Frame(dialog, pady=5)
+        btn_frame.pack(fill="x", side="bottom", pady=10)
+        
+        result = {"confirmed": False, "target_id": None}
+        
+        def on_yes():
+            result["confirmed"] = True
+            val = selected_option.get()
+            if val == "Utwórz nowy obszar":
+                result["target_id"] = None
+            else:
+                result["target_id"] = area_map.get(val)
+            dialog.destroy()
+            
+        def on_no():
+            dialog.destroy()
+            
+        tk.Button(btn_frame, text="Zastosuj", command=on_yes, width=15, bg="#e0ffe0").pack(side="left", padx=5, expand=True)
+        tk.Button(btn_frame, text="Anuluj", command=on_no, width=10).pack(side="right", padx=5, expand=True)
+        
+        def on_test():
+             if not subtitle_lines:
+                 messagebox.showerror("Błąd", "Brak danych tekstowych do weryfikacji.")
+                 return
+                 
+             dialog.withdraw()
+             self.root.withdraw()
+             time.sleep(0.3)
+             
+             try:
+                 img = capture_fullscreen()
+                 if not img:
+                      messagebox.showerror("Błąd", "Nie udało się wykonać zrzutu ekranu.")
+                      dialog.deiconify()
+                      self.root.deiconify()
+                      return
+                 
+                 # Show Progress
+                 p_win = tk.Toplevel(self.root)
+                 p_win.title("Weryfikacja...")
+                 tk.Label(p_win, text="Sprawdzanie aktualnych ustawień...").pack(padx=20, pady=20)
+                 p_win.update()
+                 
+                 from app.matcher import precompute_subtitles
+                 pre_db = precompute_subtitles(subtitle_lines)
+                 
+                 ox, oy, ow, oh = optimized_area
+                 img_w, img_h = img.size
+                 cx = max(0, ox); cy = max(0, oy)
+                 cw = min(ow, img_w - cx); ch = min(oh, img_h - cy)
+                 
+                 crop = img.crop((cx, cy, cx+cw, cy+ch))
+                 
+                 optimizer = SettingsOptimizer()
+                 cur_score, _ = optimizer._evaluate_settings(crop, settings, pre_db, settings.get('subtitle_mode', 'Full Lines'))
+                 
+                 p_win.destroy()
+                 
+                 msg = f"Wynik na nowym zrzucie: {cur_score:.1f}"
+                 better_res = None
+                 
+                 if cur_score < 101:
+                      if messagebox.askyesno("Wynik", f"{msg}\n\nCzy chcesz spróbować znaleźć LEPSZE ustawienia dla tego zrzutu?"):
+                           # Optimize
+                           w2 = tk.Toplevel(self.root)
+                           tk.Label(w2, text="Szukam lepszych ustawień...").pack(padx=20, pady=20)
+                           w2.update()
+                           
+                           res = optimizer.optimize(img, (ox, oy, ow, oh), subtitle_lines, settings.get('subtitle_mode', 'Full Lines'))
+                           w2.destroy()
+                           
+                           if res and res.get('score', 0) > cur_score:
+                                better_res = res
+                                msg += f"\n\nZnaleziono lepsze: {res['score']:.1f}"
+                           else:
+                                msg += "\n\nNie znaleziono lepszych."
+                 else:
+                      msg += "\n\nIdealne dopasowanie (Exact Match)."
+                      
+                 if better_res:
+                      if messagebox.askyesno("Lepszy wynik", msg + "\n\nCzy chcesz użyć NOWYCH ustawień?"):
+                           dialog.destroy()
+                           self.root.deiconify()
+                           # Recursive reopen with new settings
+                           self._show_custom_result_dialog(better_res['score'], better_res['settings'], better_res['optimized_area'], existing_areas, subtitle_lines)
+                           return
+                 else:
+                      messagebox.showinfo("Info", msg)
+                 
+                 dialog.deiconify()
+                 self.root.deiconify()
+
+             except Exception as e:
+                 messagebox.showerror("Błąd", str(e))
+                 try: p_win.destroy() 
+                 except: pass
+                 dialog.deiconify()
+                 self.root.deiconify()
+                 
+        tk.Button(btn_frame, text="Testuj ustawienia", command=on_test).pack(side="left", padx=5)
+        
+        dialog.transient(self.root)
+        dialog.wait_visibility()
+        dialog.grab_set()
+        self.root.wait_window(dialog)
+        
+        return result
 
 
 def main():

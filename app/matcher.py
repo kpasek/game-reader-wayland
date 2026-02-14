@@ -119,14 +119,14 @@ Optional[Tuple[int, int]]:
     for _, sub_clean, original_idx, sub_len in candidates:
         len_diff = abs(ocr_len - sub_len)
 
-        if mode == "Start of Line":
+        if mode == "Starts With":
             if sub_len < ocr_len - 5:
                 continue
 
             sub_truncated = sub_clean[:ocr_len + 5]
             score = fuzz.ratio(sub_truncated, ocr_text)
 
-        elif mode == "Partial Lines":
+        elif mode == "Partial":
             if sub_len < ocr_len - 2:  # Minimalna walidacja długości
                 continue
 
@@ -134,10 +134,9 @@ Optional[Tuple[int, int]]:
             score_start = fuzz.ratio(sub_truncated, ocr_text)
             score_anywhere = fuzz.partial_ratio(ocr_text, sub_clean)
 
-            if score_anywhere > score_start:
-                score = score_anywhere - 5
-            else:
-                score = score_start
+            # Wybierz lepszy
+            score = max(score_start, score_anywhere)
+            if score > 100: score = 100
         else:
             if len_diff > max(ocr_len, sub_len) * ratio_limit:
                 continue

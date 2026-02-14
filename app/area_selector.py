@@ -45,6 +45,9 @@ class AreaSelector(tk.Toplevel):
 
         self.bg_img = ImageTk.PhotoImage(self.display_img)
 
+        # self.cv = tk.Canvas(self, cursor="cross", highlightthickness=0)
+        # self.cv.pack(fill=tk.BOTH, expand=True)
+        # self.cv.create_image(0, 0, image=self.bg_img, anchor=tk.NW)
         self.cv = tk.Canvas(self, cursor="cross", highlightthickness=0)
         self.cv.pack(fill=tk.BOTH, expand=True)
         self.cv.create_image(0, 0, image=self.bg_img, anchor=tk.NW)
@@ -112,10 +115,14 @@ class AreaSelector(tk.Toplevel):
         self.lbl_info.place(x=10, y=10)
 
         # Focus i czekanie na okno
+        self.update() # Ensure window is created
         self.focus_force()
-        self.wait_visibility()
-        self.grab_set()
-        self.wait_window()
+        try:
+             self.wait_visibility()
+             self.grab_set()
+             self.wait_window()
+        except tk.TclError:
+             pass # Window destroyed or bad path
 
     def on_press(self, event):
         if self.rect_id: self.cv.delete(self.rect_id)

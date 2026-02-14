@@ -2,6 +2,7 @@ import threading
 import time
 import os
 import queue
+import copy
 from collections import deque
 from datetime import datetime
 from typing import Optional, Tuple, Dict, Any, List
@@ -14,20 +15,42 @@ from app.matcher import find_best_match, precompute_subtitles
 from app.config_manager import ConfigManager
 
 
+class AreaConfigContext:
+    """
+    Pomocnicza klasa udająca ConfigManager, ale zwracająca ustawienia
+    specyficzne dla danego obszaru (połączone z globalnymi).
+    """
+    def __init__(self, effective_preset_data):
+        self.preset_data = effective_preset_data
+        self.settings = effective_preset_data
+
+    def load_preset(self, path=None):
+        return self.preset_data
+
+
 class CaptureWorker(threading.Thread):
     """Wątek PRODUCENTA: Robi zrzuty ekranu."""
 
     def __init__(self, stop_event: threading.Event, img_queue: queue.Queue,
-                 unified_area: Dict[str, int], interval: float):
+                 unified_area: Dict[str, int], interval: float, log_queue=None):
         super().__init__(daemon=True)
         self.stop_event = stop_event
         self.img_queue = img_queue
         self.unified_area = unified_area
         self.interval = interval
+        self.log_queue = log_queue
+        self.first_capture_done = False
 
     def run(self):
+        print("CaptureWorker thread started.")
+        frame_count = 0
         while not self.stop_event.is_set():
             loop_start = time.monotonic()
+            
+            # Heartbeat log every 10 frames
+            frame_count += 1
+            if frame_count % 10 == 0:
+                 print(f"DEBUG: CaptureWorker loop #{frame_count}")
 
             self.capture()
 
@@ -36,10 +59,19 @@ class CaptureWorker(threading.Thread):
 
     def capture(self):
         t0 = time.perf_counter()
-        full_img = capture_region(self.unified_area)
+        try:
+            full_img = capture_region(self.unified_area)
+        except Exception as e:
+            full_img = None
+            print(f"Capture Exception: {e}")
+            
         t_cap = (time.perf_counter() - t0) * 1000
 
         if full_img:
+            if not self.first_capture_done:
+                 self.first_capture_done = True
+                 print(f"CaptureWorker: First frame captured successfully ({t_cap:.1f}ms).")
+
             try:
                 if self.img_queue.full():
                     try:
@@ -49,6 +81,14 @@ class CaptureWorker(threading.Thread):
                 self.img_queue.put((full_img, t_cap), block=False)
             except queue.Full:
                 pass
+        else:
+            if not getattr(self, '_logged_fail', False):
+                 self._logged_fail = True
+                 msg = "CaptureWorker: Failed to grab screen (returned None/Empty)!"
+                 print(msg)
+                 if self.log_queue:
+                     self.log_queue.put({"time": "ERROR", "line_text": msg})
+
 
 
 class ReaderThread(threading.Thread):
@@ -172,56 +212,35 @@ class ReaderThread(threading.Thread):
         
         # Parse original resolution
         orig_w, orig_h = None, None
+        
+        # FIX: If preset lacks resolution, try to infer or default to standard 4K if coordinates seem high
+        if not original_res_str:
+             print("DEBUG: Preset has no resolution defined! attempting heuristic or default.")
+             # Check if any area has coords > 2560 or > 1440
+             max_x = max([m.get('left',0) + m.get('width',0) for m in monitors]) if monitors else 0
+             max_y = max([m.get('top',0) + m.get('height',0) for m in monitors]) if monitors else 0
+             
+             if max_x > 2560 or max_y > 1440:
+                 original_res_str = "3840x2160"
+                 print("DEBUG: Heuristic detected 4K coordinates. Assuming source is 3840x2160.")
+             elif max_x > 1920 or max_y > 1080:
+                 original_res_str = "2560x1440"
+             else:
+                 original_res_str = "1920x1080" # Default fallback
+        
+        # Restore original logic: Respect the preset's resolution string if available
         if original_res_str:
             try:
-                orig_w, orig_h = map(int, original_res_str.lower().split('x'))
+                parts = original_res_str.lower().split('x')
+                if len(parts) == 2:
+                    orig_w, orig_h = int(parts[0]), int(parts[1])
             except:
                 pass
-
-        # Fallback Logic if Physical Capture failed
-        if not dest_w or not dest_h:
-             if orig_w and orig_h:
-                 # Assume same as preset
-                 dest_w, dest_h = orig_w, orig_h
-             elif self.target_resolution:
-                 # Only use target if we really don't know original
-                 dest_w, dest_h = self.target_resolution
-             else:
-                 return monitors
         
-        # HiDPI Heuristic Logic
-        # Detect if we have a mismatch between Detected (Logical) and Preset (Physical) resolution
-        if orig_w and orig_h and dest_w and dest_h:
-            target_w = self.target_resolution[0] if self.target_resolution else 0
-            
-            # Check if this looks like a fractional scaling artifact (e.g. 1.5x which is 3840->2560)
-            # Common scaling factors: 1.25, 1.5, 1.75.
-            # Ratios like 2.0 (1920x1080) are ambiguous (could be genuine 1080p screen),
-            # but 1.5 (2560x1440) is almost certainly HiDPI scaling on a 4K panel.
-            ratio_w = orig_w / dest_w
-            is_fractional_scale = abs(ratio_w - 1.5) < 0.05 or abs(ratio_w - 1.25) < 0.05 or abs(ratio_w - 1.75) < 0.05
-            
-            # Use stricter condition: Detected matches Target (Logical) AND (Detected < Preset) AND (Fractional Scale OR User forced via config?)
-            # For now, explicit fractional scale detection is safest to avoid breaking 1080p users.
-            
-            if (orig_w > dest_w) and (target_w and abs(dest_w - target_w) < 50) and is_fractional_scale:
-                 if self.log_queue and not hasattr(self, '_logged_hidpi'):
-                    self._logged_hidpi = True
-                    msg = f"HiDPI Scaling Trap Detected (Ratio {ratio_w:.2f})! Overriding detected {dest_w}x{dest_h} with Preset {orig_w}x{orig_h}"
-                    self.log_queue.put({"time": "WARN", "line_text": msg})
-                    try:
-                       with open("session_debug.log", "a") as f: f.write(f"{datetime.now()} {msg}\n")
-                    except: pass
-                 dest_w, dest_h = orig_w, orig_h
-        
-        if not orig_w or not orig_h: return monitors
-        
-        if (orig_w, orig_h) == (dest_w, dest_h): return monitors
-        
-        sx, sy = dest_w / orig_w, dest_h / orig_h
-        return [{'left': int(m['left'] * sx), 'top': int(m['top'] * sy),
-                 'width': int(m['width'] * sx), 'height': int(m['height'] * sy)} for m in monitors]
-
+        # --- BEZWZGLĘDNE PRZESKALOWANIE Z 4K DO ROZDZIELCZOŚCI DOCELWEJ ---
+        print(f"DEBUG: _scale_monitor_areas. NO SCALING – using preset coordinates 1:1!")
+        return monitors
+                 
     def _images_are_similar(self, img1: Image.Image, img2: Image.Image, similarity: float) -> bool:
         if similarity == 0: return False
         if img1 is None or img2 is None: return False
@@ -257,7 +276,8 @@ class ReaderThread(threading.Thread):
         precomputed_data = precompute_subtitles(raw_subtitles, min_line_len) if raw_subtitles else ([], {})
 
         # --- LOAD AREAS ---
-        areas_config = preset.get('areas', [])
+        # USE DEEPCOPY to prevent modifying the original preset with scaled rects
+        areas_config = copy.deepcopy(preset.get('areas', []))
         monitors = [] # List of rects for unified calc
         
         # If old config (no 'areas'), usage fallback (should be migrated but just in case)
@@ -276,17 +296,43 @@ class ReaderThread(threading.Thread):
 
         # Scale areas
         valid_areas = []
+        print(f"DEBUG: Processing {len(areas_config)} areas from config.")
         for area in areas_config:
             r = area.get('rect')
-            if not r: continue
+            if not r: 
+                print(f"DEBUG: Area {area.get('id')} has no rect.")
+                continue
             
             # Scale rect
-            scaled_list = self._scale_monitor_areas([r], preset.get('resolution'))
+            preset_res = preset.get('resolution')
+            print(f"DEBUG: Scaling Area {area.get('id')} Input: {r} | PresetRes: {preset_res}")
+            
+            # Additional bounds check log
+            rx, ry, rw, rh = r.get('left'), r.get('top'), r.get('width'), r.get('height')
+            if rx+rw > 2560 or ry+rh > 1600:
+                 print(f"DEBUG: WARNING - Area {area.get('id')} coords EXCEED 2560x1600! MaxX={rx+rw}, MaxY={ry+rh}")
+
+            scaled_list = self._scale_monitor_areas([r], preset_res)
             if scaled_list:
                 area['rect'] = scaled_list[0]
-                valid_areas.append(area)
+                sr = area['rect']
+                print(f"DEBUG: Scaling Area {area.get('id')} Output: {sr}")
+                
+                # Check if output is also out of bounds
+                srx, sry, srw, srh = sr.get('left'), sr.get('top'), sr.get('width'), sr.get('height')
+                if srx+srw > 2560 or sry+srh > 1600: # Assuming 2560x1600 as max for now
+                     print(f"DEBUG: CRITICAL - Scaled Area OUT OF BOUNDS! MaxX={srx+srw}, MaxY={sry+srh}")
 
-        if not valid_areas: return
+                valid_areas.append(area)
+            else:
+                print(f"DEBUG: Scaling returned empty for area {area.get('id')}")
+
+        if not valid_areas: 
+            print("ERROR: No valid areas found. ReaderThread exiting.")
+            if self.log_queue: self.log_queue.put({"time": "ERROR", "line_text": "Nie znaleziono aktywnych obszarów. Sprawdź konfigurację."})
+            return
+        
+        print(f"DEBUG: Valid areas: {len(valid_areas)}")
         
         # Initialize enabled continuous areas from config
         self.enabled_continuous_areas = set()
@@ -304,6 +350,7 @@ class ReaderThread(threading.Thread):
         max_r = max(m['left'] + m['width'] for m in monitors)
         max_b = max(m['top'] + m['height'] for m in monitors)
         unified_area = {'left': min_l, 'top': min_t, 'width': max_r - min_l, 'height': max_b - min_t}
+        print(f"DEBUG: Unified Area: {unified_area}")
 
         self.current_unified_area = {
             'left': min_l,
@@ -317,12 +364,14 @@ class ReaderThread(threading.Thread):
         audio_dir = preset.get('audio_dir', '')
         audio_ext = preset.get('audio_ext', '.mp3')
 
-        capture_worker = CaptureWorker(self.stop_event, self.img_queue, unified_area, interval)
+        capture_worker = CaptureWorker(self.stop_event, self.img_queue, unified_area, interval, log_queue=self.log_queue)
         capture_worker.start()
 
-        if self.log_queue and self.save_logs:
-            self.log_queue.put({"time": "INFO", "line_text": f"Start Reader. Logs enabled."})
+        if self.log_queue:
+             self.log_queue.put({"time": "INFO", "line_text": f"Reader started. Areas: {len(valid_areas)}. Logging enabled."})
+
         if self.save_logs:
+            if self.log_queue: self.log_queue.put({"time": "INFO", "line_text": f"Saving logs to session_log.txt"})
             with open("session_log.txt", "a", encoding='utf-8') as f:
                 f.write(f"\n=== SESSION START {datetime.now()} ===\n")
                 f.write("Time | Monitor | Capture(ms) | Pre(ms) | OCR(ms) | Match(ms) | Text | MatchResult\n")
@@ -340,6 +389,15 @@ class ReaderThread(threading.Thread):
                     self.img_queue.get_nowait()
                 except queue.Empty:
                     pass
+            
+            # Zapisz pierwszy zrzut ekranu tylko jeśli włączony jest tryb DEBUG w ustawieniach
+            if not getattr(self, '_debug_capture_saved', False) and self.config_manager.settings.get('debug', False):
+                if hasattr(full_img, 'save'):
+                    try:
+                        full_img.save("debug_first_capture.png")
+                        self._debug_capture_saved = True
+                    except Exception:
+                        pass
 
             for idx, area_obj in enumerate(valid_areas):
                 t_start_proc = time.perf_counter()
@@ -375,14 +433,33 @@ class ReaderThread(threading.Thread):
 
                 last_crop = self.last_monitor_crops.get(idx)
                 if self._images_are_similar(crop, last_crop, similarity):
-                    # print("images are similar")
+                    # Throttle "no change" logs
+                    if idx == 0 and time.time() % 2 < 0.2: 
+                        print("DEBUG: No change detected (Skipping OCR)")
                     continue
                 self.last_monitor_crops[idx] = crop.copy()
 
+                # --- Prepare Context for Area ---
+                area_settings = area_obj.get('settings', {}).copy()
+                # Legacy fallback for colors
+                if 'subtitle_colors' not in area_settings and 'colors' in area_obj:
+                     area_settings['subtitle_colors'] = area_obj['colors']
+                
+                merged_preset = preset.copy()
+                merged_preset.update(area_settings)
+
+                # DEBUG LOGGING FOR SETTINGS
+                if idx == 0 and time.time() % 5 < 0.2:
+                     print(f"DEBUG: Processing Area {area_id}. Colors: {merged_preset.get('subtitle_colors')}, Tol: {merged_preset.get('color_tolerance')}, Bright: {merged_preset.get('brightness_threshold')}")
+                
+                area_ctx = AreaConfigContext(merged_preset)
+                current_subtitle_mode = merged_preset.get('subtitle_mode', 'Full Lines')
+
                 t_pre_start = time.perf_counter()
 
-                # Przekazanie parametru density_threshold + COLORS
-                processed, has_content, crop_bbox = preprocess_image(crop, self.config_manager, override_colors=area_obj.get('colors'))
+                # Używamy area_ctx zamiast globalnego configa. override_colors nie jest już potrzebne
+                # bo settings w kontekście ma już poprawne kolory.
+                processed, has_content, crop_bbox = preprocess_image(crop, area_ctx)
 
                 if not has_content:
                     # print("images has no content")
@@ -391,7 +468,7 @@ class ReaderThread(threading.Thread):
                 t_pre = (time.perf_counter() - t_pre_start) * 1000
 
                 t_ocr_start = time.perf_counter()
-                text = recognize_text(processed, self.config_manager)
+                text = recognize_text(processed, area_ctx)
 
                 t_ocr = (time.perf_counter() - t_ocr_start) * 1000
 
@@ -414,8 +491,8 @@ class ReaderThread(threading.Thread):
                 self.last_ocr_texts.append(text)
 
                 t_match_start = time.perf_counter()
-                # Przekazanie matcher_config
-                match = find_best_match(text, precomputed_data, self.subtitle_mode,
+                # Przekazanie dynamicznego trybu dopasowania (Area Specific)
+                match = find_best_match(text, precomputed_data, current_subtitle_mode,
                                         last_index=self.last_matched_idx,
                                         matcher_config=self.matcher_config)
                 t_match = (time.perf_counter() - t_match_start) * 1000

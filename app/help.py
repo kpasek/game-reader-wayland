@@ -100,6 +100,17 @@ class HelpWindow(tk.Toplevel):
             ("4. Ignoruj krótsze niż\n", 'h2'),
             ("Ignoruje odczytany text ORC krótszy niż X znaków. Pomaga w eliminowaniu szumu OCR.\n", 'normal'),
 
+            ("ZARZĄDZANIE OBSZARAMI I OPTYMALIZACJA\n", 'h1'),
+
+            ("1. Konfiguracja Per-Obszar\n", 'h2'),
+            ("Wszystkie parametry obrazu (jasność, kontrast, tolerancja) są teraz przypisane oddzielnie do każdego zdefiniowanego obszaru. Pozwala to na jednoczesne czytanie napisów jasnych i ciemnych z różnych części ekranu.\n", 'normal'),
+
+            ("2. Kreator Optymalizacji\n", 'h2'),
+            ("W oknie 'Zarządzaj Obszarami' w menu kontekstowym listy obszarów (Prawy Przycisk Myszy -> Kreator Optymalizacji) dostępny jest kreator. Należy dodać zrzuty ekranu z widocznym tekstem, a system automatycznie dobierze parametry OCR oraz dopasuje ramkę z marginesem 2%.\n", 'normal'),
+            
+            ("3. Zmiana nazwy\n", 'h2'),
+            ("Możesz zmienić nazwę obszaru dwukrotnie klikając na niego na liście.\n", 'normal'),
+
             ("AUDIO (KOLEJKOWANIE)\n", 'h1'),
 
             ("1. Przyspieszanie\n", 'h2'),
