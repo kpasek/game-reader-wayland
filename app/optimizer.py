@@ -129,8 +129,8 @@ class SettingsOptimizer:
 
         # Wspólne parametry do permutacji
         # Zmiana: Testy zawsze w pełnej skali (1.0), aby wykluczyć błędy przy skalowaniu
+
         params = {
-            "scales": [1.0], 
             "color_tolerances": range(5, 45, 5),
             "thickenings": [0, 1]
         }
@@ -138,7 +138,7 @@ class SettingsOptimizer:
         # Generujemy pełną listę wszystkich kombinacji ustawień do sprawdzenia
         # Branch A: Color-based
         for color in candidate_colors_list:
-            for tol, thick, scale in itertools.product(params["color_tolerances"], params["thickenings"], params["scales"]):
+            for tol, thick in itertools.product(params["color_tolerances"], params["thickenings"]):
                 s = self.base_preset.copy()
                 s.update({
                     "auto_remove_names": True,
@@ -147,7 +147,7 @@ class SettingsOptimizer:
                     "subtitle_colors": [color],
                     "color_tolerance": tol,
                     "text_thickening": thick,
-                    "ocr_scale_factor": scale,
+                    "ocr_scale_factor": 1.0,
                     "text_color_mode": "Light", 
                     "brightness_threshold": 200, 
                     "contrast": 0
@@ -162,14 +162,14 @@ class SettingsOptimizer:
         # Dodam jednak dla pewności defaultowy biały bez filtracji kolorem (czyli czyste OCR na progowaniu jasności)
         # Tzw. legacy mode.
         for mode in ["Light", "Dark"]:
-             for thick, scale in itertools.product(params["thickenings"], params["scales"]):
+            for thick in params["thickenings"]:
                 s = self.base_preset.copy()
                 s.update({
                     "auto_remove_names": True,
                     "subtitle_colors": [], # Pusta lista = tryb jasności/kontrastu
                     "text_color_mode": mode,
                     "text_thickening": thick,
-                    "ocr_scale_factor": scale,
+                    "ocr_scale_factor": 1.0,
                     "brightness_threshold": 200,
                     "contrast": 0
                 })

@@ -156,15 +156,6 @@ class AreaManagerWindow(tk.Toplevel):
             r += 1
             return widget
 
-        # Scale
-        f_scale = ttk.Frame(pl)
-        self.var_scale = tk.DoubleVar()
-        # Scale OCR set from 0.1 to 1.0 per request
-        ttk.Scale(f_scale, from_=0.1, to=1.0, variable=self.var_scale, command=lambda v: self._on_field_change()).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        l_sc = ttk.Label(f_scale, text="1.0")
-        l_sc.pack(side=tk.LEFT, padx=5)
-        self.var_scale.trace_add("write", lambda *a: l_sc.config(text=f"{self.var_scale.get():.2f}"))
-        add_row("Skala OCR:", f_scale)
         
         # Thickening
         f_th = ttk.Frame(pl)
@@ -253,7 +244,6 @@ class AreaManagerWindow(tk.Toplevel):
         self.var_hotkey.set(area.get('hotkey', ''))
         
         # Tab OCR
-        self.var_scale.set(settings.get('ocr_scale_factor', 1.0))
         self.var_thickening.set(settings.get('text_thickening', 0))
         
         mode_val = settings.get('subtitle_mode', 'Full Lines')
@@ -297,7 +287,6 @@ class AreaManagerWindow(tk.Toplevel):
         area['enabled'] = self.var_enabled.get()
         area['hotkey'] = self.var_hotkey.get()
         
-        s['ocr_scale_factor'] = self.var_scale.get()
         s['text_thickening'] = self.var_thickening.get()
         
         disp_mode = self.var_mode.get()

@@ -290,13 +290,14 @@ class LektorApp:
         # Removed old subtitle colors section
         # grp_sub = ttk.LabelFrame(panel, text="Kolory napisów", padding=10) ...
 
-        # --- AUDIO ---
-        grp_aud = ttk.LabelFrame(panel, text="Kontrola Audio", padding=10)
+
+        # --- AUDIO + SKALA OCR ---
+        grp_aud = ttk.LabelFrame(panel, text="Kontrola Audio i Skala OCR", padding=10)
         grp_aud.pack(fill=tk.X, pady=10)
 
         ttk.Label(grp_aud, text="Prędkość:").grid(row=0, column=0)
         s_spd = ttk.Scale(grp_aud, from_=0.9, to=1.5, variable=self.var_speed,
-                          command=lambda v: self.lbl_spd.config(text=f"{float(v):.2f}x"))
+                  command=lambda v: self.lbl_spd.config(text=f"{float(v):.2f}x"))
         s_spd.grid(row=0, column=1, sticky="ew", padx=10)
         s_spd.bind("<ButtonRelease-1>", lambda e: self._save_preset_val("audio_speed", round(self.var_speed.get(), 2)))
         self.lbl_spd = ttk.Label(grp_aud, text="1.00x", width=5)
@@ -304,17 +305,26 @@ class LektorApp:
 
         ttk.Label(grp_aud, text="Głośność:").grid(row=1, column=0)
         s_vol = ttk.Scale(grp_aud, from_=0.0, to=1.5, variable=self.var_volume,
-                          command=lambda v: self.lbl_vol.config(text=f"{float(v):.2f}"))
+                  command=lambda v: self.lbl_vol.config(text=f"{float(v):.2f}"))
         s_vol.grid(row=1, column=1, sticky="ew", padx=10)
         s_vol.bind("<ButtonRelease-1>",
-                   lambda e: self._save_preset_val("audio_volume", round(self.var_volume.get(), 2)))
+               lambda e: self._save_preset_val("audio_volume", round(self.var_volume.get(), 2)))
         self.lbl_vol = ttk.Label(grp_aud, text="1.00", width=5)
         self.lbl_vol.grid(row=1, column=2)
 
         ttk.Label(grp_aud, text="Format:").grid(row=2, column=0)
         ttk.Label(grp_aud, textvariable=self.var_audio_ext, font=("Arial", 8, "bold")).grid(row=2, column=1, sticky="w",
-                                                                                            padx=10)
+                                                    padx=10)
         grp_aud.columnconfigure(1, weight=1)
+
+        # --- SKALA OCR ---
+        ttk.Label(grp_aud, text="Skala OCR:").grid(row=3, column=0, sticky="w", pady=(10,0))
+        s_ocr = ttk.Scale(grp_aud, from_=0.1, to=1.0, variable=self.var_ocr_scale,
+                 command=lambda v: self.lbl_ocr_scale.config(text=f"{float(v):.2f}"))
+        s_ocr.grid(row=3, column=1, sticky="ew", padx=10)
+        s_ocr.bind("<ButtonRelease-1>", lambda e: self.on_manual_scale_change())
+        self.lbl_ocr_scale = ttk.Label(grp_aud, text=f"{self.var_ocr_scale.get():.2f}", width=5)
+        self.lbl_ocr_scale.grid(row=3, column=2)
 
         # --- STEROWANIE ---
         hk_start = self.config_mgr.get('hotkey_start_stop', 'F2')
