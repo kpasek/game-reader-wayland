@@ -925,7 +925,23 @@ class OptimizationCaptureWindow(tk.Toplevel):
         main_f.pack(fill=tk.BOTH, expand=True)
         
         ttk.Label(main_f, text="Kreator Optymalizacji", font=("Arial", 12, "bold")).pack(pady=10)
-        ttk.Label(main_f, text="Dodaj zrzuty ekranu z widocznymi napisami.\nIm więcej przykładów, tym lepszy wynik.", justify=tk.CENTER).pack(pady=5)
+        instrukcja = (
+            "Jak optymalizować ustawienia:\n"
+            "- Najważniejszy jest pierwszy zrzut ekranu: na jego podstawie testowane są wszystkie kombinacje ustawień.\n"
+            "- Kolejne zrzuty służą do weryfikacji poprawności znalezionych ustawień (muszą również zawierać napisy w tym samym stylu).\n"
+            "- Zaznacz na zrzucie możliwie precyzyjnie obszar występowania napisów.\n"
+            "- Wybierz kolor napisów (jeśli są białe, nie musisz nic zmieniać – biały jest domyślnie testowany).\n"
+            "- Tryb dopasowania:\n"
+            "    • Pełne zdania – [OPIS: uzupełnij]\n"
+            "    • Zaczyna się od – [OPIS: uzupełnij]\n"
+            "    • Częściowe – [OPIS: uzupełnij]\n"
+            "\n"
+            "Wskazówka: Im lepiej dobrane zrzuty i obszary, tym większa szansa na znalezienie optymalnych ustawień."
+        )
+        label_instr = ttk.Label(main_f, text=instrukcja, justify=tk.LEFT, wraplength=480)
+        label_instr.pack(pady=5)
+        label_instr.bind("<Enter>", lambda e: label_instr.config(cursor="question_arrow"))
+        label_instr.bind("<Leave>", lambda e: label_instr.config(cursor=""))
         
         self.list_frame = ttk.Frame(main_f)
         self.list_frame.pack(fill=tk.BOTH, expand=True, pady=10)

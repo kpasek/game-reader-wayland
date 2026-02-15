@@ -130,15 +130,17 @@ class SettingsOptimizer:
         # Wspólne parametry do permutacji
         # Zmiana: Testy zawsze w pełnej skali (1.0), aby wykluczyć błędy przy skalowaniu
 
+
         params = {
             "color_tolerances": range(1, 30, 1),
-            "thickenings": [0, 1]
+            "thickenings": [0, 1],
+            "contrasts": [round(x * 0.1, 2) for x in range(0, 11)]  # 0.0, 0.1, ..., 1.0
         }
 
         # Generujemy pełną listę wszystkich kombinacji ustawień do sprawdzenia
         # Branch A: Color-based
         for color in candidate_colors_list:
-            for tol, thick in itertools.product(params["color_tolerances"], params["thickenings"]):
+            for tol, thick, contrast in itertools.product(params["color_tolerances"], params["thickenings"], params["contrasts"]):
                 s = self.base_preset.copy()
                 s.update({
                     "auto_remove_names": True,
@@ -150,7 +152,7 @@ class SettingsOptimizer:
                     "ocr_scale_factor": 1.0,
                     "text_color_mode": "Light", 
                     "brightness_threshold": 200, 
-                    "contrast": 0
+                    "contrast": contrast
                 })
                 candidates.append(s)
         
@@ -162,7 +164,7 @@ class SettingsOptimizer:
         # Dodam jednak dla pewności defaultowy biały bez filtracji kolorem (czyli czyste OCR na progowaniu jasności)
         # Tzw. legacy mode.
         for mode in ["Light", "Dark"]:
-            for thick in params["thickenings"]:
+            for thick, contrast in itertools.product(params["thickenings"], params["contrasts"]):
                 s = self.base_preset.copy()
                 s.update({
                     "auto_remove_names": True,
@@ -171,7 +173,7 @@ class SettingsOptimizer:
                     "text_thickening": thick,
                     "ocr_scale_factor": 1.0,
                     "brightness_threshold": 200,
-                    "contrast": 0
+                    "contrast": contrast
                 })
                 candidates.append(s)
 
@@ -202,7 +204,9 @@ class SettingsOptimizer:
             score, settings, _ = item
             tolerance = settings.get('color_tolerance', 9999)
             thick = settings.get('text_thickening', 1)
-            return (score, -tolerance, -int(thick == 0))
+            contrast = settings.get('contrast', 9999)
+            # Najpierw score (malejąco), potem tolerancja (rosnąco), potem pogrubienie (0 preferowane), potem kontrast (rosnąco)
+            return (score, -tolerance, -int(thick == 0), -contrast)
 
         ranked_candidates.sort(key=sort_key, reverse=True)
         survivors = ranked_candidates[:50]
