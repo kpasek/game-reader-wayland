@@ -273,19 +273,22 @@ class LektorApp:
             self._update_scale_for_resolution(self.var_resolution.get())
         ])
         ttk.Button(f_res, text="Dopasuj rozdz.", command=self.auto_detect_resolution).pack(side=tk.LEFT, padx=5)
-        self.btn_settings = ttk.Button(f_res, text="⚙ Ustawienia", command=self.open_settings)
-        self.btn_settings.pack(side=tk.LEFT, padx=5)
+
 
         # Actions Panel (Replaces Colors Panel)
         grp_act = ttk.LabelFrame(panel, text="Akcje", padding=10)
         grp_act.pack(fill=tk.X, pady=5)
-        
+
         # Big Buttons for main actions
         btn_detect = tk.Button(grp_act, text="Wykryj Ustawienia", command=self.detect_optimal_settings, bg="#e0e0e0", relief="raised")
         btn_detect.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
         btn_areas = tk.Button(grp_act, text="Zarządzaj Obszarami", command=self.open_area_manager, bg="#e0e0e0", relief="raised")
         btn_areas.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+
+        # Przycisk Ustawienia
+        self.btn_settings = ttk.Button(grp_act, text="⚙ Ustawienia", command=self.open_settings)
+        self.btn_settings.pack(side=tk.LEFT, padx=5)
 
         # Removed old subtitle colors section
         # grp_sub = ttk.LabelFrame(panel, text="Kolory napisów", padding=10) ...
