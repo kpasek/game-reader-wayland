@@ -32,7 +32,7 @@ class TestScaling(unittest.TestCase):
         self.set_res(1920, 1080)
         reader = ReaderThread(MagicMock(), MagicMock(), MagicMock(), target_resolution=(1920, 1080))
         monitors = [{'left': 100, 'top': 100, 'width': 200, 'height': 200}]
-        scaled = reader._scale_monitor_areas(monitors, "1920x1080")
+        scaled = reader._scale_monitor_areas(monitors)
         self.assertEqual(scaled, monitors)
         
     def test_scale_monitor_areas_downscaling(self):
@@ -40,7 +40,7 @@ class TestScaling(unittest.TestCase):
         self.set_res(1920, 1080)
         reader = ReaderThread(MagicMock(), MagicMock(), MagicMock(), target_resolution=(1920, 1080))
         monitors = [{'left': 200, 'top': 200, 'width': 400, 'height': 400}]
-        scaled = reader._scale_monitor_areas(monitors, "3840x2160")
+        scaled = reader._scale_monitor_areas(monitors)
         self.assertEqual(scaled, monitors)
 
     def test_scale_monitor_areas_upscaling(self):
@@ -48,7 +48,7 @@ class TestScaling(unittest.TestCase):
         self.set_res(3840, 2160)
         reader = ReaderThread(MagicMock(), MagicMock(), MagicMock(), target_resolution=(3840, 2160))
         monitors = [{'left': 100, 'top': 100, 'width': 200, 'height': 200}]
-        scaled = reader._scale_monitor_areas(monitors, "1920x1080")
+        scaled = reader._scale_monitor_areas(monitors)
         self.assertEqual(scaled, monitors)
         
     def test_logic_flaw_with_screen_resolution_fixed(self):
@@ -57,7 +57,7 @@ class TestScaling(unittest.TestCase):
         reader = ReaderThread(MagicMock(), MagicMock(), MagicMock(), target_resolution=(1920, 1080))
         monitors = [{'left': 3000, 'top': 2000, 'width': 100, 'height': 100}]
         preset_res = "3840x2160"
-        scaled = reader._scale_monitor_areas(monitors, preset_res)
+        scaled = reader._scale_monitor_areas(monitors)
         self.assertEqual(scaled, monitors)
 
     def test_capture_fails_fallback_logic(self):
@@ -66,7 +66,7 @@ class TestScaling(unittest.TestCase):
         reader = ReaderThread(MagicMock(), MagicMock(), MagicMock(), target_resolution=(1920, 1080))
         monitors = [{'left': 3000, 'top': 2000, 'width': 100, 'height': 100}]
         preset_res = "3840x2160"
-        scaled = reader._scale_monitor_areas(monitors, preset_res)
+        scaled = reader._scale_monitor_areas(monitors)
         self.assertEqual(scaled, monitors)
 
     def test_hidpi_logical_vs_physical_mismatch(self):
@@ -75,7 +75,7 @@ class TestScaling(unittest.TestCase):
         reader = ReaderThread(MagicMock(), MagicMock(), MagicMock(), target_resolution=(2560, 1440))
         monitors = [{'left': 3000, 'top': 2000, 'width': 100, 'height': 100}]
         preset_res = "3840x2160"
-        scaled = reader._scale_monitor_areas(monitors, preset_res)
+        scaled = reader._scale_monitor_areas(monitors)
         self.assertEqual(scaled, monitors)
 
     def test_logic_upscaling_with_physical_resolution(self):
@@ -83,5 +83,5 @@ class TestScaling(unittest.TestCase):
         self.set_res(3840, 2160)
         reader = ReaderThread(MagicMock(), MagicMock(), MagicMock(), target_resolution=(1920, 1080))
         monitors = [{'left': 100, 'top': 100, 'width': 100, 'height': 100}]
-        scaled = reader._scale_monitor_areas(monitors, "1920x1080")
+        scaled = reader._scale_monitor_areas(monitors)
         self.assertEqual(scaled, monitors)

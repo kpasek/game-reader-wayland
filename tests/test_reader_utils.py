@@ -16,7 +16,7 @@ def test_scale_monitor_areas_no_change(reader_thread):
     # patch capture_fullscreen to avoid MagicMock unpacking error if mocked globally,
     # or to control return value.
     with patch('app.capture.capture_fullscreen', return_value=None):
-        scaled = reader_thread._scale_monitor_areas(monitors, "3840x2160")
+        scaled = reader_thread._scale_monitor_areas(monitors)
     assert scaled[0] == monitors[0]
 
 def test_scale_monitor_areas_scaling(reader_thread):
@@ -25,14 +25,14 @@ def test_scale_monitor_areas_scaling(reader_thread):
     mock_img = MagicMock()
     mock_img.size = (3840, 2160)
     with patch('app.capture.capture_fullscreen', return_value=mock_img):
-        scaled = reader_thread._scale_monitor_areas(monitors, "1920x1080")
+        scaled = reader_thread._scale_monitor_areas(monitors)
     assert scaled == monitors
 
 def test_scale_monitor_areas_bad_input(reader_thread):
     monitors = [{'left': 10}]
     # Bad resolution string
     with patch('app.capture.capture_fullscreen', return_value=None):
-        res = reader_thread._scale_monitor_areas(monitors, "invalid")
+        res = reader_thread._scale_monitor_areas(monitors)
     assert res == monitors
 
 def test_images_are_similar(reader_thread):

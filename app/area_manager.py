@@ -11,6 +11,7 @@ except ImportError:
 from app.area_selector import AreaSelector, ColorSelector
 from app.capture import capture_fullscreen
 from app.optimizer import SettingsOptimizer
+from app import scale_utils
 from app.matcher import precompute_subtitles, MATCH_MODE_FULL, MATCH_MODE_STARTS, MATCH_MODE_PARTIAL
 from app.ocr import find_text_bounds
 from app.geometry_utils import calculate_merged_area
@@ -267,20 +268,19 @@ class AreaManagerWindow(tk.Toplevel):
         else:
             self.chk_enabled.config(state=tk.DISABLED)
             
-        r = area.get('rect')
+            r = area.get('rect')
         print(f"[AreaManager][LOG] _load_details: area['rect'] type={type(r)}, value={r}")
         if r:
+            # Convert canonical 4K rect to current screen pixels for display
             screen_w = self.winfo_screenwidth()
             screen_h = self.winfo_screenheight()
-            sx = screen_w / 3840
-            sy = screen_h / 2160
-            print(f"[AreaManager][LOG] _load_details: screen_w={screen_w}, screen_h={screen_h}, sx={sx}, sy={sy}")
-            left = int(round(r.get('left', 0) * sx))
-            top = int(round(r.get('top', 0) * sy))
-            width = int(round(r.get('width', 0) * sx))
-            height = int(round(r.get('height', 0) * sy))
-            print(f"[AreaManager][LOG] _load_details: rect 4K->screen: left={left}, top={top}, width={width}, height={height}")
-            self.lbl_rect.config(text=f"X:{left} Y:{top} {width}x{height}")
+            try:
+                srect = scale_utils.scale_rect_to_physical(r, screen_w, screen_h)
+                print(f"[AreaManager][LOG] _load_details: screen_w={screen_w}, screen_h={screen_h}")
+                print(f"[AreaManager][LOG] _load_details: rect 4K->screen: {srect}")
+                self.lbl_rect.config(text=f"X:{srect['left']} Y:{srect['top']} {srect['width']}x{srect['height']}")
+            except Exception:
+                self.lbl_rect.config(text="Błąd przeliczenia obszaru")
         else:
             print(f"[AreaManager][LOG] _load_details: area['rect'] is None")
             self.lbl_rect.config(text="Brak (Kliknij 'Wybierz Obszar')")
@@ -479,20 +479,16 @@ class AreaManagerWindow(tk.Toplevel):
             # Przekazuj tylko listę dictów {'rect': ...} (bez id, type, settings)
             screen_w = self.winfo_screenwidth()
             screen_h = self.winfo_screenheight()
-            sx = screen_w / 3840
-            sy = screen_h / 2160
             regions_screen = []
             for idx, area in enumerate(self.areas):
                 r = area.get('rect')
                 if not r:
                     continue
-                box = {
-                    'left': int(round(r.get('left', 0) * sx)),
-                    'top': int(round(r.get('top', 0) * sy)),
-                    'width': int(round(r.get('width', 0) * sx)),
-                    'height': int(round(r.get('height', 0) * sy)),
-                }
-                print(f"[AreaManager] Przeliczony rect #{idx} z 4K na ekran: {box}, screen_w={screen_w}, screen_h={screen_h}, sx={sx}, sy={sy}")
+                try:
+                    box = scale_utils.scale_rect_to_physical(r, screen_w, screen_h)
+                except Exception:
+                    box = {'left': 0, 'top': 0, 'width': 0, 'height': 0}
+                print(f"[AreaManager] Przeliczony rect #{idx} z 4K na ekran: {box}, screen_w={screen_w}, screen_h={screen_h}")
                 if box['left'] < 0 or box['top'] < 0 or box['left'] + box['width'] > screen_w or box['top'] + box['height'] > screen_h:
                     print(f"[AreaManager][WARN] Rect #{idx} wykracza poza ekran: {box}, screen_w={screen_w}, screen_h={screen_h}")
                 regions_screen.append({'rect': box})
@@ -503,11 +499,15 @@ class AreaManagerWindow(tk.Toplevel):
             if sel.geometry:
                 print(f"[AreaManager] Otrzymana geometria z AreaSelector (ekran): {sel.geometry}")
                 # Przelicz z powrotem do 4K przed zapisem
-                left_4k = int(round(sel.geometry['left'] * 3840 / screen_w))
-                top_4k = int(round(sel.geometry['top'] * 2160 / screen_h))
-                width_4k = int(round(sel.geometry['width'] * 3840 / screen_w))
-                height_4k = int(round(sel.geometry['height'] * 2160 / screen_h))
-                rect_4k = {'left': left_4k, 'top': top_4k, 'width': width_4k, 'height': height_4k}
+                try:
+                    rect_4k = scale_utils.scale_rect_to_4k(sel.geometry, screen_w, screen_h)
+                except Exception:
+                    left_4k = int(round(sel.geometry['left'] * 3840 / screen_w))
+                    top_4k = int(round(sel.geometry['top'] * 2160 / screen_h))
+                    width_4k = int(round(sel.geometry['width'] * 3840 / screen_w))
+                    height_4k = int(round(sel.geometry['height'] * 2160 / screen_h))
+                    rect_4k = {'left': left_4k, 'top': top_4k, 'width': width_4k, 'height': height_4k}
+
                 print(f"[AreaManager] Przeliczam do 4K przed zapisem: {rect_4k} (z ekranu: {sel.geometry}, ekran: {screen_w}x{screen_h})")
                 print(f"[AreaManager] Area przed aktualizacją: {self.areas[self.current_selection_idx]}")
                 self.areas[self.current_selection_idx]['rect'] = rect_4k
@@ -654,10 +654,16 @@ class AreaManagerWindow(tk.Toplevel):
              if not full_img:
                  self.deiconify()
                  return
-                 
-             ox = rect['left']; oy = rect['top']
-             ow = rect['width']; oh = rect['height']
              img_w, img_h = full_img.size
+
+             # rect in storage is canonical 4K — convert to physical/image coords before cropping
+             try:
+                 srect = scale_utils.scale_rect_to_physical(rect, img_w, img_h)
+             except Exception:
+                 srect = rect.copy()
+
+             ox = srect['left']; oy = srect['top']
+             ow = srect['width']; oh = srect['height']
              
              # Calculate expanded rect (20% padding)
              # Clamp padding to image bounds
@@ -765,11 +771,12 @@ class AreaManagerWindow(tk.Toplevel):
                                     # Update rect (Union + Margin)
                                     if 'rect' not in area or not area['rect']:
                                         area['rect'] = {}
-                                    
-                                    area['rect']['left'] = int(fx)
-                                    area['rect']['top'] = int(fy)
-                                    area['rect']['width'] = int(real_w)
-                                    area['rect']['height'] = int(real_h)
+                                    # fx,fy are in image coordinates (fw,fh) -> convert back to 4K before storing
+                                    try:
+                                        rect4 = scale_utils.scale_rect_to_4k({'left': int(fx), 'top': int(fy), 'width': int(real_w), 'height': int(real_h)}, fw, fh)
+                                    except Exception:
+                                        rect4 = {'left': int(fx), 'top': int(fy), 'width': int(real_w), 'height': int(real_h)}
+                                    area['rect'] = rect4
                                     
                                     self._load_details(self.current_selection_idx)
                                     messagebox.showinfo("Zapisano", "Zaktualizowano ustawienia i granice obszaru.")
@@ -801,12 +808,18 @@ class AreaManagerWindow(tk.Toplevel):
                                     f"Wykryto tekst w szerszym obszarze.\n"
                                     f"Nowy wymiar: {bw}x{bh} (stary: {area['rect']['width']}x{area['rect']['height']})\n"
                                     "Czy zaktualizować granice obszaru?"):
-                  area['rect']['left'] = abs_x
-                  area['rect']['top'] = abs_y
-                  area['rect']['width'] = bw
-                  area['rect']['height'] = bh
-                  # Update settings from OCR might be needed too? No, just rect.
-                  self._load_details(self.current_selection_idx)
+                 # Convert absolute (image/screen) coords back to canonical 4K for storage
+                 try:
+                     src_w, src_h = image.size
+                     rect4 = scale_utils.scale_rect_to_4k({'left': abs_x, 'top': abs_y, 'width': bw, 'height': bh}, src_w, src_h)
+                 except Exception:
+                     rect4 = {'left': abs_x, 'top': abs_y, 'width': bw, 'height': bh}
+                 area['rect']['left'] = rect4['left']
+                 area['rect']['top'] = rect4['top']
+                 area['rect']['width'] = rect4['width']
+                 area['rect']['height'] = rect4['height']
+                 # Update settings from OCR might be needed too? No, just rect.
+                 self._load_details(self.current_selection_idx)
 
 
     def _save_and_close(self):
@@ -970,7 +983,14 @@ class AreaManagerWindow(tk.Toplevel):
         
         opt_rect = result.get('optimized_area')
         if opt_rect and isinstance(opt_rect, (list, tuple)):
-            area['rect'] = {'left': opt_rect[0], 'top': opt_rect[1], 'width': opt_rect[2], 'height': opt_rect[3]}
+            # opt_rect is in image/screen coordinates; convert to canonical 4K for storage
+            try:
+                screen_w = self.winfo_screenwidth()
+                screen_h = self.winfo_screenheight()
+                rect4 = scale_utils.scale_rect_to_4k({'left': opt_rect[0], 'top': opt_rect[1], 'width': opt_rect[2], 'height': opt_rect[3]}, screen_w, screen_h)
+            except Exception:
+                rect4 = {'left': opt_rect[0], 'top': opt_rect[1], 'width': opt_rect[2], 'height': opt_rect[3]}
+            area['rect'] = rect4
             
         new_settings = result.get('settings', {})
         if 'settings' not in area: area['settings'] = {}

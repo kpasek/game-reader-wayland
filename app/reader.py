@@ -168,48 +168,29 @@ class ReaderThread(threading.Thread):
             return monitors
 
     def _scale_monitor_areas(self, monitors: List[Dict]) -> List[Dict]:
-        """
-        Skaluje współrzędne obszarów z bazy 4K (3840x2160) do aktualnej rozdzielczości obrazu.
-        """
-        from app.capture import capture_fullscreen
-        STANDARD_W, STANDARD_H = 3840, 2160
+        """Delegate scaling to central utilities (4K -> physical)."""
+        try:
+            # Determine dest resolution similarly to other code paths
+            if not hasattr(self, '_physical_res') or not self._physical_res:
+                from app.capture import capture_fullscreen
+                try:
+                    img = capture_fullscreen()
+                    if img:
+                        self._physical_res = img.size
+                except Exception:
+                    pass
 
-        # Ustal docelową rozdzielczość (fizyczny obraz)
-        if not hasattr(self, '_physical_res'):
-            self._physical_res = None
-            try:
-                img = capture_fullscreen()
-                if img:
-                    self._physical_res = img.size
-            except Exception:
-                pass
-
-        dest_w, dest_h = self._physical_res if getattr(self, '_physical_res', None) else (None, None)
-        if not dest_w or not dest_h:
-            if self.target_resolution:
+            if hasattr(self, '_physical_res') and self._physical_res:
+                dest_w, dest_h = self._physical_res
+            elif self.target_resolution:
                 dest_w, dest_h = self.target_resolution
             else:
-                dest_w, dest_h = STANDARD_W, STANDARD_H
+                dest_w, dest_h = 3840, 2160
 
-        sx = dest_w / STANDARD_W
-        sy = dest_h / STANDARD_H
-
-        print(f"[ReaderThread] Skalowanie z 4K do {dest_w}x{dest_h} (sx={sx:.4f}, sy={sy:.4f})")
-        scaled = []
-        for r in monitors:
-            if not r:
-                scaled.append(r)
-                continue
-            print(f"[ReaderThread] Oryginalny rect (4K): {r}")
-            scaled_rect = {
-                'left': int(round(r.get('left', 0) * sx)),
-                'top': int(round(r.get('top', 0) * sy)),
-                'width': int(round(r.get('width', 0) * sx)),
-                'height': int(round(r.get('height', 0) * sy)),
-            }
-            print(f"[ReaderThread] Przeskalowany rect: {scaled_rect}")
-            scaled.append(scaled_rect)
-        return scaled
+            from app import scale_utils
+            return scale_utils.scale_list_to_physical(monitors, dest_w, dest_h)
+        except Exception:
+            return monitors
                  
     def _images_are_similar(self, img1: Image.Image, img2: Image.Image, similarity: float) -> bool:
         if similarity == 0: return False
@@ -246,45 +227,28 @@ class ReaderThread(threading.Thread):
         precomputed_data = precompute_subtitles(raw_subtitles, min_line_len) if raw_subtitles else ([], {})
 
         # --- LOAD AREAS ---
-        # USE DEEPCOPY to prevent modifying the original preset with scaled rects
-        areas_config = copy.deepcopy(preset.get('areas', []))
-        monitors = [] # List of rects for unified calc
-        
-        # If old config (no 'areas'), usage fallback (should be migrated but just in case)
-        if not areas_config and preset.get('monitor'):
-             raw_monitors = preset.get('monitor', [])
-             if isinstance(raw_monitors, dict): raw_monitors = [raw_monitors]
-             # Create dummy area objects
-             for i, m in enumerate(raw_monitors):
-                 if not m: continue
-                 areas_config.append({
-                     "id": i+1,
-                     "type": "manual" if i == 2 else "continuous",
-                     "rect": m,
-                     "colors": preset.get("subtitle_colors", []) if i==0 else []
-                 })
+        # Centralne skalowanie: pobierz preset i przeskaluj recty z 4K do fizycznej rozdzielczości
+        from app.capture import capture_fullscreen
+        dest_w = dest_h = None
+        try:
+            if not hasattr(self, '_physical_res') or not self._physical_res:
+                img_tmp = capture_fullscreen()
+                if img_tmp:
+                    self._physical_res = img_tmp.size
+        except Exception:
+            pass
 
-        # Scale areas
-        valid_areas = []
-        # print(f"DEBUG: Processing {len(areas_config)} areas from config.")
-        for area in areas_config:
-            r = area.get('rect')
-            if not r:
-                continue
-            # Przeskaluj TYLKO jeśli rozmiar ekranu (z głównego okna) jest inny niż ten, na którym był wybierany obszar
-            # Zakładamy, że wartości w preset są w pikselach ekranu, na którym były wybierane
-            # Jeśli użytkownik zmieni rozdzielczość, przeliczamy proporcjonalnie
-            # Pobierz aktualną rozdzielczość ekranu
-            if hasattr(self, '_physical_res') and self._physical_res:
-                dest_w, dest_h = self._physical_res
-            elif self.target_resolution:
-                dest_w, dest_h = self.target_resolution
-            else:
-                dest_w, dest_h = None, None
-            # Pobierz rozdzielczość, na której był wybierany obszar (z preset, jeśli jest, lub załóż brak skalowania)
-            # UWAGA: NIE MA resolution w presetach, więc nie przeliczaj, tylko użyj jak jest!
-            area['rect'] = r
-            valid_areas.append(area)
+        if hasattr(self, '_physical_res') and self._physical_res:
+            dest_w, dest_h = self._physical_res
+        elif self.target_resolution:
+            dest_w, dest_h = self.target_resolution
+        else:
+            dest_w, dest_h = 3840, 2160
+
+        # Use ConfigManager helper to fetch preset with areas already scaled to dest resolution
+        preset_for_display = self.config_manager.get_preset_for_resolution(None, (dest_w, dest_h))
+        areas_config = copy.deepcopy(preset_for_display.get('areas', []))
+        valid_areas = areas_config
 
         if not valid_areas:
             if self.log_queue:
@@ -301,6 +265,15 @@ class ReaderThread(threading.Thread):
             # So we MUST add enabled areas here.
             if area.get('type') == 'continuous' and area.get('enabled', False):
                 self.enabled_continuous_areas.add(area.get('id'))
+
+        # Skaluje recty z kanonicznego 4K do aktualnej rozdzielczości obrazu
+        try:
+            scaled_rects = self._scale_monitor_areas([a['rect'] for a in valid_areas])
+            for i, a in enumerate(valid_areas):
+                a['rect'] = scaled_rects[i]
+        except Exception:
+            # Fallback: użyj oryginalnych rectów jeżeli skalowanie nie powiedzie się
+            pass
 
         monitors = [a['rect'] for a in valid_areas] # For Unified Calculation
 

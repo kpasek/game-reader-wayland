@@ -2,6 +2,8 @@ import json
 import os
 from typing import Dict, Any, List, Optional
 from pathlib import Path
+from typing import Tuple
+from app import scale_utils
 
 APP_CONFIG_FILE = Path.home() / '.config' / 'app_config.json'
 
@@ -249,6 +251,39 @@ class ConfigManager:
             })
             
         data['areas'] = new_areas
+
+    # --- New helpers for scaling areas ---
+    def get_preset_for_resolution(self, path: Optional[str], dest_resolution: Tuple[int, int]) -> Dict[str, Any]:
+        """Return preset dict where `areas` rects are scaled from canonical 4K to dest_resolution.
+
+        This does NOT modify the stored preset on disk; it returns a copy with scaled rects suitable
+        for immediate use by UI and processing code.
+        """
+        data = self.load_preset(path)
+        if not data:
+            return {}
+        # Work on a deep-ish copy for safety
+        import copy as _copy
+        out = _copy.deepcopy(data)
+        try:
+            dest_w, dest_h = dest_resolution
+            areas = out.get('areas', [])
+            for a in areas:
+                if not a or 'rect' not in a:
+                    continue
+                a['rect'] = scale_utils.scale_rect_to_physical(a['rect'], dest_w, dest_h)
+            out['areas'] = areas
+        except Exception:
+            pass
+        return out
+
+    def normalize_areas_to_4k(self, areas: List[Dict[str, Any]], src_resolution: Tuple[int, int]) -> List[Dict[str, Any]]:
+        """Convert a list of rect dicts given in src_resolution up to canonical 4K for storage."""
+        src_w, src_h = src_resolution
+        try:
+            return [scale_utils.scale_rect_to_4k(a, src_w, src_h) for a in areas]
+        except Exception:
+            return areas
 
     def save_preset(self, path: str, data: Dict[str, Any]):
         try:

@@ -1080,52 +1080,78 @@ class LektorApp:
             bkp = self.config_mgr.backup_preset(preset_path)
             if bkp:
                 print(f"Kopia zapasowa: {bkp}")
-            
-            # 6. Zapis
+
+            # 6. Zapis ustawień
             preset_data.update(best_settings)
-            
+
+            target_id = dialog_res.get("target_id")
+
             if optimized_area:
-                 ox, oy, ow, oh = optimized_area
-                 new_rect = {'left': ox, 'top': oy, 'width': ow, 'height': oh}
-                 
-                 target_id = dialog_res["target_id"]
-                 
-                 if target_id is None:
-                     # Create new
-                     existing_ids = [a.get('id', 0) for a in current_areas]
-                     new_id = (max(existing_ids) if existing_ids else 0) + 1
-                     current_areas.append({
-                         "id": new_id, 
-                         "type": "continuous", 
-                         "rect": new_rect, 
-                         "hotkey": "", 
-                         "settings": best_settings
-                     })
-                 else:
-                     # Update existing
-                     for area in current_areas:
-                         if area.get('id') == target_id:
-                             # Update rect if provided
-                             if optimized_area:
-                                 area['rect'] = {
-                                     'left': int(optimized_area[0]),
-                                     'top': int(optimized_area[1]),
-                                     'width': int(optimized_area[2]),
-                                     'height': int(optimized_area[3])
-                                 }
-                             
-                             # Update or create settings dict
-                             if 'settings' not in area:
-                                 area['settings'] = {}
-                             area['settings'].update(best_settings)
-                             
-                             # Remove legacy top-level colors if present to avoid confusion
-                             if 'colors' in area:
-                                 del area['colors']
-                             break
-                 
-                 preset_data['areas'] = current_areas
-            elif dialog_res["target_id"] is not None:
+                ox, oy, ow, oh = optimized_area
+                new_rect = {'left': int(ox), 'top': int(oy), 'width': int(ow), 'height': int(oh)}
+
+                if target_id is None:
+                    # Create new area and store rect converted to 4K
+                    existing_ids = [a.get('id', 0) for a in current_areas]
+                    new_id = (max(existing_ids) if existing_ids else 0) + 1
+                    try:
+                        from app import scale_utils
+                        # Determine source resolution: prefer preset's resolution field
+                        res_str = preset_data.get('resolution') if isinstance(preset_data.get('resolution'), str) else None
+                        if res_str and 'x' in res_str:
+                            sw, sh = map(int, res_str.lower().split('x'))
+                        else:
+                            try:
+                                sw = self.root.winfo_screenwidth()
+                                sh = self.root.winfo_screenheight()
+                            except Exception:
+                                sw, sh = 3840, 2160
+                        rect4 = scale_utils.scale_rect_to_4k(new_rect, sw, sh)
+                    except Exception:
+                        rect4 = new_rect
+
+                    current_areas.append({
+                        "id": new_id,
+                        "type": "continuous",
+                        "rect": rect4,
+                        "hotkey": "",
+                        "settings": best_settings
+                    })
+                else:
+                    # Update existing area
+                    for area in current_areas:
+                        if area.get('id') == target_id:
+                            if optimized_area:
+                                try:
+                                    from app import scale_utils
+                                    res_str = preset_data.get('resolution') if isinstance(preset_data.get('resolution'), str) else None
+                                    if res_str and 'x' in res_str:
+                                        sw, sh = map(int, res_str.lower().split('x'))
+                                    else:
+                                        try:
+                                            sw = self.root.winfo_screenwidth()
+                                            sh = self.root.winfo_screenheight()
+                                        except Exception:
+                                            sw, sh = 3840, 2160
+                                    area_rect4 = scale_utils.scale_rect_to_4k({'left': int(optimized_area[0]), 'top': int(optimized_area[1]), 'width': int(optimized_area[2]), 'height': int(optimized_area[3])}, sw, sh)
+                                    area['rect'] = area_rect4
+                                except Exception:
+                                    area['rect'] = {
+                                        'left': int(optimized_area[0]),
+                                        'top': int(optimized_area[1]),
+                                        'width': int(optimized_area[2]),
+                                        'height': int(optimized_area[3])
+                                    }
+
+                            if 'settings' not in area:
+                                area['settings'] = {}
+                            area['settings'].update(best_settings)
+                            if 'colors' in area:
+                                del area['colors']
+                            break
+
+                preset_data['areas'] = current_areas
+            elif target_id is not None:
                 # Update settings only (no area change)
                  target_id = dialog_res["target_id"]
                  for area in current_areas:
