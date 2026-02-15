@@ -168,13 +168,26 @@ class AreaSelector(tk.Toplevel):
 
         # Minimalny rozmiar, żeby uniknąć przypadkowych kliknięć
         if width > 10 and height > 10:
+            # Convert window/screen coordinates back to original image physical pixels
+            try:
+                phys_left = int(left * self.scale_x)
+                phys_top = int(top * self.scale_y)
+                phys_width = int(width * self.scale_x)
+                phys_height = int(height * self.scale_y)
+            except Exception:
+                phys_left = int(left)
+                phys_top = int(top)
+                phys_width = int(width)
+                phys_height = int(height)
+
             self.geometry = {
-                'left': int(left),
-                'top': int(top),
-                'width': int(width),
-                'height': int(height)
+                'left': phys_left,
+                'top': phys_top,
+                'width': phys_width,
+                'height': phys_height
             }
             print(f"[AreaSelector] Zaznaczenie (ekran): left={left}, top={top}, width={width}, height={height}")
+            print(f"[AreaSelector] Zaznaczenie (fizyczne): left={phys_left}, top={phys_top}, width={phys_width}, height={phys_height}")
         self.destroy()
 
 

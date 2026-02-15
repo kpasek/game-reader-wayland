@@ -203,6 +203,8 @@ class ConfigManager:
             with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
 
+            # Normal load; no debug logs
+
             # Uzupełnianie brakujących kluczy domyślnymi
             for k, v in DEFAULT_PRESET_CONTENT.items():
                 if k not in data:
@@ -288,8 +290,27 @@ class ConfigManager:
     def normalize_areas_to_4k(self, areas: List[Dict[str, Any]], src_resolution: Tuple[int, int]) -> List[Dict[str, Any]]:
         """Convert a list of rect dicts given in src_resolution up to canonical 4K for storage."""
         src_w, src_h = src_resolution
+        out = []
         try:
-            return [scale_utils.scale_rect_to_4k(a, src_w, src_h) for a in areas]
+            for a in areas:
+                if not a:
+                    out.append(a)
+                    continue
+                # If `a` is an area dict containing 'rect', scale only the rect and keep other keys.
+                if isinstance(a, dict) and 'rect' in a and isinstance(a.get('rect'), dict):
+                    new_a = a.copy()
+                    try:
+                        new_a['rect'] = scale_utils.scale_rect_to_4k(a['rect'], src_w, src_h)
+                    except Exception:
+                        new_a['rect'] = a['rect']
+                    out.append(new_a)
+                else:
+                    # If it's already a plain rect dict or unknown shape, attempt best-effort scale
+                    try:
+                        out.append(scale_utils.scale_rect_to_4k(a, src_w, src_h))
+                    except Exception:
+                        out.append(a)
+            return out
         except Exception:
             return areas
 
@@ -318,8 +339,18 @@ class ConfigManager:
         except Exception as e:
             print(f"Błąd save_preset_from_screen: {e}")
 
-    def save_preset(self, path: str, data: Dict[str, Any]):
+    def save_preset(self, path: Optional[str] = None, data: Dict[str, Any] = None):
+        """Save preset to `path`. If `path` is None, uses `self.preset_path`.
+
+        `data` is required. This function will update `self.preset_cache` on success.
+        """
         try:
+            if data is None:
+                raise ValueError("save_preset requires `data` argument")
+            if not path:
+                path = self.preset_path
+            if not path:
+                raise ValueError("No path provided to save_preset and no cached preset_path available.")
             # Helper to recursively sanitize preventing recursion loops
             def sanitize(obj, memo=None):
                 if memo is None:
@@ -356,18 +387,15 @@ class ConfigManager:
                 if key in save_data and isinstance(save_data[key], str):
                     save_data[key] = self._to_relative(base_dir, save_data[key])
 
-            # Diagnostic: inspect areas before saving to help detect double-scaling issues
-            try:
-                for a in save_data.get('areas', []):
-                    r = a.get('rect') if isinstance(a, dict) else None
-                    if r and isinstance(r, dict):
-                        print(f"[ConfigManager] save_preset: saving area id={a.get('id')} rect={r}")
-            except Exception:
-                pass
-
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(save_data, f, indent=4)
-            self.preset_cache = data
+            # Clear cache and reload so load_preset will normalize paths (e.g., text_file_path)
+            self.preset_cache = None
+            try:
+                self.load_preset(path)
+            except Exception:
+                # If reload fails, leave preset_cache as None; caller can handle
+                self.preset_cache = None
         except Exception as e:
             print(f"Błąd zapisu presetu {path}: {e}")
 

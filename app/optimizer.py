@@ -1,11 +1,10 @@
-import pytesseract
 from PIL import Image
 import itertools
 from collections import Counter
 from typing import Tuple, List, Dict, Any, Optional
 
 from app.ocr import preprocess_image, recognize_text
-from app.matcher import find_best_match, precompute_subtitles, MATCH_MODE_FULL, MATCH_MODE_STARTS, MATCH_MODE_PARTIAL
+from app.matcher import find_best_match, precompute_subtitles, MATCH_MODE_FULL
 from app.config_manager import ConfigManager
 
 class OptimizerConfigManager(ConfigManager):
@@ -81,6 +80,11 @@ class SettingsOptimizer:
                     Jeśli podano listę, optymalizacja odbywa się wieloetapowo.
         """
         
+        try:
+            num_images = len(images) if isinstance(images, list) else 1
+        except Exception:
+            num_images = 'unknown'
+
         # Normalizacja do listy
         if not isinstance(images, list):
             input_images = [images]
@@ -91,13 +95,7 @@ class SettingsOptimizer:
             return {}
 
         first_image = input_images[0]
-
-        # 1. Wstępne przygotowanie obrazu (crop) dla pierwszego obrazu
-        # rough_area = (left, top, width, height)
         rx, ry, rw, rh = rough_area
-
-        # Zabezpieczenie przed wyjściem poza obraz
-        img_w, img_h = first_image.size
 
         # Przygotowanie funkcji pomocniczej do cropowania
         def create_crop(img):
@@ -122,18 +120,14 @@ class SettingsOptimizer:
             candidate_colors = set(detected_colors)
             candidate_colors.add("#FFFFFF")
             candidate_colors_list = sorted(list(candidate_colors))
-
-        # Generowanie kandydatów ustawień
+            
         candidates = []
-
-        # Wspólne parametry do permutacji
-        # Zmiana: Testy zawsze w pełnej skali (1.0), aby wykluczyć błędy przy skalowaniu
-
 
         params = {
             "color_tolerances": range(1, 30, 1),
             "thickenings": [0, 1],
-            "contrasts": [round(x * 0.1, 2) for x in range(0, 11)]  # 0.0, 0.1, ..., 1.0
+            "contrasts": [round(x * 0.2, 2) for x in range(0, 11)],
+            "brightness_threshold": range(100, 255, 2)
         }
 
         # Generujemy pełną listę wszystkich kombinacji ustawień do sprawdzenia
@@ -142,6 +136,7 @@ class SettingsOptimizer:
             for tol, thick, contrast in itertools.product(params["color_tolerances"], params["thickenings"], params["contrasts"]):
                 s = self.base_preset.copy()
                 s.update({
+                    "setting_mode": "color",
                     "auto_remove_names": True,
                     "text_alignment": "None",
                     "subtitle_colors": [color],
@@ -154,23 +149,19 @@ class SettingsOptimizer:
                 })
                 candidates.append(s)
         
-        # Branch B: Text Color Mode (Light/Dark/Mixed) - tylko jeśli nie znaleziono kolorów?
-        # W oryginalnym kodzie było to oddzielne, tutaj dla uproszczenia (i zgodnie z prośbą usunięcia z UI)
-        # możemy pominąć, lub dodać jako fallback. Skoro usuwamy z UI, to tutaj w optymalizatorze
-        # też wypadałoby się skupić na kolorach (subtitle_colors), chyba że użytkownik chce tryb jasny/ciemny bez kolorów.
-        # Ale skoro extract_dominant_colors zawsze coś zwraca (choćby biały), to Branch A pokrywa większość.
-        # Dodam jednak dla pewności defaultowy biały bez filtracji kolorem (czyli czyste OCR na progowaniu jasności)
-        # Tzw. legacy mode.
+        # Branch B: Brightness Mode (Light/Dark/Mixed)
         for mode in ["Light", "Dark"]:
-            for thick, contrast in itertools.product(params["thickenings"], params["contrasts"]):
+            for contrast, brightness in itertools.product(params["contrasts"], params["brightness_threshold"]):
                 s = self.base_preset.copy()
                 s.update({
+                    "setting_mode": "brightness",
                     "auto_remove_names": True,
-                    "subtitle_colors": [], # Pusta lista = tryb jasności/kontrastu
+                    "text_alignment": "None",
+                    "subtitle_colors": [],
                     "text_color_mode": mode,
-                    "text_thickening": thick,
+                    "text_thickening": 0,
                     "ocr_scale_factor": 1.0,
-                    "brightness_threshold": 200,
+                    "brightness_threshold": brightness,
                     "contrast": contrast
                 })
                 candidates.append(s)
@@ -181,7 +172,6 @@ class SettingsOptimizer:
         best_score_st1 = 0
         best_settings_st1 = None
 
-        # Zamiast sztywnego progu 100%, zbieramy najlepszych kandydatów
         ranked_candidates = []
 
         for settings in candidates:
@@ -190,21 +180,25 @@ class SettingsOptimizer:
             if score > best_score_st1:
                 best_score_st1 = score
                 best_settings_st1 = settings
-                best_bbox_st1 = bbox
             
-            # Dodajemy wszystko co ma jakikolwiek sens (> 10%) - próg znacznie obniżony
-            if score > 10:
+            if score > 50:
                 ranked_candidates.append((score, settings, bbox))
 
-        # Sortujemy i bierzemy znacznie szerszą grupę kandydatów (TOP 50)
-        # Preferuj: wyższy score, niższa tolerancja, brak pogrubienia
         def sort_key(item):
             score, settings, _ = item
-            tolerance = settings.get('color_tolerance', 9999)
-            thick = settings.get('text_thickening', 1)
+            # Prefer color-mode candidates over brightness-mode when otherwise equal.
+            mode_prio = 1 if settings.get('setting_mode') == 'color' else 0
+
+            if settings.get('setting_mode') == 'color':
+                tolerance = settings.get('color_tolerance', 9999)
+                thick = settings.get('text_thickening', 1)
+                contrast = settings.get('contrast', 9999)
+                # Higher mode_prio (color) helps color candidates win in reverse sorting
+                return (score, mode_prio, -tolerance, -int(thick == 0), -contrast)
+
+            brightness = settings.get('brightness_threshold', 1)
             contrast = settings.get('contrast', 9999)
-            # Najpierw score (malejąco), potem tolerancja (rosnąco), potem pogrubienie (0 preferowane), potem kontrast (rosnąco)
-            return (score, -tolerance, -int(thick == 0), -contrast)
+            return (score, mode_prio, brightness, 1, -contrast)
 
         ranked_candidates.sort(key=sort_key, reverse=True)
         survivors = ranked_candidates[:50]
@@ -223,13 +217,13 @@ class SettingsOptimizer:
                 print(f"{idx}. Final Score: {final_score:.1f}% | Score: {score_this_img:.1f}% | Kolor: {color} | Tryb: {match_mode_str} | Tolerancja: {tolerance} | Kontrast: {contrast} | Pogrubienie: {thick}")
 
         # Pierwszy zrzut: score_list = [score]
-        ranked_candidates = [([score], settings, bbox) for score, settings, bbox in ranked_candidates]
-        print_summary(ranked_candidates, 0, len(input_images))
+        survivors = [([score], settings, bbox) for score, settings, bbox in survivors]
+        print_summary(survivors, 0, len(input_images))
 
         # Jeśli mamy więcej obrazów, filtrujemy
         rejected_screens = []
         if len(input_images) > 1 and survivors:
-            finalists = ranked_candidates
+            finalists = survivors
             # Sprawdzamy kolejne obrazy
             for idx, img in enumerate(input_images[1:], start=1):
                 crop_n = create_crop(img)
@@ -237,14 +231,11 @@ class SettingsOptimizer:
                 next_round = []
                 best_ocr = None
                 best_ocr_score = -1
-                best_ocr_settings = None
                 best_ocr_img = None
                 for score_list, settings, _ in finalists:
                     score, bbox = self._evaluate_settings(crop_n, settings, precomputed_db, match_mode)
-                    # Zapamiętaj najlepszy OCR (niezależnie od progu)
                     if score > best_ocr_score:
                         best_ocr_score = score
-                        best_ocr_settings = settings
                         best_ocr_img = crop_n
                         try:
                             ocr_text = recognize_text(crop_n, OptimizerConfigManager(settings))
@@ -270,7 +261,7 @@ class SettingsOptimizer:
                     })
                     continue
                 next_round.sort(key=sort_key, reverse=True)
-                finalists = next_round[:20]
+                finalists = next_round
                 print_summary(finalists, idx, len(input_images))
             if finalists:
                 finalists.sort(key=sort_key, reverse=True)
@@ -307,47 +298,32 @@ class SettingsOptimizer:
         """
         mock_cfg = OptimizerConfigManager(settings)
 
-        # A. Preprocess
         try:
             processed_img, has_content, bbox = preprocess_image(crop.copy(), mock_cfg)
-        except Exception:
-            # W razie błędów w przetwarzaniu obrazu
-            return 0, None
+            if not has_content:
+                return 0, None
 
-        if not has_content:
-            return 0, None
-
-        # B. OCR
-        try:
             ocr_text = recognize_text(processed_img, mock_cfg)
-        except Exception:
-            # W razie błędów tesseracta
-            return 0, None
-        
-        # Filtrowanie zbyt krótkich napisów (szum OCR)
-        if not ocr_text or len(ocr_text.strip()) < 2:
-            return 0, None
+            if not ocr_text or len(ocr_text.strip()) < 2:
+                return 0, None
 
-        # C. Matching
-        try:
             match_result = find_best_match(ocr_text, precomputed_db, mode=match_mode)
         except Exception:
+            # Jeśli cokolwiek pójdzie nie tak (preprocess/OCR/matching), traktujemy jako brak wyniku
             return 0, None
 
-        if match_result:
-            _, score = match_result
-            
-            # Check for exact match (Score 101)
-            # precomputed_db[1] is the exact_map (cleaned_text -> index)
-            from app.text_processing import clean_text, smart_remove_name
-            
-            # Musimy usunąć imię tak samo jak robi to matcher
-            ocr_no_name = smart_remove_name(ocr_text)
-            cleaned_ocr = clean_text(ocr_no_name)
-            
-            if cleaned_ocr in precomputed_db[1]:
-                 score = 101
-                 
-            return score, bbox
-        
-        return 0, bbox
+        if not match_result:
+            return 0, bbox
+
+        _, score = match_result
+
+        # Check for exact match (Score 101)
+        # precomputed_db[1] is the exact_map (cleaned_text -> index)
+        from app.text_processing import clean_text, smart_remove_name
+
+        ocr_no_name = smart_remove_name(ocr_text)
+        cleaned_ocr = clean_text(ocr_no_name)
+        if cleaned_ocr in precomputed_db[1]:
+            score = 101
+
+        return score, bbox

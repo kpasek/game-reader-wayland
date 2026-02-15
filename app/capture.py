@@ -60,7 +60,6 @@ class KWinSpectacleWrapper:
 
             if x is not None and width is not None:
                 box = (int(x), int(y), int(x + width), int(y + height))
-                print(f"DEBUG: Cropping Spectacle image {img.size} with box: {box}")
                 img = img.crop(box)
                 
                 # DEBUG: Save immediate crop result
@@ -115,6 +114,7 @@ def capture_fullscreen() -> Optional[Image.Image]:
     Pobiera zrzut całego ekranu.
     """
     try:
+        print(f"[capture_fullscreen] backend={SCREENSHOT_BACKEND}")
         if SCREENSHOT_BACKEND == 'kde_spectacle':
             try:
                 grabber = KWinSpectacleWrapper()
@@ -128,12 +128,22 @@ def capture_fullscreen() -> Optional[Image.Image]:
                 sct_img = sct.grab(monitor)
                 return Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
 
-        return ImageGrab.grab()
+        img = ImageGrab.grab()
+        try:
+            print(f"[capture_fullscreen] grabbed size={img.size}")
+        except Exception:
+            pass
+        return img
 
     except Exception as e:
         print(f"BŁĄD (capture_fullscreen): {e}", file=sys.stderr)
         try:
-            return ImageGrab.grab()
+            img = ImageGrab.grab()
+            try:
+                print(f"[capture_fullscreen][fallback] grabbed size={img.size}")
+            except Exception:
+                pass
+            return img
         except Exception:
             return None
 
@@ -159,9 +169,9 @@ def capture_region(region: Dict[str, int]) -> Optional[Image.Image]:
             with mss.mss() as sct:
                 rect = {"top": top, "left": left, "width": width, "height": height}
                 sct_img = sct.grab(rect)
-                return Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
-
-        return ImageGrab.grab(bbox=(left, top, left + width, top + height))
+                img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
+                return img
+        img = ImageGrab.grab(bbox=(left, top, left + width, top + height))
 
     except Exception as e:
         print(f"BŁĄD (capture_region): {e}", file=sys.stderr)

@@ -42,13 +42,9 @@ class CaptureWorker(threading.Thread):
         self.first_capture_done = False
 
     def run(self):
-        frame_count = 0
         while not self.stop_event.is_set():
             loop_start = time.monotonic()
             
-            # Heartbeat log every 10 frames
-            frame_count += 1
-
             self.capture()
 
             elapsed = time.monotonic() - loop_start
@@ -115,8 +111,6 @@ class ReaderThread(threading.Thread):
         self.empty_threshold = 0.15
         self.text_alignment = "None"
         self.save_logs = False
-        from app.matcher import MATCH_MODE_FULL
-        self.subtitle_mode = MATCH_MODE_FULL
 
         self.matcher_config = {}
         self.audio_speed_inc = 1.2
@@ -208,9 +202,9 @@ class ReaderThread(threading.Thread):
         self.ocr_scale = preset.get('ocr_scale_factor', 1.0)
         self.text_alignment = preset.get('text_alignment', "None")
         self.save_logs = preset.get('save_logs', False)
-        self.subtitle_mode = None #preset.get('subtitle_mode', MATCH_MODE_FULL)
         interval = preset.get('capture_interval', 0.5)
         similarity = preset.get('similarity', 5.0)
+        min_line_len = preset.get('min_line_length', 0)
 
         self.audio_speed_inc = preset.get('audio_speed_inc', 1.20)
 
@@ -223,7 +217,6 @@ class ReaderThread(threading.Thread):
         }
 
         raw_subtitles = ConfigManager.load_text_lines(preset.get('text_file_path'))
-        min_line_len = preset.get('min_line_length', 0)
         precomputed_data = precompute_subtitles(raw_subtitles, min_line_len) if raw_subtitles else ([], {})
 
         # --- LOAD AREAS ---
@@ -471,6 +464,8 @@ class ReaderThread(threading.Thread):
                         self.recent_match_indices.append(idx_match)
 
                         audio_path = os.path.join(audio_dir, f"output1 ({idx_match + 1}){audio_ext}")
+                        if not os.path.exists(audio_path):
+                            print(f"Audio file not found: {audio_path}")
 
                         q_size = self.audio_queue.qsize()
                         speed_multiplier = 1.0

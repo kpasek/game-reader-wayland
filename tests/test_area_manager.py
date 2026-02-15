@@ -96,12 +96,24 @@ class TestAreaManager(unittest.TestCase):
         self.patcher1 = patch('app.area_manager.AreaSelector')
         self.patcher2 = patch('app.area_manager.ColorSelector')
         self.patcher3 = patch('app.area_manager.capture_fullscreen')
-        
+
         self.MockAreaSelector = self.patcher1.start()
         self.MockColorSelector = self.patcher2.start()
         self.MockCapture = self.patcher3.start()
 
-        self.window = AreaManagerWindow(self.root, self.areas, self.mock_callback)
+        # Create a simple mock ConfigManager for tests
+        self.mock_cfg = MagicMock()
+        self.mock_cfg.get_preset_for_resolution = MagicMock(return_value={'areas': self.areas})
+        self.mock_cfg.load_preset = MagicMock(return_value={'areas': self.areas})
+        self.mock_cfg.save_preset_from_screen = MagicMock()
+
+        # Ensure mock_cfg has cached preset_path like real ConfigManager
+        self.mock_cfg.preset_path = 'dummy_path'
+        # Build a mock LektorApp object exposing config_mgr and _get_screen_size
+        self.mock_app = MagicMock()
+        self.mock_app.config_mgr = self.mock_cfg
+        self.mock_app._get_screen_size = MagicMock(return_value=(3840, 2160))
+        self.window = AreaManagerWindow(self.root, self.mock_app)
         
         # Fix for Listbox mock behavior
         self.window.lb_areas.get = MagicMock(return_value=["#1 [Stały]", "#2 [Na skrót]"])
@@ -145,9 +157,12 @@ class TestAreaManager(unittest.TestCase):
 
     def test_save_callback(self):
         self.window._save_and_close()
-        self.mock_callback.assert_called_once()
-        args = self.mock_callback.call_args[0][0]
-        self.assertEqual(len(args), 2)
+        # Ensure ConfigManager.save_preset_from_screen invoked
+        self.mock_cfg.save_preset_from_screen.assert_called_once()
+        # Validate that saved areas length matches
+        saved_data = self.mock_cfg.save_preset_from_screen.call_args[0][1]
+        self.assertIn('areas', saved_data)
+        self.assertEqual(len(saved_data['areas']), 2)
 
 if __name__ == '__main__':
     unittest.main()

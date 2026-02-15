@@ -1,5 +1,8 @@
 import sys
-from typing import Any, Dict
+from typing import Any, Dict, TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from lektor import LektorApp
 
 try:
     import tkinter as tk
@@ -13,12 +16,12 @@ class SettingsDialog(tk.Toplevel):
     Okno dialogowe do globalnych ustawień aplikacji oraz zaawansowanych ustawień presetu.
     """
 
-    def __init__(self, parent, settings: Dict[str, Any], app_instance):
+    def __init__(self, parent: tk.Misc, settings: Dict[str, Any], app_instance: 'LektorApp'):
         super().__init__(parent)
         self.transient(parent)
         self.title("Ustawienia aplikacji")
-        self.settings = settings
-        self.app = app_instance
+        self.settings: Dict[str, Any] = settings
+        self.app: 'LektorApp' = app_instance
 
         # Zmienne UI (Globalne)
         self.var_brightness_threshold = tk.IntVar(value=settings.get('brightness_threshold', 150))
