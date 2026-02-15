@@ -143,7 +143,6 @@ class SettingsOptimizer:
                 s = self.base_preset.copy()
                 s.update({
                     "auto_remove_names": True,
-                    "resolution": "1920x1080",
                     "text_alignment": "None",
                     "subtitle_colors": [color],
                     "color_tolerance": tol,

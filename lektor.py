@@ -519,21 +519,17 @@ class LektorApp:
         if isinstance(mons, dict): mons = [mons]
         while len(mons) < 3: mons.append(None)
 
-        try:
-            pw, ph = map(int, data.get('resolution', "1920x1080").split('x'))
-        except:
-            pw, ph = 1920, 1080
-
-        disp_mons = [self._scale_rect(m, sw / pw, sh / ph) if m else None for m in mons]
+        from app import scale_utils
+        # Presets store monitor rects in canonical 4K; convert them to current screen size
+        disp_mons = [scale_utils.scale_rect_to_physical(m, sw, sh) if m else None for m in mons]
         sel = AreaSelector(self.root, img, existing_regions=disp_mons)
         self.root.deiconify()
 
         if sel.geometry:
             disp_mons[idx] = sel.geometry
-            final_mons = [self._scale_rect(m, STANDARD_WIDTH / sw, STANDARD_HEIGHT / sh) if m else None for m in
-                          disp_mons]
+            # Convert selected screen-relative monitors back to canonical 4K for storage
+            final_mons = [scale_utils.scale_rect_to_4k(m, sw, sh) if m else None for m in disp_mons]
             data['monitor'] = final_mons
-            data['resolution'] = f"{STANDARD_WIDTH}x{STANDARD_HEIGHT}"
             self.config_mgr.save_preset(path, data)
 
     def clear_area(self, idx):
@@ -1104,16 +1100,12 @@ class LektorApp:
                     new_id = (max(existing_ids) if existing_ids else 0) + 1
                     try:
                         from app import scale_utils
-                        # Determine source resolution: prefer preset's resolution field
-                        res_str = preset_data.get('resolution') if isinstance(preset_data.get('resolution'), str) else None
-                        if res_str and 'x' in res_str:
-                            sw, sh = map(int, res_str.lower().split('x'))
-                        else:
-                            try:
-                                sw = self.root.winfo_screenwidth()
-                                sh = self.root.winfo_screenheight()
-                            except Exception:
-                                sw, sh = 3840, 2160
+                        # Determine source resolution from current GUI screen size
+                        try:
+                            sw = self.root.winfo_screenwidth()
+                            sh = self.root.winfo_screenheight()
+                        except Exception:
+                            sw, sh = 3840, 2160
                         rect4 = scale_utils.scale_rect_to_4k(new_rect, sw, sh)
                     except Exception:
                         rect4 = new_rect
@@ -1132,15 +1124,11 @@ class LektorApp:
                             if optimized_area:
                                 try:
                                     from app import scale_utils
-                                    res_str = preset_data.get('resolution') if isinstance(preset_data.get('resolution'), str) else None
-                                    if res_str and 'x' in res_str:
-                                        sw, sh = map(int, res_str.lower().split('x'))
-                                    else:
-                                        try:
-                                            sw = self.root.winfo_screenwidth()
-                                            sh = self.root.winfo_screenheight()
-                                        except Exception:
-                                            sw, sh = 3840, 2160
+                                    try:
+                                        sw = self.root.winfo_screenwidth()
+                                        sh = self.root.winfo_screenheight()
+                                    except Exception:
+                                        sw, sh = 3840, 2160
                                     area_rect4 = scale_utils.scale_rect_to_4k({'left': int(optimized_area[0]), 'top': int(optimized_area[1]), 'width': int(optimized_area[2]), 'height': int(optimized_area[3])}, sw, sh)
                                     area['rect'] = area_rect4
                                 except Exception:

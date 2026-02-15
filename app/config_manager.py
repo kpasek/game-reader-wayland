@@ -19,7 +19,6 @@ DEFAULT_PRESET_CONTENT = {
     "audio_dir": "audio",
     "text_file_path": "subtitles.txt",
     "monitor": [],
-    "resolution": "1920x1080",
     # Domyślny tryb dopasowania napisów (musi być zgodny z MATCH_MODE_FULL z matcher.py)
     "subtitle_mode": "Full Lines",
     "text_color_mode": "Light",
@@ -324,6 +323,8 @@ class ConfigManager:
                     return str(obj)
 
             save_data = sanitize(data)
+
+            # (No preset-based resolution conversion — areas expected to be stored in canonical 4K)
             base_dir = os.path.dirname(os.path.abspath(path))
 
             for key in ['audio_dir', 'text_file_path']:
