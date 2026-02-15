@@ -52,7 +52,7 @@ audio_queue = queue.Queue()
 log_queue = queue.Queue()
 debug_queue = queue.Queue()
 
-APP_VERSION = "v1.3.0"
+APP_VERSION = "v1.4.0"
 
 
 class LektorApp:
@@ -1180,7 +1180,7 @@ class LektorApp:
     def _show_custom_result_dialog(self, score, settings, optimized_area, existing_areas, subtitle_lines=None):
         dialog = tk.Toplevel(self.root)
         dialog.title(f"Wynik Optymalizacji")
-        dialog.geometry("450x700")
+        dialog.geometry("450x600")
         
         content = tk.Frame(dialog, padx=20, pady=20)
         content.pack(fill="both", expand=True)

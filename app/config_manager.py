@@ -271,7 +271,16 @@ class ConfigManager:
             for a in areas:
                 if not a or 'rect' not in a:
                     continue
+                # Diagnostic log: show rect before scaling
+                try:
+                    print(f"[ConfigManager] get_preset_for_resolution: scaling area id={a.get('id')} rect_before={a.get('rect')} -> dest={dest_w}x{dest_h}")
+                except Exception:
+                    pass
                 a['rect'] = scale_utils.scale_rect_to_physical(a['rect'], dest_w, dest_h)
+                try:
+                    print(f"[ConfigManager] get_preset_for_resolution: area id={a.get('id')} rect_after={a.get('rect')}")
+                except Exception:
+                    pass
             out['areas'] = areas
         except Exception:
             pass
@@ -320,6 +329,15 @@ class ConfigManager:
             for key in ['audio_dir', 'text_file_path']:
                 if key in save_data and isinstance(save_data[key], str):
                     save_data[key] = self._to_relative(base_dir, save_data[key])
+
+            # Diagnostic: inspect areas before saving to help detect double-scaling issues
+            try:
+                for a in save_data.get('areas', []):
+                    r = a.get('rect') if isinstance(a, dict) else None
+                    if r and isinstance(r, dict):
+                        print(f"[ConfigManager] save_preset: saving area id={a.get('id')} rect={r}")
+            except Exception:
+                pass
 
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(save_data, f, indent=4)

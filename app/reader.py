@@ -268,9 +268,30 @@ class ReaderThread(threading.Thread):
 
         # Skaluje recty z kanonicznego 4K do aktualnej rozdzielczości obrazu
         try:
-            scaled_rects = self._scale_monitor_areas([a['rect'] for a in valid_areas])
-            for i, a in enumerate(valid_areas):
-                a['rect'] = scaled_rects[i]
+            # If rects already look like physical coordinates (fit within dest), skip scaling.
+            dest_w, dest_h = dest_w, dest_h
+            rects = [a['rect'] for a in valid_areas]
+            need_scale = False
+            for r in rects:
+                if not r: continue
+                try:
+                    # If any rect exceeds destination bounds, assume it's in 4K and needs scaling
+                    if (r.get('left', 0) < 0 or r.get('top', 0) < 0 or
+                        r.get('left', 0) + r.get('width', 0) > dest_w or
+                        r.get('top', 0) + r.get('height', 0) > dest_h):
+                        need_scale = True
+                        break
+                except Exception:
+                    need_scale = True
+                    break
+
+            if need_scale:
+                scaled_rects = self._scale_monitor_areas(rects)
+                for i, a in enumerate(valid_areas):
+                    a['rect'] = scaled_rects[i]
+            else:
+                # Rects already in physical coords; leave as-is
+                pass
         except Exception:
             # Fallback: użyj oryginalnych rectów jeżeli skalowanie nie powiedzie się
             pass

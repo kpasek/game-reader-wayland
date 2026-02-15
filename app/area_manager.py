@@ -521,6 +521,21 @@ class AreaManagerWindow(tk.Toplevel):
             })
          self._refresh_list()
 
+    def _add_area(self):
+        # Create and select a new manual area
+        existing_ids = [a.get('id', 0) for a in self.areas]
+        new_id = (max(existing_ids) if existing_ids else 0) + 1
+        new_area = {
+            "id": new_id,
+            "type": "manual",
+            "rect": None,
+            "hotkey": "",
+            "settings": {}
+        }
+        self.areas.append(new_area)
+        self.current_selection_idx = len(self.areas) - 1
+        self._refresh_list()
+
     def _select_area_on_screen(self):
         if self.current_selection_idx < 0: return
         self.withdraw()
@@ -1103,6 +1118,10 @@ class AreaManagerWindow(tk.Toplevel):
     def _apply_opt_result(self, result):
         if self.current_selection_idx < 0: return
         area = self.areas[self.current_selection_idx]
+        try:
+            print(f"[AreaManager] _apply_opt_result: received optimized_area={result.get('optimized_area')} settings_keys={list(result.get('settings', {}).keys())}")
+        except Exception:
+            pass
         
         opt_rect = result.get('optimized_area')
         if opt_rect and isinstance(opt_rect, (list, tuple)):
@@ -1129,7 +1148,7 @@ class OptimizationCaptureWindow(tk.Toplevel):
     def __init__(self, parent, on_start, area_manager=None):
         super().__init__(parent)
         self.title("Optymalizacja Ustawień")
-        self.geometry("700x700")
+        self.geometry("500x500")
         
         # Shortcuts
         self.bind("<F4>", lambda e: self._add_with_selection())

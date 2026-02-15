@@ -95,11 +95,10 @@ class SettingsOptimizer:
         # 1. Wstępne przygotowanie obrazu (crop) dla pierwszego obrazu
         # rough_area = (left, top, width, height)
         rx, ry, rw, rh = rough_area
-        
+
         # Zabezpieczenie przed wyjściem poza obraz
         img_w, img_h = first_image.size
-        # ... (zachowanie logiki cropa dla cropów pomocniczych, ale tutaj musimy cropować każdego z osobna w pętli)
-        
+
         # Przygotowanie funkcji pomocniczej do cropowania
         def create_crop(img):
             cx = max(0, rx); cy = max(0, ry)
