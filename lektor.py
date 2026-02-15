@@ -281,11 +281,11 @@ class LektorApp:
         grp_act.pack(fill=tk.X, pady=5)
         
         # Big Buttons for main actions
-        btn_areas = tk.Button(grp_act, text="Zarządzaj Obszarami", command=self.open_area_manager, bg="#e0e0e0", relief="raised")
-        btn_areas.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-
         btn_detect = tk.Button(grp_act, text="Wykryj Ustawienia", command=self.detect_optimal_settings, bg="#e0e0e0", relief="raised")
         btn_detect.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+
+        btn_areas = tk.Button(grp_act, text="Zarządzaj Obszarami", command=self.open_area_manager, bg="#e0e0e0", relief="raised")
+        btn_areas.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
         # Removed old subtitle colors section
         # grp_sub = ttk.LabelFrame(panel, text="Kolory napisów", padding=10) ...
@@ -571,6 +571,9 @@ class LektorApp:
         if not path or not os.path.exists(path): return messagebox.showerror("Błąd", "Brak profilu.")
         self.config_mgr.add_recent_preset(path)
         self._update_preset_list()
+
+        # Wymuś ponowne wczytanie presetów z pliku (czyść cache)
+        self.config_mgr.preset_cache = None
 
         mode = self.var_regex_mode.get()
         pattern = self.var_custom_regex.get() if mode == "Własny (Regex)" else self.regex_map.get(mode, "")
