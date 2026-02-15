@@ -180,12 +180,12 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager, override
                 print(f"  > Tolerancja: {preset.get('color_tolerance', 10)}")
                 
                 # Zrzut obrazu wejściowego dla celów diagnostycznych
-                try:
-                    debug_path = "debug_crop_failure.png"
-                    # Save the debug image
-                    image.save(debug_path)
-                    print(f"  > Zapisano obraz po filtrowaniu do: {debug_path}")
-                except: pass
+                # try:
+                #     debug_path = "debug_crop_failure.png"
+                #     # Save the debug image
+                #     image.save(debug_path)
+                #     print(f"  > Zapisano obraz po filtrowaniu do: {debug_path}")
+                # except: pass
                 
                 return image, False, (0, 0, image.width, image.height)
 

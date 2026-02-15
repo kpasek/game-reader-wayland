@@ -52,11 +52,11 @@ class KWinSpectacleWrapper:
             img.load()
             
             # DEBUG: Save full raw capture from Spectacle
-            if not os.path.exists("debug_spectacle_full_integrity.png"):
-                 try:
-                     img.save("debug_spectacle_full_integrity.png")
-                     print(f"DEBUG: Saved debug_spectacle_full_integrity.png (Size: {img.size})")
-                 except: pass
+            # if not os.path.exists("debug_spectacle_full_integrity.png"):
+            #      try:
+            #          img.save("debug_spectacle_full_integrity.png")
+            #          print(f"DEBUG: Saved debug_spectacle_full_integrity.png (Size: {img.size})")
+            #      except: pass
 
             if x is not None and width is not None:
                 box = (int(x), int(y), int(x + width), int(y + height))
@@ -64,11 +64,11 @@ class KWinSpectacleWrapper:
                 img = img.crop(box)
                 
                 # DEBUG: Save immediate crop result
-                if not os.path.exists("debug_spectacle_crop_immediate.png"):
-                     try:
-                        img.save("debug_spectacle_crop_immediate.png")
-                        print("DEBUG: Saved debug_spectacle_crop_immediate.png")
-                     except: pass
+                     # if not os.path.exists("debug_spectacle_crop_immediate.png"):
+                     #      try:
+                     #          img.save("debug_spectacle_crop_immediate.png")
+                     #          print("DEBUG: Saved debug_spectacle_crop_immediate.png")
+                     #      except: pass
 
             return img
 

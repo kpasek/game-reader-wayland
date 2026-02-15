@@ -225,6 +225,7 @@ class SettingsOptimizer:
         print_summary(ranked_candidates, 0, len(input_images))
 
         # Jeśli mamy więcej obrazów, filtrujemy
+        rejected_screens = []
         if len(input_images) > 1 and survivors:
             finalists = ranked_candidates
             # Sprawdzamy kolejne obrazy
@@ -251,14 +252,20 @@ class SettingsOptimizer:
                     if score > 50:
                         next_round.append((score_list + [score], settings, bbox))
                 if not next_round:
-                    print(f"\nUWAGA: Zrzut {idx+1} został odrzucony (brak ustawień z wynikiem >50%).")
-                    if best_ocr is not None:
-                        print(f"Najlepszy odczytany tekst (score={best_ocr_score:.1f}%): {best_ocr}")
+                    # Zapisz info o odrzuconym zrzucie
+                    preview_path = None
+                    if best_ocr_img is not None:
                         try:
-                            best_ocr_img.save(f"odrzucony_zrzut_{idx+1}.png")
-                            print(f"Podgląd zapisany jako odrzucony_zrzut_{idx+1}.png")
+                            preview_path = f"odrzucony_zrzut_{idx+1}.png"
+                            best_ocr_img.save(preview_path)
                         except Exception as e:
-                            print(f"Błąd zapisu podglądu: {e}")
+                            preview_path = f"Błąd zapisu: {e}"
+                    rejected_screens.append({
+                        "index": idx+1,
+                        "ocr": best_ocr,
+                        "score": best_ocr_score,
+                        "preview": preview_path
+                    })
                     continue
                 next_round.sort(key=sort_key, reverse=True)
                 finalists = next_round[:20]
@@ -271,21 +278,21 @@ class SettingsOptimizer:
                 return {
                     "score": avg_score, 
                     "settings": best_settings, 
-                    "optimized_area": opt_rect 
+                    "optimized_area": opt_rect,
+                    "rejected_screens": rejected_screens
                 }
 
         # Fallback jeśli tylko 1 obraz LUB brak survivors
         if best_settings_st1:
             # Same fix here
             opt_rect = rough_area
-                
             return {
                 "score": best_score_st1, 
                 "settings": best_settings_st1,
-                "optimized_area": opt_rect 
+                "optimized_area": opt_rect,
+                "rejected_screens": []
             }
-            
-        return {"score": 0, "settings": {}, "optimized_area": rough_area}
+        return {"score": 0, "settings": {}, "optimized_area": rough_area, "rejected_screens": []}
 
     def _evaluate_settings(self, 
                            crop: Image.Image, 

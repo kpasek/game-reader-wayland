@@ -380,13 +380,13 @@ class ReaderThread(threading.Thread):
                     pass
             
             # Zapisz pierwszy zrzut ekranu tylko jeśli włączony jest tryb DEBUG w ustawieniach
-            if not getattr(self, '_debug_capture_saved', False) and self.config_manager.settings.get('debug', False):
-                if hasattr(full_img, 'save'):
-                    try:
-                        full_img.save("debug_first_capture.png")
-                        self._debug_capture_saved = True
-                    except Exception:
-                        pass
+            # if not getattr(self, '_debug_capture_saved', False) and self.config_manager.settings.get('debug', False):
+            #     if hasattr(full_img, 'save'):
+            #         try:
+            #             full_img.save("debug_first_capture.png")
+            #             self._debug_capture_saved = True
+            #         except Exception:
+            #             pass
 
             for idx, area_obj in enumerate(valid_areas):
                 t_start_proc = time.perf_counter()

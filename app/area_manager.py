@@ -792,6 +792,12 @@ class AreaManagerWindow(tk.Toplevel):
         status_label.pack(pady=20)
         prog.update()
 
+        # Potrzebujemy referencji do okna optymalizacji, by wywołać _show_rejected
+        opt_win = None
+        for w in self.winfo_children():
+            if isinstance(w, OptimizationCaptureWindow):
+                opt_win = w
+                break
 
         def task():
             try:
@@ -818,6 +824,9 @@ class AreaManagerWindow(tk.Toplevel):
                 prog.update()
                 result = optimizer.optimize(valid_images, rough_area, subtitle_db, match_mode=mode, initial_color=initial_color)
                 results = [(0, result)]
+                # Przekaż rejected_screens do okna optymalizacji
+                if opt_win and result and "rejected_screens" in result:
+                    self.after(0, lambda: opt_win._show_rejected(result["rejected_screens"]))
             except Exception as e:
                 errors.append(f"Błąd optymalizacji: {e}")
                 results = []
@@ -960,6 +969,10 @@ class OptimizationCaptureWindow(tk.Toplevel):
         ttk.Button(main_f, text="Uruchom Optymalizację", command=self._start_opt).pack(pady=10, fill=tk.X)
         self.status = ttk.Label(main_f, text="")
         self.status.pack(pady=5)
+
+        # Label na odrzucone zrzuty
+        self.rejected_label = ttk.Label(main_f, text="", foreground="red", wraplength=450, justify=tk.LEFT)
+        self.rejected_label.pack(pady=5)
     
     def _pick_color(self):
         # Store root reference
@@ -1135,11 +1148,34 @@ class OptimizationCaptureWindow(tk.Toplevel):
         if not self.frames:
             messagebox.showerror("Błąd", "Dodaj przynajmniej jeden zrzut ekranu.")
             return
-            
         disp_mode = self.var_match_mode.get()
         mode = self.mode_map.get(disp_mode, "Full Lines")
-        
         color = self.var_color.get() if self.var_color.get() else None
-        
-        self.on_start(self.frames, mode=mode, initial_color=color)
-        self.destroy()
+
+        # Przechwyć callback, aby przechwycić rejected_screens
+        def on_start_with_rejected(frames, mode, initial_color):
+            result = self.on_start(frames, mode=mode, initial_color=initial_color)
+            # Oczekujemy, że on_start zwraca result (lub None)
+            if result and isinstance(result, dict) and "rejected_screens" in result:
+                self._show_rejected(result["rejected_screens"])
+            return result
+
+        # Spróbuj wywołać i przechwycić rejected_screens (jeśli on_start zwraca wynik synchronicznie)
+        res = on_start_with_rejected(self.frames, mode, color)
+        # Jeśli on_start jest asynchroniczny, _show_rejected powinno być wywołane przez wywołującego
+        # Zamknij okno tylko jeśli nie ma rejected_screens do pokazania
+        if not (res and isinstance(res, dict) and res.get("rejected_screens")):
+            self.destroy()
+
+    def _show_rejected(self, rejected_screens):
+        if not rejected_screens:
+            self.rejected_label.config(text="")
+            return
+        lines = [f"Odrzucone zrzuty (brak ustawień z wynikiem >50%):"]
+        for r in rejected_screens:
+            idx = r.get("index", "?")
+            score = r.get("score", 0)
+            ocr = r.get("ocr", "")
+            preview = r.get("preview", "")
+            lines.append(f"- Zrzut #{idx}: Najlepszy wynik: {score:.1f}%, Tekst OCR: {ocr}, Podgląd: {preview}")
+        self.rejected_label.config(text="\n".join(lines))
