@@ -872,8 +872,9 @@ class LektorApp:
         if txt_path and os.path.exists(txt_path):
              subs = self.config_mgr.load_text_lines(txt_path)
         
-        # Open Manager
-        AreaManagerWindow(self.root, data['areas'], self._save_areas_callback, subs)
+        # Open Manager (deepcopy to avoid auto-saving changes on cancel)
+        import copy
+        AreaManagerWindow(self.root, copy.deepcopy(data['areas']), self._save_areas_callback, subs)
 
     def _normalize_area_to_4k(self, rect, img_w, img_h):
         """

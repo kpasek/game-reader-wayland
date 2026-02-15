@@ -19,7 +19,7 @@ class AreaManagerWindow(tk.Toplevel):
     def __init__(self, parent, areas: List[Dict[str, Any]], on_save_callback, subtitle_lines: List[str] = None):
         super().__init__(parent)
         self.title("Zarządzanie Obszarami")
-        self.geometry("1000x700")
+        self.geometry("900x600")
         self.areas = [a.copy() for a in areas]
         self.subtitle_lines = subtitle_lines
         
