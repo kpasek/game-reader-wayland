@@ -241,7 +241,18 @@ class AreaManagerWindow(tk.Toplevel):
             
         r = area.get('rect')
         if r:
-            self.lbl_rect.config(text=f"X:{r.get('left')} Y:{r.get('top')} {r.get('width')}x{r.get('height')}")
+            # Przeskaluj z 4K do aktualnej rozdzielczości ekranu
+            screen_w = self.winfo_screenwidth()
+            screen_h = self.winfo_screenheight()
+            sx = screen_w / 3840
+            sy = screen_h / 2160
+            left = int(round(r.get('left', 0) * sx))
+            top = int(round(r.get('top', 0) * sy))
+            width = int(round(r.get('width', 0) * sx))
+            height = int(round(r.get('height', 0) * sy))
+            print(f"[AreaManager] Odczyt z presetów (4K): left={r.get('left', 0)}, top={r.get('top', 0)}, width={r.get('width', 0)}, height={r.get('height', 0)}")
+            print(f"[AreaManager] Przeliczone na ekran ({screen_w}x{screen_h}): left={left}, top={top}, width={width}, height={height}")
+            self.lbl_rect.config(text=f"X:{left} Y:{top} {width}x{height}")
         else:
             self.lbl_rect.config(text="Brak (Kliknij 'Wybierz Obszar')")
             
@@ -439,13 +450,13 @@ class AreaManagerWindow(tk.Toplevel):
             
             # Explicit root + no wait_window() on sel
             root = self._get_root()
+            print(f"[AreaManager] Przekazuję existing_regions do AreaSelector: {self.areas}")
             sel = AreaSelector(root, img, existing_regions=self.areas) 
             # AreaSelector is blocking in init, so no need to wait here.
-            
             if sel.geometry:
-                self.areas[self.current_selection_idx]['rect'] = sel.geometry
+                print(f"[AreaManager] Otrzymana geometria z AreaSelector: {sel.geometry}")
+                self.areas[self.current_selection_idx]['rect'] = sel.geometry.copy()
                 self._load_details(self.current_selection_idx)
-                
                 # Auto update bounds label
                 r = sel.geometry
                 self.lbl_rect.config(text=f"X:{r.get('left')} Y:{r.get('top')} {r.get('width')}x{r.get('height')}")

@@ -5,13 +5,13 @@ import queue
 import copy
 from collections import deque
 from datetime import datetime
-from typing import Optional, Tuple, Dict, Any, List
+from typing import Optional, Tuple, Dict, List
 # ImageChops jest wykorzystywany w funkcji _images_are_similar, a ImageStat w tej samej funkcji.
-from PIL import Image, ImageChops, ImageStat, ImageOps, ImageFilter
+from PIL import Image, ImageChops, ImageStat
 
 from app.capture import capture_region
-from app.ocr import preprocess_image, recognize_text, get_text_bounds
-from app.matcher import find_best_match, precompute_subtitles, MATCH_MODE_FULL, MATCH_MODE_STARTS, MATCH_MODE_PARTIAL
+from app.ocr import preprocess_image, recognize_text
+from app.matcher import find_best_match, precompute_subtitles
 from app.config_manager import ConfigManager
 
 
@@ -167,72 +167,49 @@ class ReaderThread(threading.Thread):
         except:
             return monitors
 
-    def _scale_monitor_areas(self, monitors: List[Dict], original_res_str: str) -> List[Dict]:
+    def _scale_monitor_areas(self, monitors: List[Dict]) -> List[Dict]:
         """
-        Scales area coordinates from the original preset resolution to the actual capture resolution.
+        Skaluje współrzędne obszarów z bazy 4K (3840x2160) do aktualnej rozdzielczości obrazu.
         """
         from app.capture import capture_fullscreen
-        
-        # Try to determine physical resolution
+        STANDARD_W, STANDARD_H = 3840, 2160
+
+        # Ustal docelową rozdzielczość (fizyczny obraz)
         if not hasattr(self, '_physical_res'):
             self._physical_res = None
-            
-            # Try capture ONCE to get real physical pixels (important for HiDPI)
-            # If it fails, we fall back to target_resolution immediately without waiting.
             try:
                 img = capture_fullscreen()
                 if img:
                     self._physical_res = img.size
-            except:
+            except Exception:
                 pass
-            
-            # If capture failed, we leave _physical_res as None and let the 
-            # fallback logic below handle the priority (Original > Target)
-
-        # Debug logging for resolution detection
-        if self.log_queue and not hasattr(self, '_logged_res'):
-             self._logged_res = True
-             res = getattr(self, '_physical_res', 'None')
-             msg = f"Resolution Debug: Physical={res}, Target={self.target_resolution}, Preset={original_res_str}"
-             self.log_queue.put({"time": "INFO", "line_text": msg})
-             # Force log to file as well for debugging
-             try:
-                 with open("session_debug.log", "a") as f:
-                     f.write(f"{datetime.now()} {msg}\n")
-             except: pass
 
         dest_w, dest_h = self._physical_res if getattr(self, '_physical_res', None) else (None, None)
-        
-        # Parse original resolution
-        orig_w, orig_h = None, None
-        
-        # FIX: If preset lacks resolution, try to infer or default to standard 4K if coordinates seem high
-        if not original_res_str:
-            # print("DEBUG: Preset has no resolution defined! attempting heuristic or default.")
-             # Check if any area has coords > 2560 or > 1440
-             max_x = max([m.get('left',0) + m.get('width',0) for m in monitors]) if monitors else 0
-             max_y = max([m.get('top',0) + m.get('height',0) for m in monitors]) if monitors else 0
-             
-             if max_x > 2560 or max_y > 1440:
-                 original_res_str = "3840x2160"
-                # print("DEBUG: Heuristic detected 4K coordinates. Assuming source is 3840x2160.")
-             elif max_x > 1920 or max_y > 1080:
-                 original_res_str = "2560x1440"
-             else:
-                 original_res_str = "1920x1080" # Default fallback
-        
-        # Restore original logic: Respect the preset's resolution string if available
-        if original_res_str:
-            try:
-                parts = original_res_str.lower().split('x')
-                if len(parts) == 2:
-                    orig_w, orig_h = int(parts[0]), int(parts[1])
-            except:
-                pass
-        
-        # --- BEZWZGLĘDNE PRZESKALOWANIE Z 4K DO ROZDZIELCZOŚCI DOCELWEJ ---
-        # print(f"DEBUG: _scale_monitor_areas. NO SCALING – using preset coordinates 1:1!")
-        return monitors
+        if not dest_w or not dest_h:
+            if self.target_resolution:
+                dest_w, dest_h = self.target_resolution
+            else:
+                dest_w, dest_h = STANDARD_W, STANDARD_H
+
+        sx = dest_w / STANDARD_W
+        sy = dest_h / STANDARD_H
+
+        print(f"[ReaderThread] Skalowanie z 4K do {dest_w}x{dest_h} (sx={sx:.4f}, sy={sy:.4f})")
+        scaled = []
+        for r in monitors:
+            if not r:
+                scaled.append(r)
+                continue
+            print(f"[ReaderThread] Oryginalny rect (4K): {r}")
+            scaled_rect = {
+                'left': int(round(r.get('left', 0) * sx)),
+                'top': int(round(r.get('top', 0) * sy)),
+                'width': int(round(r.get('width', 0) * sx)),
+                'height': int(round(r.get('height', 0) * sy)),
+            }
+            print(f"[ReaderThread] Przeskalowany rect: {scaled_rect}")
+            scaled.append(scaled_rect)
+        return scaled
                  
     def _images_are_similar(self, img1: Image.Image, img2: Image.Image, similarity: float) -> bool:
         if similarity == 0: return False
@@ -292,30 +269,22 @@ class ReaderThread(threading.Thread):
         # print(f"DEBUG: Processing {len(areas_config)} areas from config.")
         for area in areas_config:
             r = area.get('rect')
-            if not r: 
-                # print(f"DEBUG: Area {area.get('id')} has no rect.")
+            if not r:
                 continue
-            
-            # Scale rect
-            preset_res = preset.get('resolution')
-            # print(f"DEBUG: Scaling Area {area.get('id')} Input: {r} | PresetRes: {preset_res}")
-            
-            # Additional bounds check log
-            rx, ry, rw, rh = r.get('left'), r.get('top'), r.get('width'), r.get('height')
-            if rx+rw > 2560 or ry+rh > 1600:
-                pass
-                # print(f"DEBUG: WARNING - Area {area.get('id')} coords EXCEED 2560x1600! MaxX={rx+rw}, MaxY={ry+rh}")
-
-            scaled_list = self._scale_monitor_areas([r], preset_res)
-            if scaled_list:
-                area['rect'] = scaled_list[0]
-                sr = area['rect']
-                srx, sry, srw, srh = sr.get('left'), sr.get('top'), sr.get('width'), sr.get('height')
-                if srx+srw > 2560 or sry+srh > 1600:
-                    pass
-                valid_areas.append(area)
+            # Przeskaluj TYLKO jeśli rozmiar ekranu (z głównego okna) jest inny niż ten, na którym był wybierany obszar
+            # Zakładamy, że wartości w preset są w pikselach ekranu, na którym były wybierane
+            # Jeśli użytkownik zmieni rozdzielczość, przeliczamy proporcjonalnie
+            # Pobierz aktualną rozdzielczość ekranu
+            if hasattr(self, '_physical_res') and self._physical_res:
+                dest_w, dest_h = self._physical_res
+            elif self.target_resolution:
+                dest_w, dest_h = self.target_resolution
             else:
-                pass
+                dest_w, dest_h = None, None
+            # Pobierz rozdzielczość, na której był wybierany obszar (z preset, jeśli jest, lub załóż brak skalowania)
+            # UWAGA: NIE MA resolution w presetach, więc nie przeliczaj, tylko użyj jak jest!
+            area['rect'] = r
+            valid_areas.append(area)
 
         if not valid_areas:
             if self.log_queue:

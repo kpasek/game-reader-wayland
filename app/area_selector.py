@@ -10,6 +10,7 @@ except ImportError:
     ImageTk = None
 
 
+
 class AreaSelector(tk.Toplevel):
     """
     Pełnoekranowe okno pozwalające zaznaczyć prostokątny obszar myszką.
@@ -23,21 +24,25 @@ class AreaSelector(tk.Toplevel):
         self.start_y = None
         self.rect_id = None
         self.original_screenshot = screenshot # Original physical image
+        # NIE przeliczamy do 4K – AreaSelector operuje na pikselach ekranu
 
         # Ustawienia pełnego ekranu i widoczności
         self.attributes('-fullscreen', True)
         self.attributes('-topmost', True)
         self.attributes('-alpha', 1.0)
         
+
         # Calculate scaling
         # We need to know the window size. Usually screen width/height.
         screen_w = self.winfo_screenwidth()
         screen_h = self.winfo_screenheight()
         img_w, img_h = screenshot.size
-        
+
         self.scale_x = img_w / screen_w if screen_w else 1.0
         self.scale_y = img_h / screen_h if screen_h else 1.0
-        
+
+        # NIE zapisujemy rozdzielczości do presetów!
+
         # Prepare display image (resized if needed)
         self.display_img = screenshot
         if abs(self.scale_x - 1.0) > 0.01 or abs(self.scale_y - 1.0) > 0.01:
@@ -53,11 +58,11 @@ class AreaSelector(tk.Toplevel):
         self.cv.create_image(0, 0, image=self.bg_img, anchor=tk.NW)
 
         if existing_regions:
+            print(f"[AreaSelector] Otrzymane istniejące regiony: {existing_regions}")
             for i, area_data in enumerate(existing_regions):
                 # area_data can be dict with rect, id, colors
                 # Handle nested rect or direct rect
                 r = area_data.get('rect') if isinstance(area_data, dict) else area_data
-                
                 # Normalize r to (x, y, w, h)
                 x, y, w, h = 0, 0, 0, 0
                 if isinstance(r, dict):
@@ -69,25 +74,21 @@ class AreaSelector(tk.Toplevel):
                     x, y, w, h = r[0], r[1], r[2], r[3]
                 else:
                     continue
-                
-                if w <= 0 or h <= 0: continue
-                
+                if w <= 0 or h <= 0:
+                    print(f"[AreaSelector] Pomijam region #{i} (zerowy rozmiar): x={x}, y={y}, w={w}, h={h}")
+                    continue
                 # Scale from Physical to Logical (Window) for display
-                x = int(x / self.scale_x)
-                y = int(y / self.scale_y)
-                w = int(w / self.scale_x)
-                h = int(h / self.scale_y)
-                
-                # Determine color (default blue if missing or invalid)
+                x_log = int(x / self.scale_x)
+                y_log = int(y / self.scale_y)
+                w_log = int(w / self.scale_x)
+                h_log = int(h / self.scale_y)
                 color = 'blue'
                 colors = area_data.get('colors', [])
                 if isinstance(area_data, dict) and colors and isinstance(colors, list) and len(colors) > 0:
-                     color = colors[0]
-                
-                # Draw rect
+                    color = colors[0]
                 try:
-                    self.cv.create_rectangle(x, y, x + w, y + h, outline=color, width=2, dash=(4, 4))
-                    
+                    rect_id = self.cv.create_rectangle(x_log, y_log, x_log + w_log, y_log + h_log, outline=color, width=2, dash=(4, 4))
+                    print(f"[AreaSelector] Rysuję region #{i}: x={x}, y={y}, w={w}, h={h} (logiczne: x={x_log}, y={y_log}, w={w_log}, h={h_log}), kolor={color}, rect_id={rect_id}")
                     # Draw label
                     aid = area_data.get('id', i+1) if isinstance(area_data, dict) else i+1
                     typ = area_data.get('type', '') if isinstance(area_data, dict) else ""
@@ -146,13 +147,13 @@ class AreaSelector(tk.Toplevel):
 
         # Minimalny rozmiar, żeby uniknąć przypadkowych kliknięć
         if width > 10 and height > 10:
-            # Scale back to Physical for storage
-            real_left = int(left * self.scale_x)
-            real_top = int(top * self.scale_y)
-            real_width = int(width * self.scale_x)
-            real_height = int(height * self.scale_y)
-            
-            self.geometry = {'left': real_left, 'top': real_top, 'width': real_width, 'height': real_height}
+            self.geometry = {
+                'left': int(left),
+                'top': int(top),
+                'width': int(width),
+                'height': int(height)
+            }
+            print(f"[AreaSelector] Zaznaczenie (ekran): left={left}, top={top}, width={width}, height={height}")
         self.destroy()
 
 
