@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 from PIL import Image
 from app.optimizer import SettingsOptimizer
+from app.matcher import MATCH_MODE_PARTIAL
 
 class TestOptimizerExtra(unittest.TestCase):
     def setUp(self):
@@ -36,7 +37,7 @@ class TestOptimizerExtra(unittest.TestCase):
         """Sprawdza czy tryb dopasowania (match_mode) jest przekazywany dalej."""
         mock_evaluate.return_value = (0, (0,0,10,10))
         rough_area = (10, 10, 80, 40)
-        mode = "Partial"
+        mode = MATCH_MODE_PARTIAL
         
         self.optimizer.optimize(self.image, rough_area, self.dummy_db, match_mode=mode)
         

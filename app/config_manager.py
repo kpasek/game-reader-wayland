@@ -18,6 +18,7 @@ DEFAULT_PRESET_CONTENT = {
     "text_file_path": "subtitles.txt",
     "monitor": [],
     "resolution": "1920x1080",
+    # Domyślny tryb dopasowania napisów (musi być zgodny z MATCH_MODE_FULL z matcher.py)
     "subtitle_mode": "Full Lines",
     "text_color_mode": "Light",
     "ocr_scale_factor": 0.5,

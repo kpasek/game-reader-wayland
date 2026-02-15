@@ -11,7 +11,7 @@ from PIL import Image, ImageChops, ImageStat, ImageOps, ImageFilter
 
 from app.capture import capture_region
 from app.ocr import preprocess_image, recognize_text, get_text_bounds
-from app.matcher import find_best_match, precompute_subtitles
+from app.matcher import find_best_match, precompute_subtitles, MATCH_MODE_FULL, MATCH_MODE_STARTS, MATCH_MODE_PARTIAL
 from app.config_manager import ConfigManager
 
 
@@ -115,7 +115,8 @@ class ReaderThread(threading.Thread):
         self.empty_threshold = 0.15
         self.text_alignment = "None"
         self.save_logs = False
-        self.subtitle_mode = 'Full Lines'
+        from app.matcher import MATCH_MODE_FULL
+        self.subtitle_mode = MATCH_MODE_FULL
 
         self.matcher_config = {}
         self.audio_speed_inc = 1.2
@@ -249,7 +250,7 @@ class ReaderThread(threading.Thread):
         self.ocr_scale = preset.get('ocr_scale_factor', 1.0)
         self.text_alignment = preset.get('text_alignment', "None")
         self.save_logs = preset.get('save_logs', False)
-        self.subtitle_mode = preset.get('subtitle_mode', 'Full Lines')
+        self.subtitle_mode = preset.get('subtitle_mode', MATCH_MODE_FULL)
         interval = preset.get('capture_interval', 0.5)
         similarity = preset.get('similarity', 5.0)
 
@@ -435,7 +436,8 @@ class ReaderThread(threading.Thread):
                 merged_preset.update(area_settings)
 
                 area_ctx = AreaConfigContext(merged_preset)
-                current_subtitle_mode = merged_preset.get('subtitle_mode', 'Full Lines')
+                from app.matcher import MATCH_MODE_FULL
+                current_subtitle_mode = merged_preset.get('subtitle_mode', MATCH_MODE_FULL)
 
                 t_pre_start = time.perf_counter()
 

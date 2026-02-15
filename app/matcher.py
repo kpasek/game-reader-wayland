@@ -1,3 +1,8 @@
+# Stałe trybów dopasowania
+MATCH_MODE_FULL = "Full Lines"
+MATCH_MODE_STARTS = "Starts With"
+MATCH_MODE_PARTIAL = "Partial"
+
 import re
 from typing import List, Optional, Tuple, Dict, Any
 from app.text_processing import clean_text, smart_remove_name
@@ -85,7 +90,8 @@ def find_best_match(ocr_text: str,
 
     partial_min_len = matcher_config.get('partial_mode_min_len', 25)
 
-    effective_mode = "Full Lines" if ocr_len < partial_min_len else mode
+    from app.matcher import MATCH_MODE_FULL
+    effective_mode = MATCH_MODE_FULL if ocr_len < partial_min_len else mode
 
     # 1. Szukanie lokalne
     match = _scan_list(ocr_clean, ocr_len, candidates_in_window, effective_mode, matcher_config)
@@ -116,17 +122,18 @@ Optional[Tuple[int, int]]:
     score_short = config.get('match_score_short', 90)
     score_long = config.get('match_score_long', 75)
 
+    from app.matcher import MATCH_MODE_FULL, MATCH_MODE_STARTS, MATCH_MODE_PARTIAL
     for _, sub_clean, original_idx, sub_len in candidates:
         len_diff = abs(ocr_len - sub_len)
 
-        if mode == "Starts With":
+        if mode == MATCH_MODE_STARTS:
             if sub_len < ocr_len - 5:
                 continue
 
             sub_truncated = sub_clean[:ocr_len + 5]
             score = fuzz.ratio(sub_truncated, ocr_text)
 
-        elif mode == "Partial":
+        elif mode == MATCH_MODE_PARTIAL:
             if sub_len < ocr_len - 2:  # Minimalna walidacja długości
                 continue
 

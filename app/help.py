@@ -18,6 +18,7 @@ class HelpWindow(tk.Toplevel):
         txt.tag_config('normal', spacing3=2)
         txt.tag_config('italic', font=(base_font_family, 10, 'italic'))
 
+        from app.matcher import MATCH_MODE_FULL, MATCH_MODE_STARTS, MATCH_MODE_PARTIAL
         content = [
             ("JAK TO DZIAŁA?\n", 'h1'),
             ("Aplikacja wykonuje cykliczne zrzuty zdefiniowanego obszaru ekranu, przetwarza je przez OCR (rozpoznawanie tekstu) i porównuje z załadowanym plikiem napisów. Gdy znajdzie dopasowanie, odtwarza przypisany plik audio.\n",
@@ -72,12 +73,12 @@ class HelpWindow(tk.Toplevel):
             ("USTAWIENIA DIALOGÓW\n", 'h1'),
 
             ("1. Tryb dopasowania\n", 'h2'),
-            ("• Full Lines: ", 'bold'),
+            (f"• {MATCH_MODE_FULL}: ", 'bold'),
             ("Wymaga, aby OCR rozpoznał całą linię.\n", 'normal'),
-            ("• Start of line: ", 'bold'),
+            (f"• {MATCH_MODE_STARTS}: ", 'bold'),
             ("Wystarczy, że rozpoznany tekst zaczyna się w linii napisów. Przydatne, gdy gra pokazuje napisy w częściach.\n",
              'normal'),
-            ("• Partial Lines: ", 'bold'),
+            (f"• {MATCH_MODE_PARTIAL}: ", 'bold'),
             ("Wystarczy, że rozpoznany tekst zaczyna się lub zawiera w linii napisów. Przydatne, gdy gra pokazuje napisy w częściach.\n",
              'normal'),
 
@@ -89,8 +90,8 @@ class HelpWindow(tk.Toplevel):
             ("3. Maksymalna różnica długości\n", 'h2'),
             ("Maksymalna dopuszczalna różnica długości między tekstem OCR a dopasowywaną linią. Wartość 0.25 oznacza tolerancję 25%.\n", 'normal'),
 
-            ("4. Min długość dla Partial Mode i Start of Line\n", 'h2'),
-            ("Jeśli tekst jest dłuższy niż X znaków (domyślnie 25), system jednorazowo wyłączy tryb 'Partial Lines' lub 'Start of Line'.\n", 'normal'),
+            ("4. Min długość dla Partial Mode i Starts With\n", 'h2'),
+            ("Jeśli tekst jest dłuższy niż X znaków (domyślnie 25), system jednorazowo wyłączy tryb 'Partial' lub 'Starts With'.\n", 'normal'),
 
             ("4. Ignoruj krótsze niż\n", 'h2'),
             ("Ignoruje odczytany text ORC krótszy niż X znaków. Pomaga w eliminowaniu szumu OCR.\n", 'normal'),

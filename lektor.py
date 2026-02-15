@@ -78,7 +78,6 @@ class LektorApp:
         self.var_preset_full_path = tk.StringVar()
 
         # Opcje Lektora
-        self.var_subtitle_mode = tk.StringVar(value="Full Lines")
         self.var_text_color = tk.StringVar(value="Light")
         self.var_ocr_scale = tk.DoubleVar(value=1.0)
         self.var_brightness_threshold = tk.IntVar(value=200)
@@ -431,7 +430,6 @@ class LektorApp:
         self.var_audio_ext.set(current_ext)
 
         self.var_auto_names.set(data.get("auto_remove_names", True))
-        self.var_subtitle_mode.set(data.get("subtitle_mode", "Full Lines"))
 
         self.var_ocr_scale.set(data.get("ocr_scale_factor", 1.0))
         self.var_capture_interval.set(data.get("capture_interval", 0.5))
@@ -990,7 +988,8 @@ class LektorApp:
         self._show_optimization_setup(data, subtitle_lines, path)
 
     def _show_optimization_setup(self, preset_data, subtitle_lines, preset_path):
-        def on_wizard_finish(frames_data, mode="Full Lines", initial_color=None):
+        from app.matcher import MATCH_MODE_FULL
+        def on_wizard_finish(frames_data, mode=MATCH_MODE_FULL, initial_color=None):
             # frames_data: list of {'image': PIL, 'rect': (x,y,w,h) or None}
             valid_images = [f['image'] for f in frames_data]
             valid_rects = [f['rect'] for f in frames_data if f['rect']]
@@ -1012,7 +1011,10 @@ class LektorApp:
         # Open shared Wizard
         OptimizationCaptureWindow(self.root, on_wizard_finish)
 
-    def _start_optimization_process(self, images, rough_area, subtitle_lines, path, data, mode="Full Lines", initial_color=None):
+    def _start_optimization_process(self, images, rough_area, subtitle_lines, path, data, mode=None, initial_color=None):
+        from app.matcher import MATCH_MODE_FULL
+        if mode is None:
+            mode = MATCH_MODE_FULL
             # 4. Uruchomienie algorytmu w wątku (z UI oczekiwania)
             wait_win = tk.Toplevel(self.root)
             wait_win.title("Przetwarzanie...")
@@ -1280,7 +1282,8 @@ class LektorApp:
                  crop = img.crop((cx, cy, cx+cw, cy+ch))
                  
                  optimizer = SettingsOptimizer()
-                 cur_score, _ = optimizer._evaluate_settings(crop, settings, pre_db, settings.get('subtitle_mode', 'Full Lines'))
+                 from app.matcher import MATCH_MODE_FULL
+                 cur_score, _ = optimizer._evaluate_settings(crop, settings, pre_db, settings.get('subtitle_mode', MATCH_MODE_FULL))  # Ustawienie per obszar
                  
                  p_win.destroy()
                  
@@ -1294,7 +1297,8 @@ class LektorApp:
                            tk.Label(w2, text="Szukam lepszych ustawień...").pack(padx=20, pady=20)
                            w2.update()
                            
-                           res = optimizer.optimize(img, (ox, oy, ow, oh), subtitle_lines, settings.get('subtitle_mode', 'Full Lines'))
+                           from app.matcher import MATCH_MODE_FULL
+                           res = optimizer.optimize(img, (ox, oy, ow, oh), subtitle_lines, settings.get('subtitle_mode', MATCH_MODE_FULL))  # Ustawienie per obszar
                            w2.destroy()
                            
                            if res and res.get('score', 0) > cur_score:

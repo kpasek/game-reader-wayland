@@ -11,7 +11,7 @@ except ImportError:
 from app.area_selector import AreaSelector, ColorSelector
 from app.capture import capture_fullscreen
 from app.optimizer import SettingsOptimizer
-from app.matcher import precompute_subtitles
+from app.matcher import precompute_subtitles, MATCH_MODE_FULL, MATCH_MODE_STARTS, MATCH_MODE_PARTIAL
 from app.ocr import find_text_bounds
 from app.geometry_utils import calculate_merged_area
 
@@ -168,10 +168,11 @@ class AreaManagerWindow(tk.Toplevel):
         
         # Mode
         self.var_mode = tk.StringVar()
+        from app.matcher import MATCH_MODE_FULL, MATCH_MODE_STARTS, MATCH_MODE_PARTIAL
         self.mode_mapping = {
-            "Full Lines": "Pełne linie", 
-            "Starts With": "Zaczyna się na",
-            "Partial": "Częściowe"
+            MATCH_MODE_FULL: "Pełne linie", 
+            MATCH_MODE_STARTS: "Zaczyna się na",
+            MATCH_MODE_PARTIAL: "Częściowe"
         }
         self.rev_mode_mapping = {v: k for k, v in self.mode_mapping.items()}
         cb_mode = ttk.Combobox(pl, textvariable=self.var_mode, values=list(self.mode_mapping.values()), state="readonly")
@@ -249,7 +250,8 @@ class AreaManagerWindow(tk.Toplevel):
         # Tab OCR
         self.var_thickening.set(settings.get('text_thickening', 0))
         
-        mode_val = settings.get('subtitle_mode', 'Full Lines')
+        from app.matcher import MATCH_MODE_FULL
+        mode_val = settings.get('subtitle_mode', MATCH_MODE_FULL)
         self.var_mode.set(self.mode_mapping.get(mode_val, mode_val))
         
         # Removed var_cmode logic
@@ -300,6 +302,9 @@ class AreaManagerWindow(tk.Toplevel):
         s['contrast'] = self.var_contrast.get()
         s['use_colors'] = self.var_use_colors.get()
         s['color_tolerance'] = self.var_tolerance.get()
+        # Zapisz tryb dopasowania do settings
+        if self.var_mode.get() in self.rev_mode_mapping:
+            s['subtitle_mode'] = self.rev_mode_mapping[self.var_mode.get()]
         
         # Refresh list name if type changed
         self.lb_areas.delete(self.current_selection_idx)
@@ -607,7 +612,8 @@ class AreaManagerWindow(tk.Toplevel):
              settings = area.get('settings', {})
              pre_db = precompute_subtitles(self.subtitle_lines)
              optimizer = SettingsOptimizer()
-             mode = settings.get('subtitle_mode', 'Full Lines')
+            from app.matcher import MATCH_MODE_FULL
+            mode = settings.get('subtitle_mode', MATCH_MODE_FULL)
              
              score_original, _ = optimizer._evaluate_settings(normal_crop, settings, pre_db, mode)
              
@@ -644,7 +650,8 @@ class AreaManagerWindow(tk.Toplevel):
              else:
                   msg += "\n\nSłaby wynik. Czy chcesz uruchomić optymalizator?"
                   if messagebox.askyesno("Wynik Testu", msg):
-                       def run_opt_callback(frames_data, mode="Full Lines", initial_color=None):
+                       from app.matcher import MATCH_MODE_FULL
+                       def run_opt_callback(frames_data, mode=MATCH_MODE_FULL, initial_color=None):
                             # Collect rects
                             # Base rect is either expanded or original
                             base = (ex, ey, ew, eh) if expanded_better else (ox, oy, ow, oh)
@@ -776,7 +783,10 @@ class AreaManagerWindow(tk.Toplevel):
         OptimizationCaptureWindow(self, self._run_optimizer, area_manager=self)
 
 
-    def _run_optimizer(self, frames, mode="Full Lines", initial_color=None):
+    def _run_optimizer(self, frames, mode=None, initial_color=None):
+        from app.matcher import MATCH_MODE_FULL
+        if mode is None:
+            mode = MATCH_MODE_FULL
         if not frames:
             return
 
@@ -986,11 +996,13 @@ class OptimizationCaptureWindow(tk.Toplevel):
         # Match Mode
         ttk.Label(opt_frame, text="Sposób dopasowania:").pack(anchor=tk.W)
         self.var_match_mode = tk.StringVar(value="Pełne zdania")
+        # Mapowanie nazw wyświetlanych na stałe
         self.mode_map = {
-            "Pełne zdania": "Full Lines", 
-            "Zaczyna się od": "Starts With",
-            "Częściowe": "Partial"
+            "Pełne zdania": MATCH_MODE_FULL, 
+            "Zaczyna się od": MATCH_MODE_STARTS,
+            "Częściowe": MATCH_MODE_PARTIAL
         }
+        self.mode_map_reverse = {v: k for k, v in self.mode_map.items()}
         modes = list(self.mode_map.keys())
         cb_mode = ttk.Combobox(opt_frame, textvariable=self.var_match_mode, values=modes, state="readonly")
         cb_mode.pack(fill=tk.X, pady=(0, 5))
@@ -1192,7 +1204,7 @@ class OptimizationCaptureWindow(tk.Toplevel):
             messagebox.showerror("Błąd", "Dodaj przynajmniej jeden zrzut ekranu.")
             return
         disp_mode = self.var_match_mode.get()
-        mode = self.mode_map.get(disp_mode, "Full Lines")
+        mode = self.mode_map.get(disp_mode, MATCH_MODE_FULL)
         color = self.var_color.get() if self.var_color.get() else None
 
         # Przechwyć callback, aby przechwycić rejected_screens

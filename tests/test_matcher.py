@@ -1,5 +1,5 @@
 import pytest
-from app.matcher import precompute_subtitles, find_best_match, SubtitleEntry
+from app.matcher import precompute_subtitles, find_best_match, SubtitleEntry, MATCH_MODE_FULL, MATCH_MODE_STARTS, MATCH_MODE_PARTIAL
 
 @pytest.fixture
 def sample_subtitles():
@@ -23,7 +23,7 @@ def test_precompute_subtitles(sample_subtitles):
 
 def test_find_best_match_exact(precomputed_data):
     ocr_text = "Witaj w moim świecie"
-    match = find_best_match(ocr_text, precomputed_data, "Full Lines")
+    match = find_best_match(ocr_text, precomputed_data, MATCH_MODE_FULL)
     assert match is not None
     idx, score = match
     assert idx == 0
@@ -32,7 +32,7 @@ def test_find_best_match_exact(precomputed_data):
 def test_find_best_match_fuzzy(precomputed_data):
     # Typos: "swiecie" instead of "świecie", "Witaj" -> "Wita"
     ocr_text = "Wita w moim swiecie" 
-    match = find_best_match(ocr_text, precomputed_data, "Full Lines", matcher_config={'match_score_long': 60, 'match_score_short': 60})
+    match = find_best_match(ocr_text, precomputed_data, MATCH_MODE_FULL, matcher_config={'match_score_long': 60, 'match_score_short': 60})
     assert match is not None
     idx, score = match
     assert idx == 0
@@ -45,21 +45,21 @@ def test_find_best_match_partial_lines(precomputed_data):
     matcher_config = {
         'partial_mode_min_len': 10
     }
-    match = find_best_match(ocr_text, precomputed_data, "Partial", matcher_config=matcher_config)
+    match = find_best_match(ocr_text, precomputed_data, MATCH_MODE_PARTIAL, matcher_config=matcher_config)
     assert match is not None
     idx, score = match
     assert idx == 3 
 
 def test_no_match(precomputed_data):
     ocr_text = "Kompletnie inny tekst z kosmosu"
-    match = find_best_match(ocr_text, precomputed_data, "Full Lines")
+    match = find_best_match(ocr_text, precomputed_data, MATCH_MODE_FULL)
     # Should probably match nothing or have very low score which filters it out usually inside wrapper (here it returns tuple if score > threshold inside function logic)
     # The function internal logic has thresholds.
     assert match is None
 
 def test_find_best_match_with_name_removal(precomputed_data):
     ocr_text = "Geralt: To jest testowy napis."
-    match = find_best_match(ocr_text, precomputed_data, "Full Lines")
+    match = find_best_match(ocr_text, precomputed_data, MATCH_MODE_FULL)
     assert match is not None
     idx, score = match
     assert idx == 1

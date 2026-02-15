@@ -30,7 +30,6 @@ class MockApp:
         self.var_show_debug = tk.BooleanVar(value=False)
         self.var_text_alignment = tk.StringVar(value="None")
         self.var_text_color = tk.StringVar(value="Light")
-        self.var_subtitle_mode = tk.StringVar(value="Full Lines")
         self.var_match_score_short = tk.IntVar(value=90)
         self.var_match_score_long = tk.IntVar(value=75)
         self.var_match_len_diff = tk.DoubleVar(value=0.25)

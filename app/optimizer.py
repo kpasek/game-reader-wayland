@@ -5,7 +5,7 @@ from collections import Counter
 from typing import Tuple, List, Dict, Any, Optional
 
 from app.ocr import preprocess_image, recognize_text
-from app.matcher import find_best_match, precompute_subtitles
+from app.matcher import find_best_match, precompute_subtitles, MATCH_MODE_FULL, MATCH_MODE_STARTS, MATCH_MODE_PARTIAL
 from app.config_manager import ConfigManager
 
 class OptimizerConfigManager(ConfigManager):
@@ -70,7 +70,7 @@ class SettingsOptimizer:
                  images: Any, 
                  rough_area: Tuple[int, int, int, int], 
                  subtitle_db: List[str],
-                 match_mode: str = "Full Lines",
+                 match_mode: str = MATCH_MODE_FULL,
                  initial_color: str = None) -> Dict[str, Any]:
         """
         Znajduje optymalne ustawienia OCR i matchingu dla zadanego wycinka ekranu (rough_area)
@@ -302,7 +302,7 @@ class SettingsOptimizer:
                            crop: Image.Image, 
                            settings: Dict[str, Any], 
                            precomputed_db: Any,
-                           match_mode: str = "Full Lines") -> Tuple[float, Optional[Tuple[int, int, int, int]]]:
+                           match_mode: str = MATCH_MODE_FULL) -> Tuple[float, Optional[Tuple[int, int, int, int]]]:
         """
         Pomocnicza funkcja wykonująca jeden krok ewaluacji: Preprocess -> OCR -> Match.
         Zwraca (score, bbox) lub (0, None) w przypadku błędu/braku wyniku.
