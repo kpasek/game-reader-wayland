@@ -210,54 +210,64 @@ class SettingsOptimizer:
         # --- PODSUMOWANIE 5 NAJLEPSZYCH USTAWIEŃ po każdym zrzucie ---
         def print_summary(ranked, img_idx, total_imgs):
             print(f"\nPODSUMOWANIE 5 NAJLEPSZYCH USTAWIEŃ po zrzucie {img_idx+1}/{total_imgs}:")
-            for idx, (score, settings, bbox) in enumerate(ranked[:5], 1):
+            for idx, (score_list, settings, bbox) in enumerate(ranked[:5], 1):
                 color = settings.get('subtitle_colors', [''])[0] if settings.get('subtitle_colors') else '-'
                 match_mode_str = match_mode
                 tolerance = settings.get('color_tolerance', '-')
                 contrast = settings.get('contrast', '-')
                 thick = settings.get('text_thickening', '-')
-                final_score = score / (img_idx+1)
-                print(f"{idx}. Final Score: {final_score:.1f}% | Score: {score - final_score*img_idx:.1f}% | Kolor: {color} | Tryb: {match_mode_str} | Tolerancja: {tolerance} | Kontrast: {contrast} | Pogrubienie: {thick}")
+                final_score = sum(score_list) / len(score_list) if score_list else 0
+                score_this_img = score_list[-1] if score_list else 0
+                print(f"{idx}. Final Score: {final_score:.1f}% | Score: {score_this_img:.1f}% | Kolor: {color} | Tryb: {match_mode_str} | Tolerancja: {tolerance} | Kontrast: {contrast} | Pogrubienie: {thick}")
 
+        # Pierwszy zrzut: score_list = [score]
+        ranked_candidates = [([score], settings, bbox) for score, settings, bbox in ranked_candidates]
         print_summary(ranked_candidates, 0, len(input_images))
 
         # Jeśli mamy więcej obrazów, filtrujemy
         if len(input_images) > 1 and survivors:
-            finalists = survivors
-            
+            finalists = ranked_candidates
             # Sprawdzamy kolejne obrazy
             for idx, img in enumerate(input_images[1:], start=1):
                 crop_n = create_crop(img)
                 if not crop_n: continue
-                
                 next_round = []
-                for prev_score, settings, _ in finalists:
-                    # Sprawdzamy czy nadal trzyma poziom
+                best_ocr = None
+                best_ocr_score = -1
+                best_ocr_settings = None
+                best_ocr_img = None
+                for score_list, settings, _ in finalists:
                     score, bbox = self._evaluate_settings(crop_n, settings, precomputed_db, match_mode)
-                    
-                    # Sumujemy score
-                    # Próg przeżycia bardzo niski, aby nie odrzucać zbyt szybko (niektóre klatki mogą być trudne)
-                    if score > 5: 
-                         total = prev_score + score
-                         next_round.append((total, settings, bbox))
-                
+                    # Zapamiętaj najlepszy OCR (niezależnie od progu)
+                    if score > best_ocr_score:
+                        best_ocr_score = score
+                        best_ocr_settings = settings
+                        best_ocr_img = crop_n
+                        try:
+                            ocr_text = recognize_text(crop_n, OptimizerConfigManager(settings))
+                        except Exception:
+                            ocr_text = "<OCR error>"
+                        best_ocr = ocr_text
+                    if score > 50:
+                        next_round.append((score_list + [score], settings, bbox))
                 if not next_round:
-                    break
-                
-                # Zostawiamy tylko najlepszych, żeby nie puchło, ale limit większy (20)
+                    print(f"\nUWAGA: Zrzut {idx+1} został odrzucony (brak ustawień z wynikiem >50%).")
+                    if best_ocr is not None:
+                        print(f"Najlepszy odczytany tekst (score={best_ocr_score:.1f}%): {best_ocr}")
+                        try:
+                            best_ocr_img.save(f"odrzucony_zrzut_{idx+1}.png")
+                            print(f"Podgląd zapisany jako odrzucony_zrzut_{idx+1}.png")
+                        except Exception as e:
+                            print(f"Błąd zapisu podglądu: {e}")
+                    continue
                 next_round.sort(key=sort_key, reverse=True)
                 finalists = next_round[:20]
-                print_summary(next_round, idx, len(input_images))
-            
+                print_summary(finalists, idx, len(input_images))
             if finalists:
-                # Sortujemy po sumarycznym score malejąco
                 finalists.sort(key=sort_key, reverse=True)
-                best_total_score, best_settings, best_bbox = finalists[0]
-                # Średni score na obraz
-                avg_score = best_total_score / len(input_images)
-                
+                best_score_list, best_settings, best_bbox = finalists[0]
+                avg_score = sum(best_score_list) / len(best_score_list)
                 opt_rect = rough_area
-
                 return {
                     "score": avg_score, 
                     "settings": best_settings, 
