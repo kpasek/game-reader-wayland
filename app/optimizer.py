@@ -197,8 +197,29 @@ class SettingsOptimizer:
                 ranked_candidates.append((score, settings, bbox))
 
         # Sortujemy i bierzemy znacznie szerszą grupę kandydatów (TOP 50)
-        ranked_candidates.sort(key=lambda x: x[0], reverse=True)
+        # Preferuj: wyższy score, niższa tolerancja, brak pogrubienia
+        def sort_key(item):
+            score, settings, _ = item
+            tolerance = settings.get('color_tolerance', 9999)
+            thick = settings.get('text_thickening', 1)
+            return (score, -tolerance, -int(thick == 0))
+
+        ranked_candidates.sort(key=sort_key, reverse=True)
         survivors = ranked_candidates[:50]
+
+        # --- PODSUMOWANIE 5 NAJLEPSZYCH USTAWIEŃ po każdym zrzucie ---
+        def print_summary(ranked, img_idx, total_imgs):
+            print(f"\nPODSUMOWANIE 5 NAJLEPSZYCH USTAWIEŃ po zrzucie {img_idx+1}/{total_imgs}:")
+            for idx, (score, settings, bbox) in enumerate(ranked[:5], 1):
+                color = settings.get('subtitle_colors', [''])[0] if settings.get('subtitle_colors') else '-'
+                match_mode_str = match_mode
+                tolerance = settings.get('color_tolerance', '-')
+                contrast = settings.get('contrast', '-')
+                thick = settings.get('text_thickening', '-')
+                final_score = score / (img_idx+1)
+                print(f"{idx}. Final Score: {final_score:.1f}% | Score: {score - final_score*img_idx:.1f}% | Kolor: {color} | Tryb: {match_mode_str} | Tolerancja: {tolerance} | Kontrast: {contrast} | Pogrubienie: {thick}")
+
+        print_summary(ranked_candidates, 0, len(input_images))
 
         # Jeśli mamy więcej obrazów, filtrujemy
         if len(input_images) > 1 and survivors:
@@ -222,14 +243,15 @@ class SettingsOptimizer:
                 
                 if not next_round:
                     break
-                    
+                
                 # Zostawiamy tylko najlepszych, żeby nie puchło, ale limit większy (20)
-                next_round.sort(key=lambda x: x[0], reverse=True)
-                finalists = next_round[:20] 
+                next_round.sort(key=sort_key, reverse=True)
+                finalists = next_round[:20]
+                print_summary(next_round, idx, len(input_images))
             
             if finalists:
                 # Sortujemy po sumarycznym score malejąco
-                finalists.sort(key=lambda x: x[0], reverse=True)
+                finalists.sort(key=sort_key, reverse=True)
                 best_total_score, best_settings, best_bbox = finalists[0]
                 # Średni score na obraz
                 avg_score = best_total_score / len(input_images)

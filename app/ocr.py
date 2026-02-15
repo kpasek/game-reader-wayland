@@ -263,7 +263,7 @@ def recognize_text(image: Image.Image, config_manager: ConfigManager) -> str:
         if auto_remove_names:
             text = smart_remove_name(text)
 
-        print(f"OCR text: {text}")
+        # print(f"OCR text: {text}")  # Usunięto logowanie OCR text dla czytelności logów optymalizacji
         return text
     except Exception as e:
         print(f"OCR Error: {e}", file=sys.stderr)
