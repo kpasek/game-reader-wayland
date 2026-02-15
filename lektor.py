@@ -1007,45 +1007,53 @@ class LektorApp:
 
     def _start_optimization_process(self, images, rough_area, subtitle_lines, path, data, mode=None, initial_color=None):
         from app.matcher import MATCH_MODE_FULL
+        # Ensure mode default
         if mode is None:
             mode = MATCH_MODE_FULL
-            # 4. Uruchomienie algorytmu w wątku (z UI oczekiwania)
-            wait_win = tk.Toplevel(self.root)
-            wait_win.title("Przetwarzanie...")
-            wait_win.geometry("500x150")
-            wait_win.resizable(False, False)
-            
-            lbl = ttk.Label(wait_win, text="Trwa analiza obrazu i szukanie optymalnych ustawień.\nMoże to potrwać dłuższą chwilę...", justify="center")
-            lbl.pack(pady=20)
-            
-            pbar = ttk.Progressbar(wait_win, mode='indeterminate')
-            pbar.pack(fill=tk.X, padx=30, pady=10)
-            pbar.start(15)
 
-            # Thread context
-            thread_context = {"result": None, "error": None}
+        # 4. Uruchomienie algorytmu w wątku (z UI oczekiwania)
+        wait_win = tk.Toplevel(self.root)
+        wait_win.title("Przetwarzanie...")
+        wait_win.geometry("500x150")
+        wait_win.resizable(False, False)
+        
+        lbl = ttk.Label(wait_win, text="Trwa analiza obrazu i szukanie optymalnych ustawień.\nMoże to potrwać dłuższą chwilę...", justify="center")
+        lbl.pack(pady=20)
+        
+        pbar = ttk.Progressbar(wait_win, mode='indeterminate')
+        pbar.pack(fill=tk.X, padx=30, pady=10)
+        pbar.start(15)
 
-            def worker():
+        # Thread context
+        thread_context = {"result": None, "error": None}
+
+        def worker():
+            try:
+                optimizer = SettingsOptimizer(self.config_mgr)
+                # optimizer.optimize supports list of images now
+                res = optimizer.optimize(images, rough_area, subtitle_lines, mode, initial_color=initial_color)
+                thread_context["result"] = res
+            except Exception as e:
+                thread_context["error"] = e
+
+        t = threading.Thread(target=worker, daemon=True)
+        t.start()
+        
+        def check_thread():
+            if t.is_alive():
+                self.root.after(100, check_thread)
+            else:
                 try:
-                    optimizer = SettingsOptimizer(self.config_mgr)
-                    # optimizer.optimize supports list of images now
-                    res = optimizer.optimize(images, rough_area, subtitle_lines, mode, initial_color=initial_color)
-                    thread_context["result"] = res
-                except Exception as e:
-                    thread_context["error"] = e
-
-            t = threading.Thread(target=worker, daemon=True)
-            t.start()
-            
-            def check_thread():
-                if t.is_alive():
-                    self.root.after(100, check_thread)
-                else:
                     wait_win.destroy()
+                except Exception:
+                    pass
+                try:
                     self.root.deiconify()
-                    self._on_optimization_finished(thread_context, path, data, subtitle_lines)
+                except Exception:
+                    pass
+                self._on_optimization_finished(thread_context, path, data, subtitle_lines)
 
-            check_thread()
+        check_thread()
 
     def _unused_legacy_detect_method(self):
         # Placeholder to replace original method body cleanly

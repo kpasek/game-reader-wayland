@@ -358,53 +358,109 @@ class AreaManagerWindow(tk.Toplevel):
         self.lb_areas.selection_set(self.current_selection_idx)
 
     def _select_area_on_screen(self):
-        import traceback
-        print(f"[AreaManager][LOG] _select_area_on_screen() called. Stack:")
-        traceback.print_stack(limit=4)
-        self.lb_areas.delete(0, tk.END)
-        for i, area in enumerate(self.areas):
-            typ_raw = area.get('type', 'manual')
-            t = "Stały" if typ_raw == 'continuous' else "Wyzwalany"
-            if typ_raw not in ['continuous', 'manual']: t = typ_raw
-            
-            display = f"#{area.get('id', i+1)}"
-            if area.get('name'):
-                display += f" {area.get('name')}"
-            
-            display += f" [{t}]"
+        from tkinter import filedialog
+        from PIL import Image
 
-            if typ_raw == 'continuous' and area.get('id') != 1:
-                state = "ON" if area.get('enabled', False) else "OFF"
-                display += f" [{state}]"
+        # Custom large import dialog (shows files from user's home)
+        home = os.path.expanduser('~')
+        files = []
+        try:
+            for f in sorted(os.listdir(home)):
+                if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp')):
+                    files.append(os.path.join(home, f))
+        except Exception:
+            files = []
 
-            self.lb_areas.insert(tk.END, display)
-        
-        if self.current_selection_idx >= 0 and self.current_selection_idx < len(self.areas):
-            self.lb_areas.selection_set(self.current_selection_idx)
-            self._load_details(self.current_selection_idx)
-            
-            area = self.areas[self.current_selection_idx]
-            if area.get('id') == 1:
-                 self.btn_remove.config(state=tk.DISABLED)
-            else:
-                 self.btn_remove.config(state=tk.NORMAL)
-        else:
-            self._disable_details()
+        selected_paths = []
 
-    def _disable_details(self):
-        self.ignore_updates = True
-        self.var_type.set("")
-        self.lbl_rect.config(text="Brak zaznaczenia")
-        self.var_hotkey.set("")
-        self.lb_colors.delete(0, tk.END)
-        for tab in [self.tab_general, self.tab_colors]:
-             for child in tab.winfo_children():
-                 try: child.config(state=tk.DISABLED)
-                 except: pass
-        self.ignore_updates = False
-    def _add_area(self):
-        if len(self.areas) >= 5:
-            messagebox.showinfo("Limit", "Osiągnięto limit obszarów (5).")
+        dlg = tk.Toplevel(self)
+        dlg.title("Import zrzutów - wybierz pliki")
+        dlg.geometry("900x600")
+        dlg.transient(self)
+        dlg.grab_set()
+
+        frm = ttk.Frame(dlg, padding=10)
+        frm.pack(fill=tk.BOTH, expand=True)
+
+        lb = tk.Listbox(frm, selectmode=tk.EXTENDED)
+        lb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        for p in files:
+            lb.insert(tk.END, os.path.basename(p))
+
+        scr = ttk.Scrollbar(frm, orient=tk.VERTICAL, command=lb.yview)
+        scr.pack(side=tk.LEFT, fill=tk.Y)
+        lb.config(yscrollcommand=scr.set)
+
+        right = ttk.Frame(frm)
+        right.pack(side=tk.LEFT, fill=tk.Y, padx=8)
+
+        preview_lab = ttk.Label(right, text="Brak podglądu", width=40)
+        preview_lab.pack(pady=4)
+
+        def on_preview(evt=None):
+            sel = lb.curselection()
+            if not sel:
+                preview_lab.config(text="Brak podglądu")
+                return
+            idx = sel[0]
+            preview_lab.config(text=os.path.basename(files[idx]))
+
+        lb.bind('<<ListboxSelect>>', on_preview)
+
+        btns = ttk.Frame(dlg, padding=8)
+        btns.pack(fill=tk.X)
+        def do_ok():
+            for i in lb.curselection():
+                selected_paths.append(files[i])
+            dlg.destroy()
+        def do_cancel():
+            dlg.destroy()
+
+        ttk.Button(btns, text="Importuj wybrane", command=do_ok).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btns, text="Anuluj", command=do_cancel).pack(side=tk.LEFT, padx=4)
+
+        self.wait_window(dlg)
+
+        paths = selected_paths
+        if not paths:
+            return
+
+        # Hide window once for all imports
+        root = self._get_root()
+        self.withdraw()
+        if self.area_manager: self.area_manager.withdraw()
+        self.update_idletasks()
+
+        try:
+            for path in paths:
+                try:
+                    # 1. Wczytaj obraz
+                    pil_img = Image.open(path).convert('RGB')
+                    w, h = pil_img.size
+                    target_res = (w, h)
+
+                    # 2. Selekcja obszaru na zaimportowanym obrazie
+                    # AreaSelector otworzy się na pełny ekran z tym obrazem jako tło
+                    sel = AreaSelector(root, pil_img) # Blokuje aż do zamknięcia
+
+                    if sel.geometry:
+                        r = sel.geometry
+                        rect_tuple = (r['left'], r['top'], r['width'], r['height'])
+
+                        self.frames.append({"image": pil_img, "rect": rect_tuple})
+
+                        # Formatting info for listbox
+                        info = f"Import ({target_res[0]}x{target_res[1]}) - Obszar: {rect_tuple}"
+                        self.lb_screens.insert(tk.END, info)
+                except Exception as ex:
+                    print(f"Błąd importu pliku {path}: {ex}")
+                    # Continue to next file
+                    pass
+        except Exception as e:
+            messagebox.showerror("Błąd", f"Błąd importu: {e}")
+        finally:
+            self.deiconify()
+            if self.area_manager: self.area_manager.deiconify()
             return
             
         existing_ids = {a.get('id', 0) for a in self.areas}
@@ -724,64 +780,94 @@ class AreaManagerWindow(tk.Toplevel):
                   if messagebox.askyesno("Wynik Testu", msg):
                        from app.matcher import MATCH_MODE_FULL
                        def run_opt_callback(frames_data, mode=MATCH_MODE_FULL, initial_color=None):
-                            # Collect rects
-                            # Base rect is either expanded or original
+                            # Prepare data synchronously, but run heavy optimize() in background thread
                             base = (ex, ey, ew, eh) if expanded_better else (ox, oy, ow, oh)
-                            
+
                             valid_rects = []
                             valid_images = []
                             for f in frames_data:
-                                valid_images.append(f['image'])
-                                if f['rect']:
+                                if f.get('image') is not None:
+                                    valid_images.append(f['image'])
+                                if f.get('rect'):
                                     valid_rects.append(f['rect'])
                                 else:
                                     valid_rects.append(base)
-                            
-                            if not valid_rects: valid_rects = [base]
-                            
-                            # Union logic (suma zbiorów)
+
+                            if not valid_rects:
+                                valid_rects = [base]
+
                             fw, fh = valid_images[0].size
-                            
-                            # Use utility function for robust calculation with clamping
                             fx, fy, real_w, real_h = calculate_merged_area(valid_rects, fw, fh, 0.05)
-                            
                             target_rect_final = (fx, fy, real_w, real_h)
-                            
-                            # Progress Window
-                            w_prog = tk.Toplevel(self)
+
+                            # Progress Window (parented to root so it is visible even if area manager is withdrawn)
+                            root = self._get_root()
+                            w_prog = tk.Toplevel(root)
                             w_prog.title("Przetwarzanie")
+                            try:
+                                w_prog.transient(root)
+                                w_prog.lift()
+                                w_prog.attributes('-topmost', True)
+                            except Exception:
+                                pass
                             tk.Label(w_prog, text="Optymalizacja w toku...\n(To może chwilę potrwać)", padx=20, pady=20).pack()
                             w_prog.update()
-                            
+                            print("[AreaManager] run_opt_callback: created progress window (w_prog)")
                             try:
-                                res = optimizer.optimize(valid_images, target_rect_final, self.subtitle_lines, mode, initial_color=initial_color)
+                                # remove forced topmost to allow normal stacking afterwards
+                                w_prog.attributes('-topmost', False)
+                            except Exception:
+                                pass
+
+                            def worker():
+                                try:
+                                    print("[AreaManager] run_opt_callback: worker thread started")
+                                    optimizer = SettingsOptimizer()
+                                    res = optimizer.optimize(valid_images, target_rect_final, self.subtitle_lines, mode, initial_color=initial_color)
+
+                                    def finish():
+                                        try:
+                                            w_prog.destroy()
+                                        except:
+                                            pass
+
+                                        if res and res.get('score', 0) > final_score:
+                                            ns = res['score']
+                                            if messagebox.askyesno("Sukces", 
+                                                                   f"Znaleziono lepsze ustawienia!\nŚredni wynik: {ns:.1f}%\n"
+                                                                   "Czy chcesz zaktualizować obszar i parametry OCR?"):
+                                                area['settings'].update(res['settings'])
+                                                if 'rect' not in area or not area['rect']:
+                                                    area['rect'] = {}
+                                                try:
+                                                    rect4 = scale_utils.scale_rect_to_4k({'left': int(fx), 'top': int(fy), 'width': int(real_w), 'height': int(real_h)}, fw, fh)
+                                                except Exception:
+                                                    rect4 = {'left': int(fx), 'top': int(fy), 'width': int(real_w), 'height': int(real_h)}
+                                                area['rect'] = rect4
+                                                self._load_details(self.current_selection_idx)
+                                                messagebox.showinfo("Zapisano", "Zaktualizowano ustawienia i granice obszaru.")
+                                        else:
+                                            messagebox.showinfo("Info", "Nie udało się znaleźć lepszych parametrów.")
+
+                                        # If there are rejected screens, show them
+                                        if res and isinstance(res, dict) and res.get("rejected_screens") and opt_win:
+                                            opt_win._show_rejected(res["rejected_screens"])
+
+                                    self.after(0, finish)
+                                except Exception as ex:
+                                    print(f"[AreaManager] run_opt_callback: worker exception: {ex}")
+                                    self.after(0, lambda: (w_prog.destroy(), messagebox.showerror("Błąd Optymalizacji", str(ex))))
+
+                            try:
+                                t = threading.Thread(target=worker, daemon=True)
+                                print("[AreaManager] run_opt_callback: starting thread object", t)
+                                t.start()
+                                print("[AreaManager] run_opt_callback: thread started")
                             except Exception as ex:
-                                w_prog.destroy()
-                                messagebox.showerror("Błąd Optymalizacji", str(ex))
-                                return
-                            
-                            w_prog.destroy()
-                            
-                            if res and res.get('score', 0) > final_score:
-                                ns = res['score']
-                                if messagebox.askyesno("Sukces", 
-                                                       f"Znaleziono lepsze ustawienia!\nŚredni wynik: {ns:.1f}%\n"
-                                                       "Czy chcesz zaktualizować obszar i parametry OCR?"):
-                                    area['settings'].update(res['settings'])
-                                    # Update rect (Union + Margin)
-                                    if 'rect' not in area or not area['rect']:
-                                        area['rect'] = {}
-                                    # fx,fy are in image coordinates (fw,fh) -> convert back to 4K before storing
-                                    try:
-                                        rect4 = scale_utils.scale_rect_to_4k({'left': int(fx), 'top': int(fy), 'width': int(real_w), 'height': int(real_h)}, fw, fh)
-                                    except Exception:
-                                        rect4 = {'left': int(fx), 'top': int(fy), 'width': int(real_w), 'height': int(real_h)}
-                                    area['rect'] = rect4
-                                    
-                                    self._load_details(self.current_selection_idx)
-                                    messagebox.showinfo("Zapisano", "Zaktualizowano ustawienia i granice obszaru.")
-                            else:
-                                messagebox.showinfo("Info", "Nie udało się znaleźć lepszych parametrów.")
+                                print(f"[AreaManager] run_opt_callback: failed to start thread: {ex}")
+                                messagebox.showerror("Błąd", f"Nie udało się uruchomić wątku optymalizatora: {ex}")
+                            # Return None to signal asynchronous handling (keep optimization window open)
+                            return None
 
                        # Open Capture Window
                        opt_win = OptimizationCaptureWindow(self, run_opt_callback, self)
@@ -874,12 +960,25 @@ class AreaManagerWindow(tk.Toplevel):
         results = []
         errors = []
 
-        prog = tk.Toplevel(self)
+        root = self._get_root()
+        print(f"[AreaManager] _run_optimizer: creating progress window with root={root}")
+        prog = tk.Toplevel(root)
         prog.title("Optymalizacja...")
         prog.geometry("350x120")
+        try:
+            prog.transient(root)
+            prog.lift()
+            prog.attributes('-topmost', True)
+        except Exception:
+            pass
         status_label = ttk.Label(prog, text="Trwa analiza... Proszę czekać.", font=("Arial", 10))
         status_label.pack(pady=20)
         prog.update()
+        try:
+            prog.attributes('-topmost', False)
+        except Exception:
+            pass
+        print(f"[AreaManager] _run_optimizer: starting optimization (frames={len(frames)}, mode={mode}, initial_color={initial_color})")
 
         # Potrzebujemy referencji do okna optymalizacji, by wywołać _show_rejected
         opt_win = None
@@ -890,6 +989,7 @@ class AreaManagerWindow(tk.Toplevel):
 
         def task():
             try:
+                print("[AreaManager] _run_optimizer: worker thread started")
                 optimizer = SettingsOptimizer()
                 # Zbierz wszystkie obrazy i sprawdź, czy mają rect (obszar)
                 valid_images = []
@@ -911,6 +1011,7 @@ class AreaManagerWindow(tk.Toplevel):
                     return
                 status_label.config(text=f"Optymalizacja {len(valid_images)} zrzutów...")
                 prog.update()
+                print(f"[AreaManager] _run_optimizer: running optimizer.optimize on {len(valid_images)} images")
                 result = optimizer.optimize(valid_images, rough_area, subtitle_db, match_mode=mode, initial_color=initial_color)
                 results = [(0, result)]
                 # Przekaż rejected_screens do okna optymalizacji
@@ -925,7 +1026,18 @@ class AreaManagerWindow(tk.Toplevel):
         threading.Thread(target=task, daemon=True).start()
 
     def _on_multi_opt_finished(self, results, errors, prog_win):
-        prog_win.destroy()
+        # Destroy any fallback progress window created by the capture window
+        try:
+            if hasattr(self, '_opt_fallback') and self._opt_fallback:
+                try: self._opt_fallback.destroy()
+                except Exception: pass
+                self._opt_fallback = None
+        except Exception:
+            pass
+        try:
+            prog_win.destroy()
+        except Exception:
+            pass
         if not results:
             msg = "Nie udało się przeprowadzić optymalizacji."
             if errors:
@@ -967,7 +1079,18 @@ class AreaManagerWindow(tk.Toplevel):
             messagebox.showinfo("Wynik", msg)
 
     def _on_opt_finished(self, result, prog_win):
-        prog_win.destroy()
+        # Destroy any fallback progress window
+        try:
+            if hasattr(self, '_opt_fallback') and self._opt_fallback:
+                try: self._opt_fallback.destroy()
+                except Exception: pass
+                self._opt_fallback = None
+        except Exception:
+            pass
+        try:
+            prog_win.destroy()
+        except Exception:
+            pass
         if not result or result.get('error'):
              messagebox.showerror("Błąd", f"Optymalizacja nie powiodła się: {result.get('error')}")
              return
@@ -1006,7 +1129,7 @@ class OptimizationCaptureWindow(tk.Toplevel):
     def __init__(self, parent, on_start, area_manager=None):
         super().__init__(parent)
         self.title("Optymalizacja Ustawień")
-        self.geometry("500x600")
+        self.geometry("700x700")
         
         # Shortcuts
         self.bind("<F4>", lambda e: self._add_with_selection())
@@ -1107,7 +1230,8 @@ class OptimizationCaptureWindow(tk.Toplevel):
         ttk.Button(col_frame, text="X", width=3, command=self._clear_color).pack(side=tk.LEFT, padx=2)
 
         # Start
-        ttk.Button(main_f, text="Uruchom Optymalizację", command=self._start_opt).pack(pady=10, fill=tk.X)
+        self.btn_run = ttk.Button(main_f, text="Uruchom Optymalizację", command=self._start_opt)
+        self.btn_run.pack(pady=10, fill=tk.X)
         self.status = ttk.Label(main_f, text="")
         self.status.pack(pady=5)
 
@@ -1222,10 +1346,14 @@ class OptimizationCaptureWindow(tk.Toplevel):
     def _import_screenshot(self):
         from tkinter import filedialog
         from PIL import Image
+        import os
         
         # Allow multiple selection
-        paths = filedialog.askopenfilenames(title="Wybierz zrzut ekranu", 
-                                          filetypes=[("Obrazy", "*.png *.jpg *.jpeg *.bmp"), ("Wszystkie", "*.*")], parent=self)
+        home = os.path.expanduser('~')
+        print(f"[OptimizationWindow] _import_screenshot: default dir={home}")
+        paths = filedialog.askopenfilenames(title="Wybierz zrzut ekranu",
+                          initialdir=home,
+                          filetypes=[("Obrazy", "*.png *.jpg *.jpeg *.bmp"), ("Wszystkie", "*.*")], parent=self)
         if not paths:
              return
         
@@ -1293,8 +1421,21 @@ class OptimizationCaptureWindow(tk.Toplevel):
         mode = self.mode_map.get(disp_mode, MATCH_MODE_FULL)
         color = self.var_color.get() if self.var_color.get() else None
 
+        print(f"[OptimizationWindow] _start_opt: frames={len(self.frames)}")
+        for i,f in enumerate(self.frames):
+            print(f"[OptimizationWindow] frame#{i}: has_image={('image' in f and f['image'] is not None)}, has_rect={('rect' in f and f['rect'] is not None)}")
         # Przechwyć callback, aby przechwycić rejected_screens
         def on_start_with_rejected(frames, mode, initial_color):
+            print(f"[OptimizationWindow] calling on_start with {len(frames)} frames, mode={mode}, initial_color={initial_color}")
+            try:
+                print(f"[OptimizationWindow] on_start object: {self.on_start} (repr: {repr(self.on_start)})")
+                try:
+                    qual = getattr(self.on_start, '__qualname__', None)
+                except Exception:
+                    qual = None
+                print(f"[OptimizationWindow] on_start qualname: {qual}")
+            except Exception:
+                pass
             result = self.on_start(frames, mode=mode, initial_color=initial_color)
             # Oczekujemy, że on_start zwraca result (lub None)
             if result and isinstance(result, dict) and "rejected_screens" in result:
@@ -1302,11 +1443,68 @@ class OptimizationCaptureWindow(tk.Toplevel):
             return result
 
         # Spróbuj wywołać i przechwycić rejected_screens (jeśli on_start zwraca wynik synchronicznie)
+        # Spróbuj wywołać i przechwycić rejected_screens (jeśli on_start zwraca wynik synchronicznie)
         res = on_start_with_rejected(self.frames, mode, color)
-        # Jeśli on_start jest asynchroniczny, _show_rejected powinno być wywołane przez wywołującego
-        # Zamknij okno tylko jeśli nie ma rejected_screens do pokazania
-        if not (res and isinstance(res, dict) and res.get("rejected_screens")):
-            self.destroy()
+        print(f"[OptimizationWindow] on_start returned: {res}")
+        # Jeśli on_start zwróci None, oznacza to, że uruchomiono pracę asynchroniczną;
+        # w takim wypadku nie zamykamy okna - to wywołujący (w wątku) zadzwoni do
+        # _show_rejected lub innego mechanizmu powiadomienia, a następnie okno można zamknąć.
+        if res is None:
+            # Callback started asynchronous work — hide this wizard so caller's progress window is visible
+            try:
+                self.withdraw()
+            except Exception:
+                pass
+
+            # Ensure progress window appears: if caller for some reason didn't create it,
+            # create a small fallback window after short delay so user is not left without feedback.
+            def ensure_prog_visible():
+                root = self._get_root()
+                found = False
+                try:
+                    for w in root.winfo_children():
+                        try:
+                            if isinstance(w, tk.Toplevel) and w.winfo_exists():
+                                title = w.title()
+                                if "Optymalizacja" in title or "Przetwarzanie" in title:
+                                    found = True
+                                    break
+                        except Exception:
+                            pass
+                except Exception:
+                    found = False
+
+                if not found:
+                    try:
+                        print("[OptimizationWindow] ensure_prog_visible: no progress window found, creating fallback")
+                        fb = tk.Toplevel(root)
+                        fb.title("Optymalizacja...")
+                        ttk.Label(fb, text="Uruchamianie optymalizatora...", padding=10).pack()
+                        try:
+                            fb.transient(root); fb.lift(); fb.attributes('-topmost', True); fb.update(); fb.attributes('-topmost', False)
+                        except Exception:
+                            pass
+                        # store fallback on area_manager so it can be removed later
+                        if self.area_manager:
+                            try: self.area_manager._opt_fallback = fb
+                            except Exception: pass
+                    except Exception as e:
+                        print(f"[OptimizationWindow] failed to create fallback prog window: {e}")
+
+            # Schedule check shortly after returning
+            try:
+                self.after(300, ensure_prog_visible)
+            except Exception:
+                ensure_prog_visible()
+
+            return
+
+        # Jeśli on_start jest synchroniczny i zwrócił wynik z rejected_screens, pozostaw okno
+        if isinstance(res, dict) and res.get("rejected_screens"):
+            return
+
+        # W przeciwnym wypadku (synchroniczny wynik bez odrzuconych zrzutów) zamykamy okno
+        self.destroy()
 
     def _show_rejected(self, rejected_screens):
         if not rejected_screens:
