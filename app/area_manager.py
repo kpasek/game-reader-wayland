@@ -926,22 +926,38 @@ class OptimizationCaptureWindow(tk.Toplevel):
         
         ttk.Label(main_f, text="Kreator Optymalizacji", font=("Arial", 12, "bold")).pack(pady=10)
         instrukcja = (
-            "Jak optymalizować ustawienia:\n"
-            "- Najważniejszy jest pierwszy zrzut ekranu: na jego podstawie testowane są wszystkie kombinacje ustawień.\n"
-            "- Kolejne zrzuty służą do weryfikacji poprawności znalezionych ustawień (muszą również zawierać napisy w tym samym stylu).\n"
-            "- Zaznacz na zrzucie możliwie precyzyjnie obszar występowania napisów.\n"
-            "- Wybierz kolor napisów (jeśli są białe, nie musisz nic zmieniać – biały jest domyślnie testowany).\n"
-            "- Tryb dopasowania:\n"
-            "    • Pełne zdania – [OPIS: uzupełnij]\n"
-            "    • Zaczyna się od – [OPIS: uzupełnij]\n"
-            "    • Częściowe – [OPIS: uzupełnij]\n"
+            "Jak poprawnie zoptymalizować ustawienia:\n"
+            "1. Najpierw dodaj zrzut ekranu, na którym napisy są dobrze widoczne – najlepiej taki, gdzie pojawia się cały tekst dialogu. To na tym pierwszym zrzucie program będzie szukał najlepszych ustawień.\n"
+            "2. Dodaj kolejne zrzuty, jeśli chcesz sprawdzić, czy znalezione ustawienia działają także w innych sytuacjach (np. inny kolor tła, inne miejsce na ekranie).\n"
+            "3. Zaznacz na każdym zrzucie dokładnie ten fragment, gdzie pojawiają się napisy – im dokładniej, tym lepiej.\n"
+            "4. Jeśli napisy w grze mają inny kolor niż biały, wybierz ten kolor – program domyślnie testuje biały.\n"
             "\n"
-            "Wskazówka: Im lepiej dobrane zrzuty i obszary, tym większa szansa na znalezienie optymalnych ustawień."
+            "Wyjaśnienie trybów dopasowania:\n"
+            "• Pełne zdania: Wybierz tę opcję, jeśli w grze napisy pojawiają się od razu w całości (cały dialog na raz). To najpewniejszy i najdokładniejszy tryb.\n"
+            "• Zaczyna się od: Użyj, jeśli napisy w grze pojawiają się stopniowo, np. najpierw pierwsze słowa, potem kolejne. Jeśli tryb Pełne zdania nie działa, ten prawie zawsze zadziała.\n"
+            "• Częściowe: To tryb awaryjny – wybierz go tylko wtedy, gdy dwa poprzednie nie działają. Może być mniej dokładny i czasem rozpoznawać napisy błędnie.\n"
+            "\n"
+            "Im lepiej przygotujesz zrzuty i zaznaczysz napisy, tym lepszy będzie efekt optymalizacji!"
         )
-        label_instr = ttk.Label(main_f, text=instrukcja, justify=tk.LEFT, wraplength=480)
-        label_instr.pack(pady=5)
-        label_instr.bind("<Enter>", lambda e: label_instr.config(cursor="question_arrow"))
-        label_instr.bind("<Leave>", lambda e: label_instr.config(cursor=""))
+        # Przycisk "Instrukcja" z tooltipem
+        btn_instr = ttk.Button(main_f, text="Instrukcja")
+        btn_instr.pack(anchor=tk.NE, pady=(0, 0), padx=(0, 5))
+
+        tooltip = tk.Toplevel(main_f)
+        tooltip.withdraw()
+        tooltip.overrideredirect(True)
+        tooltip_label = ttk.Label(tooltip, text=instrukcja, justify=tk.LEFT, wraplength=480, background="#ffffe0", relief="solid", borderwidth=1)
+        tooltip_label.pack(ipadx=8, ipady=6)
+
+        def show_tooltip(event=None):
+            x = btn_instr.winfo_rootx() + btn_instr.winfo_width() + 8
+            y = btn_instr.winfo_rooty() + btn_instr.winfo_height() // 2
+            tooltip.geometry(f"+{x}+{y}")
+            tooltip.deiconify()
+        def hide_tooltip(event=None):
+            tooltip.withdraw()
+        btn_instr.bind("<Button-1>", show_tooltip)
+        btn_instr.bind("<Leave>", hide_tooltip)
         
         self.list_frame = ttk.Frame(main_f)
         self.list_frame.pack(fill=tk.BOTH, expand=True, pady=10)
@@ -952,11 +968,10 @@ class OptimizationCaptureWindow(tk.Toplevel):
         btn_box = ttk.Frame(self.list_frame)
         btn_box.pack(side=tk.LEFT, fill=tk.Y, padx=5)
         
-        # "Dodaj kolejny zrzut" preferred by user
-        self.btn_add_area = ttk.Button(btn_box, text="Dodaj kolejny zrzut [F4]", command=self._add_with_selection)
+        self.btn_add_area = ttk.Button(btn_box, text="Zrób zrzut ekranu zrzut [F4]", command=self._add_with_selection)
         self.btn_add_area.pack(fill=tk.X, pady=2)
         
-        self.btn_import = ttk.Button(btn_box, text="Importuj z pliku...", command=self._import_screenshot)
+        self.btn_import = ttk.Button(btn_box, text="Importuj zrzuty", command=self._import_screenshot)
         self.btn_import.pack(fill=tk.X, pady=2)
 
         # Removed Add Full Screen button as per request
