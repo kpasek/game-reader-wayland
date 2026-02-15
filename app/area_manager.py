@@ -853,6 +853,18 @@ class AreaManagerWindow(tk.Toplevel):
                 summary.append(f"Zrzut #{idx+1}: Score: {score:.1f}%")
 
         msg = "Wyniki optymalizacji:\n" + "\n".join(summary)
+        # Dodaj info o odrzuconych zrzutach jeśli są
+        rejected = []
+        for _, result in results:
+            if result and isinstance(result, dict) and result.get("rejected_screens"):
+                for r in result["rejected_screens"]:
+                    idx = r.get("index", "?")
+                    score = r.get("score", 0)
+                    ocr = r.get("ocr", "")
+                    preview = r.get("preview", "")
+                    rejected.append(f"- Zrzut #{idx}: Najlepszy wynik: {score:.1f}%, Tekst OCR: {ocr}, Podgląd: {preview}")
+        if rejected:
+            msg += "\n\nOdrzucone zrzuty (brak ustawień z wynikiem >50%):\n" + "\n".join(rejected)
         if errors:
             msg += "\n\nBłędy:\n" + "\n".join(errors)
 

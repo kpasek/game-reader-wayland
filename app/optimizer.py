@@ -131,7 +131,7 @@ class SettingsOptimizer:
         # Zmiana: Testy zawsze w pełnej skali (1.0), aby wykluczyć błędy przy skalowaniu
 
         params = {
-            "color_tolerances": range(5, 45, 5),
+            "color_tolerances": range(1, 30, 1),
             "thickenings": [0, 1]
         }
 
