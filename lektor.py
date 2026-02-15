@@ -900,15 +900,9 @@ class LektorApp:
         path = self.var_preset_full_path.get()
         if path:
             data = self.config_mgr.load_preset(path)
-            # Pobierz rozmiar ostatniego zrzutu ekranu (lub domyślny, jeśli nie ma)
-            try:
-                img = capture_fullscreen()
-                img_w, img_h = img.size
-            except Exception:
-                img_w, img_h = 3840, 2160  # fallback, jeśli nie uda się pobrać
-            # Przeskaluj do 4K
-            norm_areas = self._normalize_areas_list_to_4k(new_areas, img_w, img_h)
-            data['areas'] = norm_areas
+            # AreaManager już zapisuje recty w bazowej przestrzeni 4K.
+            # Nie skalujemy ponownie, aby uniknąć podwójnego skalowania.
+            data['areas'] = new_areas
             self.config_mgr.save_preset(path, data)
             self._restart_hotkeys()
             self.refresh_color_canvas() # Update in case Area 1 colors changed in manager

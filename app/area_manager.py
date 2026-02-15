@@ -16,6 +16,31 @@ from app.ocr import find_text_bounds
 from app.geometry_utils import calculate_merged_area
 
 class AreaManagerWindow(tk.Toplevel):
+    def _refresh_list(self):
+        self.lb_areas.delete(0, tk.END)
+        for i, area in enumerate(self.areas):
+            typ_raw = area.get('type', 'manual')
+            t = "Stały" if typ_raw == 'continuous' else "Wyzwalany"
+            if typ_raw not in ['continuous', 'manual']:
+                t = typ_raw
+            display = f"#{area.get('id', i+1)}"
+            if area.get('name'):
+                display += f" {area.get('name')}"
+            display += f" [{t}]"
+            if typ_raw == 'continuous' and area.get('id') != 1:
+                state = "ON" if area.get('enabled', False) else "OFF"
+                display += f" [{state}]"
+            self.lb_areas.insert(tk.END, display)
+        if self.current_selection_idx >= 0 and self.current_selection_idx < len(self.areas):
+            self.lb_areas.selection_set(self.current_selection_idx)
+            self._load_details(self.current_selection_idx)
+            area = self.areas[self.current_selection_idx]
+            if area.get('id') == 1:
+                self.btn_remove.config(state=tk.DISABLED)
+            else:
+                self.btn_remove.config(state=tk.NORMAL)
+        else:
+            self._disable_details()
     def __init__(self, parent, areas: List[Dict[str, Any]], on_save_callback, subtitle_lines: List[str] = None):
         super().__init__(parent)
         self.title("Zarządzanie Obszarami")
@@ -225,6 +250,9 @@ class AreaManagerWindow(tk.Toplevel):
         ttk.Label(f_tol, textvariable=self.var_tolerance).pack(side=tk.LEFT, padx=5)
 
     def _load_details(self, idx):
+        import traceback
+        print(f"[AreaManager][LOG] _load_details(idx={idx}) called. Stack:")
+        traceback.print_stack(limit=4)
         self.ignore_updates = True
         area = self.areas[idx]
         settings = area.get('settings', {})
@@ -240,20 +268,21 @@ class AreaManagerWindow(tk.Toplevel):
             self.chk_enabled.config(state=tk.DISABLED)
             
         r = area.get('rect')
+        print(f"[AreaManager][LOG] _load_details: area['rect'] type={type(r)}, value={r}")
         if r:
-            # Przeskaluj z 4K do aktualnej rozdzielczości ekranu
             screen_w = self.winfo_screenwidth()
             screen_h = self.winfo_screenheight()
             sx = screen_w / 3840
             sy = screen_h / 2160
+            print(f"[AreaManager][LOG] _load_details: screen_w={screen_w}, screen_h={screen_h}, sx={sx}, sy={sy}")
             left = int(round(r.get('left', 0) * sx))
             top = int(round(r.get('top', 0) * sy))
             width = int(round(r.get('width', 0) * sx))
             height = int(round(r.get('height', 0) * sy))
-            print(f"[AreaManager] Odczyt z presetów (4K): left={r.get('left', 0)}, top={r.get('top', 0)}, width={r.get('width', 0)}, height={r.get('height', 0)}")
-            print(f"[AreaManager] Przeliczone na ekran ({screen_w}x{screen_h}): left={left}, top={top}, width={width}, height={height}")
+            print(f"[AreaManager][LOG] _load_details: rect 4K->screen: left={left}, top={top}, width={width}, height={height}")
             self.lbl_rect.config(text=f"X:{left} Y:{top} {width}x{height}")
         else:
+            print(f"[AreaManager][LOG] _load_details: area['rect'] is None")
             self.lbl_rect.config(text="Brak (Kliknij 'Wybierz Obszar')")
             
         self.var_hotkey.set(area.get('hotkey', ''))
@@ -328,7 +357,10 @@ class AreaManagerWindow(tk.Toplevel):
         self.lb_areas.insert(self.current_selection_idx, display)
         self.lb_areas.selection_set(self.current_selection_idx)
 
-    def _refresh_list(self):
+    def _select_area_on_screen(self):
+        import traceback
+        print(f"[AreaManager][LOG] _select_area_on_screen() called. Stack:")
+        traceback.print_stack(limit=4)
         self.lb_areas.delete(0, tk.END)
         for i, area in enumerate(self.areas):
             typ_raw = area.get('type', 'manual')
@@ -365,13 +397,11 @@ class AreaManagerWindow(tk.Toplevel):
         self.lbl_rect.config(text="Brak zaznaczenia")
         self.var_hotkey.set("")
         self.lb_colors.delete(0, tk.END)
-        
         for tab in [self.tab_general, self.tab_colors]:
              for child in tab.winfo_children():
                  try: child.config(state=tk.DISABLED)
                  except: pass
         self.ignore_updates = False
-
     def _add_area(self):
         if len(self.areas) >= 5:
             messagebox.showinfo("Limit", "Osiągnięto limit obszarów (5).")
@@ -441,26 +471,51 @@ class AreaManagerWindow(tk.Toplevel):
         self.update() 
         import time
         time.sleep(0.3)
-        
         try:
             img = capture_fullscreen()
             if not img:
                 self.deiconify()
                 return
-            
-            # Explicit root + no wait_window() on sel
+            # Przekazuj tylko listę dictów {'rect': ...} (bez id, type, settings)
+            screen_w = self.winfo_screenwidth()
+            screen_h = self.winfo_screenheight()
+            sx = screen_w / 3840
+            sy = screen_h / 2160
+            regions_screen = []
+            for idx, area in enumerate(self.areas):
+                r = area.get('rect')
+                if not r:
+                    continue
+                box = {
+                    'left': int(round(r.get('left', 0) * sx)),
+                    'top': int(round(r.get('top', 0) * sy)),
+                    'width': int(round(r.get('width', 0) * sx)),
+                    'height': int(round(r.get('height', 0) * sy)),
+                }
+                print(f"[AreaManager] Przeliczony rect #{idx} z 4K na ekran: {box}, screen_w={screen_w}, screen_h={screen_h}, sx={sx}, sy={sy}")
+                if box['left'] < 0 or box['top'] < 0 or box['left'] + box['width'] > screen_w or box['top'] + box['height'] > screen_h:
+                    print(f"[AreaManager][WARN] Rect #{idx} wykracza poza ekran: {box}, screen_w={screen_w}, screen_h={screen_h}")
+                regions_screen.append({'rect': box})
+            print(f"[AreaManager] Przekazuję existing_regions do AreaSelector (ekran, tylko rect): {[r['rect'] for r in regions_screen]}")
             root = self._get_root()
-            print(f"[AreaManager] Przekazuję existing_regions do AreaSelector: {self.areas}")
-            sel = AreaSelector(root, img, existing_regions=self.areas) 
+            sel = AreaSelector(root, img, existing_regions=[r['rect'] for r in regions_screen])
             # AreaSelector is blocking in init, so no need to wait here.
             if sel.geometry:
-                print(f"[AreaManager] Otrzymana geometria z AreaSelector: {sel.geometry}")
-                self.areas[self.current_selection_idx]['rect'] = sel.geometry.copy()
+                print(f"[AreaManager] Otrzymana geometria z AreaSelector (ekran): {sel.geometry}")
+                # Przelicz z powrotem do 4K przed zapisem
+                left_4k = int(round(sel.geometry['left'] * 3840 / screen_w))
+                top_4k = int(round(sel.geometry['top'] * 2160 / screen_h))
+                width_4k = int(round(sel.geometry['width'] * 3840 / screen_w))
+                height_4k = int(round(sel.geometry['height'] * 2160 / screen_h))
+                rect_4k = {'left': left_4k, 'top': top_4k, 'width': width_4k, 'height': height_4k}
+                print(f"[AreaManager] Przeliczam do 4K przed zapisem: {rect_4k} (z ekranu: {sel.geometry}, ekran: {screen_w}x{screen_h})")
+                print(f"[AreaManager] Area przed aktualizacją: {self.areas[self.current_selection_idx]}")
+                self.areas[self.current_selection_idx]['rect'] = rect_4k
+                print(f"[AreaManager] Area po aktualizacji: {self.areas[self.current_selection_idx]}")
                 self._load_details(self.current_selection_idx)
                 # Auto update bounds label
-                r = sel.geometry
+                r = rect_4k
                 self.lbl_rect.config(text=f"X:{r.get('left')} Y:{r.get('top')} {r.get('width')}x{r.get('height')}")
-
         except Exception as e:
             print(f"Error selecting area: {e}")
         finally:
