@@ -519,18 +519,19 @@ class LektorApp:
         if isinstance(mons, dict): mons = [mons]
         while len(mons) < 3: mons.append(None)
 
-        from app import scale_utils
-        # Presets store monitor rects in canonical 4K; convert them to current screen size
-        disp_mons = [scale_utils.scale_rect_to_physical(m, sw, sh) if m else None for m in mons]
+        # Ask ConfigManager for preset scaled to current screen size
+        preset_display = self.config_mgr.get_preset_for_resolution(path, (sw, sh))
+        disp_mons = preset_display.get('monitor', []) if preset_display else []
+        if isinstance(disp_mons, dict): disp_mons = [disp_mons]
+        while len(disp_mons) < 3: disp_mons.append(None)
         sel = AreaSelector(self.root, img, existing_regions=disp_mons)
         self.root.deiconify()
 
         if sel.geometry:
             disp_mons[idx] = sel.geometry
-            # Convert selected screen-relative monitors back to canonical 4K for storage
-            final_mons = [scale_utils.scale_rect_to_4k(m, sw, sh) if m else None for m in disp_mons]
-            data['monitor'] = final_mons
-            self.config_mgr.save_preset(path, data)
+            # Store monitor rects in screen coords; ConfigManager will normalize
+            data['monitor'] = disp_mons
+            self.config_mgr.save_preset_from_screen(path, data, (sw, sh))
 
     def clear_area(self, idx):
         path = self.var_preset_full_path.get()
@@ -871,7 +872,14 @@ class LektorApp:
         
         # Open Manager (deepcopy to avoid auto-saving changes on cancel)
         import copy
-        AreaManagerWindow(self.root, copy.deepcopy(data['areas']), self._save_areas_callback, subs)
+        try:
+            sw = self.root.winfo_screenwidth()
+            sh = self.root.winfo_screenheight()
+        except Exception:
+            sw, sh = 3840, 2160
+        preset_display = self.config_mgr.get_preset_for_resolution(path, (sw, sh)) or {}
+        disp_areas = preset_display.get('areas', [])
+        AreaManagerWindow(self.root, copy.deepcopy(disp_areas), self._save_areas_callback, subs)
 
     def _normalize_area_to_4k(self, rect, img_w, img_h):
         """
@@ -896,10 +904,14 @@ class LektorApp:
         path = self.var_preset_full_path.get()
         if path:
             data = self.config_mgr.load_preset(path)
-            # AreaManager już zapisuje recty w bazowej przestrzeni 4K.
-            # Nie skalujemy ponownie, aby uniknąć podwójnego skalowania.
+            # AreaManager provides areas in screen coordinates. Use ConfigManager to normalize when saving.
             data['areas'] = new_areas
-            self.config_mgr.save_preset(path, data)
+            try:
+                sw = self.root.winfo_screenwidth()
+                sh = self.root.winfo_screenheight()
+            except Exception:
+                sw, sh = 3840, 2160
+            self.config_mgr.save_preset_from_screen(path, data, (sw, sh))
             self._restart_hotkeys()
             self.refresh_color_canvas() # Update in case Area 1 colors changed in manager
             # Restart reader to apply changes (geometry, enabled state, etc.)
@@ -937,14 +949,19 @@ class LektorApp:
                  a1 = next((a for a in areas if a.get('id') == 1), None)
                  
                  if not a1:
-                     # Create if missing
+                     # Create if missing (rect is in screen coordinates)
                      a1 = {"id": 1, "type": "continuous", "rect": sel.geometry, "hotkey": "", "colors": []}
                      areas.insert(0, a1)
                  else:
                      a1['rect'] = sel.geometry
                  
                  data['areas'] = areas
-                 self.config_mgr.save_preset(path, data)
+                 try:
+                     sw = self.root.winfo_screenwidth()
+                     sh = self.root.winfo_screenheight()
+                 except Exception:
+                     sw, sh = 3840, 2160
+                 self.config_mgr.save_preset_from_screen(path, data, (sw, sh))
                  
         except Exception as e:
             messagebox.showerror("Błąd", f"Wybór obszaru: {e}")
@@ -1098,22 +1115,11 @@ class LektorApp:
                     # Create new area and store rect converted to 4K
                     existing_ids = [a.get('id', 0) for a in current_areas]
                     new_id = (max(existing_ids) if existing_ids else 0) + 1
-                    try:
-                        from app import scale_utils
-                        # Determine source resolution from current GUI screen size
-                        try:
-                            sw = self.root.winfo_screenwidth()
-                            sh = self.root.winfo_screenheight()
-                        except Exception:
-                            sw, sh = 3840, 2160
-                        rect4 = scale_utils.scale_rect_to_4k(new_rect, sw, sh)
-                    except Exception:
-                        rect4 = new_rect
-
+                    # Create new area and store rect in screen coordinates; ConfigManager will normalize on save
                     current_areas.append({
                         "id": new_id,
                         "type": "continuous",
-                        "rect": rect4,
+                        "rect": new_rect,
                         "hotkey": "",
                         "settings": best_settings
                     })
@@ -1122,22 +1128,13 @@ class LektorApp:
                     for area in current_areas:
                         if area.get('id') == target_id:
                             if optimized_area:
-                                try:
-                                    from app import scale_utils
-                                    try:
-                                        sw = self.root.winfo_screenwidth()
-                                        sh = self.root.winfo_screenheight()
-                                    except Exception:
-                                        sw, sh = 3840, 2160
-                                    area_rect4 = scale_utils.scale_rect_to_4k({'left': int(optimized_area[0]), 'top': int(optimized_area[1]), 'width': int(optimized_area[2]), 'height': int(optimized_area[3])}, sw, sh)
-                                    area['rect'] = area_rect4
-                                except Exception:
-                                    area['rect'] = {
-                                        'left': int(optimized_area[0]),
-                                        'top': int(optimized_area[1]),
-                                        'width': int(optimized_area[2]),
-                                        'height': int(optimized_area[3])
-                                    }
+                                # Store optimized area as screen coordinates; ConfigManager will normalize on save
+                                area['rect'] = {
+                                    'left': int(optimized_area[0]),
+                                    'top': int(optimized_area[1]),
+                                    'width': int(optimized_area[2]),
+                                    'height': int(optimized_area[3])
+                                }
 
                             if 'settings' not in area:
                                 area['settings'] = {}
@@ -1149,17 +1146,23 @@ class LektorApp:
                 preset_data['areas'] = current_areas
             elif target_id is not None:
                 # Update settings only (no area change)
-                 target_id = dialog_res["target_id"]
-                 for area in current_areas:
-                     if area.get('id') == target_id:
-                         if 'settings' not in area:
-                             area['settings'] = {}
-                         area['settings'].update(best_settings)
-                         if 'colors' in area: del area['colors']
-                         break
-                 preset_data['areas'] = current_areas
+                target_id = dialog_res["target_id"]
+                for area in current_areas:
+                    if area.get('id') == target_id:
+                        if 'settings' not in area:
+                            area['settings'] = {}
+                        area['settings'].update(best_settings)
+                        if 'colors' in area: del area['colors']
+                        break
+                preset_data['areas'] = current_areas
 
-            self.config_mgr.save_preset(preset_path, preset_data)
+                # Save preset: provide data in screen coordinates and let ConfigManager normalize to 4K
+                try:
+                    sw = self.root.winfo_screenwidth()
+                    sh = self.root.winfo_screenheight()
+                except Exception:
+                    sw, sh = 3840, 2160
+                self.config_mgr.save_preset_from_screen(preset_path, preset_data, (sw, sh))
             
             # Przeładowanie GUI
             self.on_preset_selected_from_combo(None)

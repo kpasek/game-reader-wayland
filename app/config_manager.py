@@ -293,6 +293,31 @@ class ConfigManager:
         except Exception:
             return areas
 
+    def save_preset_from_screen(self, path: str, data: Dict[str, Any], src_resolution: Tuple[int, int]):
+        """Accept preset data where `areas` and `monitor` are in screen/physical coords
+        (src_resolution). Convert them to canonical 4K and save using `save_preset`.
+        This centralizes all scaling inside ConfigManager.
+        """
+        try:
+            sd = data.copy()
+            sw, sh = src_resolution
+            # Normalize areas list
+            if 'areas' in sd and isinstance(sd['areas'], list):
+                try:
+                    sd['areas'] = self.normalize_areas_to_4k(sd['areas'], (sw, sh))
+                except Exception:
+                    pass
+            # Normalize monitor entries if present
+            if 'monitor' in sd and isinstance(sd['monitor'], list):
+                try:
+                    sd['monitor'] = [scale_utils.scale_rect_to_4k(m, sw, sh) if m else None for m in sd['monitor']]
+                except Exception:
+                    pass
+            # Delegate actual write to existing save_preset (expects canonical 4K)
+            self.save_preset(path, sd)
+        except Exception as e:
+            print(f"Błąd save_preset_from_screen: {e}")
+
     def save_preset(self, path: str, data: Dict[str, Any]):
         try:
             # Helper to recursively sanitize preventing recursion loops
