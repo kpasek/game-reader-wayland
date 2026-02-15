@@ -612,8 +612,8 @@ class AreaManagerWindow(tk.Toplevel):
              settings = area.get('settings', {})
              pre_db = precompute_subtitles(self.subtitle_lines)
              optimizer = SettingsOptimizer()
-            from app.matcher import MATCH_MODE_FULL
-            mode = settings.get('subtitle_mode', MATCH_MODE_FULL)
+             from app.matcher import MATCH_MODE_FULL
+             mode = settings.get('subtitle_mode', MATCH_MODE_FULL)
              
              score_original, _ = optimizer._evaluate_settings(normal_crop, settings, pre_db, mode)
              

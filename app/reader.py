@@ -250,7 +250,7 @@ class ReaderThread(threading.Thread):
         self.ocr_scale = preset.get('ocr_scale_factor', 1.0)
         self.text_alignment = preset.get('text_alignment', "None")
         self.save_logs = preset.get('save_logs', False)
-        self.subtitle_mode = preset.get('subtitle_mode', MATCH_MODE_FULL)
+        self.subtitle_mode = None #preset.get('subtitle_mode', MATCH_MODE_FULL)
         interval = preset.get('capture_interval', 0.5)
         similarity = preset.get('similarity', 5.0)
 
