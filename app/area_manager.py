@@ -217,7 +217,10 @@ class AreaManagerWindow(tk.Toplevel):
         f_tol.pack(fill=tk.X, pady=15)
         ttk.Label(f_tol, text="Tolerancja koloru:").pack(anchor=tk.W)
         self.var_tolerance = tk.IntVar()
-        ttk.Scale(f_tol, from_=0, to=100, variable=self.var_tolerance, orient=tk.HORIZONTAL, command=lambda v: self._on_field_change()).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        def on_tol_change(v):
+            self.var_tolerance.set(int(float(v)))
+            self._on_field_change()
+        ttk.Scale(f_tol, from_=0, to=100, variable=self.var_tolerance, orient=tk.HORIZONTAL, command=on_tol_change).pack(side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Label(f_tol, textvariable=self.var_tolerance).pack(side=tk.LEFT, padx=5)
 
     def _load_details(self, idx):
