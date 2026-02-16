@@ -2,9 +2,9 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
-			"label": "Build app (build.sh)",
+			"label": "Build app",
 			"type": "shell",
-			"command": "./build.sh",
+			"command": "./build.sh --no-install",
 			"isBackground": false,
 			"problemMatcher": [],
 			"group": "build"
@@ -12,7 +12,7 @@
 		{
 			"label": "Build and Install app",
 			"type": "shell",
-			"command": "./build.sh && mkdir -p ~/Applications/Lektor/ && cp -r build/lektor/* ~/Applications/Lektor/",
+			"command": "./build.sh",
 			"isBackground": false,
 			"problemMatcher": [],
 			"group": "build"

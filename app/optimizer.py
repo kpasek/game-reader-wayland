@@ -280,12 +280,13 @@ class SettingsOptimizer:
             # Same fix here
             opt_rect = rough_area
             return {
+                "match_mode": match_mode,
                 "score": best_score_st1, 
                 "settings": best_settings_st1,
                 "optimized_area": opt_rect,
                 "rejected_screens": []
             }
-        return {"score": 0, "settings": {}, "optimized_area": rough_area, "rejected_screens": []}
+        return {"score": 0, "settings": {}, "optimized_area": rough_area, "match_mode": match_mode, "rejected_screens": []}
 
     def _evaluate_settings(self, 
                            crop: Image.Image, 

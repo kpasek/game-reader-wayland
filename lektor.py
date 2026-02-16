@@ -1022,7 +1022,7 @@ class LektorApp:
             prog = ProcessingWindow(self.root, "Trwa optymalizacja...")
             prog.set_status("Analiza obrazu i szukanie optymalnych ustawień...\nMoże to potrwać kilka minut. Nie zamykaj tego okna.")
 
-            thread_context = {"result": None, "error": None, "img_size": (fw, fh)}
+            thread_context = {"result": None, "error": None, "img_size": (fw, fh), "match_mode": mode}
 
             def worker():
                 try:
@@ -1044,7 +1044,7 @@ class LektorApp:
                 except Exception:
                     pass
                 self.root.deiconify()
-                self._on_optimization_finished(thread_context, path, data, subtitle_lines)
+                self._on_optimization_finished(thread_context, path, data)
 
             check_thread()
 
@@ -1053,7 +1053,7 @@ class LektorApp:
 
     # poprzednie funkcje _show_optimization_setup i _start_optimization_process zostały scalone
 
-    def _on_optimization_finished(self, context, preset_path, preset_data, subtitle_lines=None):
+    def _on_optimization_finished(self, context, preset_path, preset_data):
         if context["error"]:
             messagebox.showerror("Błąd", f"Błąd podczas optymalizacji: {context['error']}")
             return
@@ -1113,6 +1113,9 @@ class LektorApp:
                     sanitized_best = {k: v for k, v in (best_settings or {}).items() if k not in ('areas', 'monitor')}
                 except Exception:
                     sanitized_best = best_settings or {}
+
+                sanitized_best['subtitle_mode'] = context.get('match_mode')
+                        
 
                 if target_id is None:
                     existing_ids = [a.get('id', 0) for a in current_areas]
