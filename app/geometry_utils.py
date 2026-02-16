@@ -1,6 +1,6 @@
 from typing import List, Tuple
 
-def calculate_merged_area(rects: List[Tuple[int, int, int, int]], img_w: int, img_h: int, margin_pct: float = 0.05) -> Tuple[int, int, int, int]:
+def calculate_merged_area(rects: List[Tuple[int, int, int, int]], img_w: int, img_h: int, margin_pct: float = 0.00) -> Tuple[int, int, int, int]:
     """
     Calculates the union of multiple rectangles and adds a margin percentage.
     rects: List of (x, y, w, h)

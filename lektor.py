@@ -1014,7 +1014,7 @@ class LektorApp:
                 valid_rects = [(0, 0, fw, fh)]
 
             fw, fh = valid_images[0].size
-            fx, fy, real_w, real_h = calculate_merged_area(valid_rects, fw, fh, 0.02)
+            fx, fy, real_w, real_h = calculate_merged_area(valid_rects, fw, fh)
 
             target_rect = (fx, fy, real_w, real_h)
 
