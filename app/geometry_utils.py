@@ -10,7 +10,6 @@ def calculate_merged_area(rects: List[Tuple[int, int, int, int]], img_w: int, im
     Returns: (x, y, w, h) of the merged area.
     """
     if not rects:
-        print(f"[geometry_utils] calculate_merged_area called with empty rects -> (0,0,0,0)")
         return (0, 0, 0, 0)
 
     # 1. Calculate Union
@@ -25,7 +24,6 @@ def calculate_merged_area(rects: List[Tuple[int, int, int, int]], img_w: int, im
         cleaned.append((x, y, w, h))
 
     if not cleaned:
-        print(f"[geometry_utils][ERROR] No valid rects after cleaning: original rects={rects}")
         return (0, 0, 0, 0)
 
     min_x = min(r[0] for r in cleaned)
@@ -33,10 +31,6 @@ def calculate_merged_area(rects: List[Tuple[int, int, int, int]], img_w: int, im
     max_x = max(r[0] + r[2] for r in cleaned)
     max_y = max(r[1] + r[3] for r in cleaned)
 
-    print(f"[geometry_utils] input rects={rects}")
-    print(f"[geometry_utils] cleaned rects={cleaned}")
-    print(f"[geometry_utils] img_w={img_w}, img_h={img_h}")
-    print(f"[geometry_utils] min_x={min_x}, min_y={min_y}, max_x={max_x}, max_y={max_y}")
     
     u_w = max_x - min_x
     u_h = max_y - min_y
@@ -53,8 +47,6 @@ def calculate_merged_area(rects: List[Tuple[int, int, int, int]], img_w: int, im
     mx = max(3, min(raw_mx, 50))
     my = max(3, min(raw_my, 50))
     
-    print(f"[geometry_utils] Union {u_w}x{u_h}, Margin Calc: {raw_mx}x{raw_my} -> Clamped: {mx}x{my}")
-    
     # 3. Apply Margins and Clamp
     # Ideally: start = min_x - mx, end = max_x + mx
     final_x1 = max(0, min_x - mx)
@@ -66,6 +58,5 @@ def calculate_merged_area(rects: List[Tuple[int, int, int, int]], img_w: int, im
     final_w = max(0, final_x2 - final_x1)
     final_h = max(0, final_y2 - final_y1)
 
-    print(f"[geometry_utils] final coords x1={final_x1}, y1={final_y1}, x2={final_x2}, y2={final_y2}, w={final_w}, h={final_h}")
 
     return (int(final_x1), int(final_y1), int(final_w), int(final_h))

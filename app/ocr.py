@@ -154,7 +154,6 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager, override
 
             if bbox:
                 if not check_alignment(bbox, image.width, align_mode):
-                    print("wrong text alignment")
                     return image, False, None
 
                 padding = 4
@@ -173,20 +172,6 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager, override
                 else:
                     crop_box = (0, 0, image.width, image.height)
             else:
-                extrema = image.getextrema()
-                max_val = extrema[1] if isinstance(extrema, tuple) else '?'
-                print(f"Nie wykryto napisów. (Max jasność: {max_val}, Próg: {brightness_threshold})")
-                print(f"  > Szukane kolory: {valid_colors}")
-                print(f"  > Tolerancja: {preset.get('color_tolerance', 10)}")
-                
-                # Zrzut obrazu wejściowego dla celów diagnostycznych
-                # try:
-                #     debug_path = "debug_crop_failure.png"
-                #     # Save the debug image
-                #     image.save(debug_path)
-                #     print(f"  > Zapisano obraz po filtrowaniu do: {debug_path}")
-                # except: pass
-                
                 return image, False, (0, 0, image.width, image.height)
 
         except Exception as e:
@@ -203,7 +188,6 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager, override
             image = ImageOps.invert(image)
             total_pixels = image.width * image.height
             if total_pixels == 0:
-                print("pusty obraz")
                 return image, False, None
 
             is_cropped = (crop_box[2] - crop_box[0]) < (image.width * 0.9) if 'new_w' in locals() else False
@@ -262,8 +246,6 @@ def recognize_text(image: Image.Image, config_manager: ConfigManager) -> str:
         auto_remove_names = preset.get('auto_remove_names')
         if auto_remove_names:
             text = smart_remove_name(text)
-
-        # print(f"OCR text: {text}")  # Usunięto logowanie OCR text dla czytelności logów optymalizacji
         return text
     except Exception as e:
         print(f"OCR Error: {e}", file=sys.stderr)

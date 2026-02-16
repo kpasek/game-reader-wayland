@@ -37,10 +37,8 @@ class AreaSelector(tk.Toplevel):
         screen_w = self.winfo_screenwidth()
         screen_h = self.winfo_screenheight()
         img_w, img_h = screenshot.size
-        print(f"[AreaSelector] screen_w={screen_w}, screen_h={screen_h}, img_w={img_w}, img_h={img_h}")
         self.scale_x = img_w / screen_w if screen_w else 1.0
         self.scale_y = img_h / screen_h if screen_h else 1.0
-        print(f"[AreaSelector] scale_x={self.scale_x}, scale_y={self.scale_y}")
 
         # NIE zapisujemy rozdzielczości do presetów!
 
@@ -60,30 +58,20 @@ class AreaSelector(tk.Toplevel):
 
         if existing_regions:
             import traceback
-            print(f"[AreaSelector][LOG] Otrzymane existing_regions: type={type(existing_regions)}, value={existing_regions}")
             traceback.print_stack(limit=4)
             for i, area_data in enumerate(existing_regions):
-                print(f"[AreaSelector][LOG] existing_regions[{i}]: type={type(area_data)}, value={area_data}")
-                # area_data can be:
-                # - dict wrapper {'rect': {...}, 'id':..., 'colors':...}
-                # - direct rect dict {left, top, width, height} (legacy)
-                # - list/tuple (x,y,w,h)
-                # Detect wrapper vs direct rect robustly
                 r = None
                 if isinstance(area_data, dict):
                     if 'rect' in area_data and area_data.get('rect') is not None:
                         r = area_data.get('rect')
-                        print(f"[AreaSelector][LOG] Detected wrapper dict with 'rect' for region #{i}")
                     else:
                         # Might be a direct rect dict (has left/top/width/height)
                         if any(k in area_data for k in ('left', 'top', 'width', 'height', 'x', 'y', 'w', 'h')):
                             r = area_data
-                            print(f"[AreaSelector][LOG] Detected direct rect dict for region #{i}")
                         else:
                             r = None
                 else:
                     r = area_data
-                print(f"[AreaSelector][LOG] existing_regions[{i}] rect: type={type(r)}, value={r}")
                 # Normalize r to (x, y, w, h)
                 x, y, w, h = 0, 0, 0, 0
                 if isinstance(r, dict):
@@ -94,10 +82,8 @@ class AreaSelector(tk.Toplevel):
                 elif isinstance(r, (list, tuple)) and len(r) >= 4:
                     x, y, w, h = r[0], r[1], r[2], r[3]
                 else:
-                    print(f"[AreaSelector][LOG] Pomijam region #{i} (nieprawidłowy format): {r}")
                     continue
                 if w <= 0 or h <= 0:
-                    print(f"[AreaSelector][LOG] Pomijam region #{i} (zerowy rozmiar): x={x}, y={y}, w={w}, h={h}")
                     continue
                 # NIE przeliczamy do 4K! Rysujemy to co dostajemy (ekran)
                 x_log = int(x)
@@ -110,15 +96,10 @@ class AreaSelector(tk.Toplevel):
                     color = colors[0]
                 screen_w = self.winfo_screenwidth()
                 screen_h = self.winfo_screenheight()
-                print(f"[AreaSelector][LOG] create_rectangle: x={x_log}, y={y_log}, x2={x_log + w_log}, y2={y_log + h_log}, color={color}, screen_w={screen_w}, screen_h={screen_h}")
-                if x_log < 0 or y_log < 0 or x_log + w_log > screen_w or y_log + h_log > screen_h:
-                    print(f"[AreaSelector][WARN] Prostokąt #{i} wykracza poza ekran: x={x_log}, y={y_log}, w={w_log}, h={h_log}, screen_w={screen_w}, screen_h={screen_h}")
                 try:
                     rect_id = self.cv.create_rectangle(x_log, y_log, x_log + w_log, y_log + h_log, outline=color, width=2, dash=(4, 4))
-                    print(f"[AreaSelector][LOG] Rysuję region #{i}: x={x}, y={y}, w={w}, h={h} (ekran), kolor={color}, rect_id={rect_id}")
                     aid = area_data.get('id', i+1) if isinstance(area_data, dict) else i+1
                     typ = area_data.get('type', '') if isinstance(area_data, dict) else ""
-                    print(f"[AreaSelector][LOG] Region #{i} typ: {typ}")
                 except Exception as e:
                     print(f"[AreaSelector][ERR] Error drawing region {i}: {e}")
                     traceback.print_exc()
@@ -186,8 +167,6 @@ class AreaSelector(tk.Toplevel):
                 'width': phys_width,
                 'height': phys_height
             }
-            print(f"[AreaSelector] Zaznaczenie (ekran): left={left}, top={top}, width={width}, height={height}")
-            print(f"[AreaSelector] Zaznaczenie (fizyczne): left={phys_left}, top={phys_top}, width={phys_width}, height={phys_height}")
         self.destroy()
 
 

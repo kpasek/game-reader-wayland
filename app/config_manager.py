@@ -64,7 +64,6 @@ class ConfigManager:
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             backup_path = f"{path}.{timestamp}.bak"
             shutil.copy2(path, backup_path)
-            print(f"Utworzono kopię zapasową ustawień: {backup_path}")
             return backup_path
         except Exception as e:
             print(f"Błąd tworzenia kopii zapasowej: {e}")

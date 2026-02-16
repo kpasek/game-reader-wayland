@@ -296,7 +296,6 @@ class ReaderThread(threading.Thread):
         max_r = max(m['left'] + m['width'] for m in monitors)
         max_b = max(m['top'] + m['height'] for m in monitors)
         unified_area = {'left': min_l, 'top': min_t, 'width': max_r - min_l, 'height': max_b - min_t}
-        # print(f"DEBUG: Unified Area: {unified_area}")
 
         self.current_unified_area = {
             'left': min_l,
@@ -322,7 +321,7 @@ class ReaderThread(threading.Thread):
                 f.write(f"\n=== SESSION START {datetime.now()} ===\n")
                 f.write("Time | Monitor | Capture(ms) | Pre(ms) | OCR(ms) | Match(ms) | Text | MatchResult\n")
 
-        # print(f"ReaderThread started.")
+        print(f"ReaderThread started.")
 
         while not self.stop_event.is_set():
             try:

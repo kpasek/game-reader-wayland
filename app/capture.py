@@ -50,24 +50,11 @@ class KWinSpectacleWrapper:
 
             img = Image.open(temp_path)
             img.load()
-            
-            # DEBUG: Save full raw capture from Spectacle
-            # if not os.path.exists("debug_spectacle_full_integrity.png"):
-            #      try:
-            #          img.save("debug_spectacle_full_integrity.png")
-            #          print(f"DEBUG: Saved debug_spectacle_full_integrity.png (Size: {img.size})")
-            #      except: pass
+
 
             if x is not None and width is not None:
                 box = (int(x), int(y), int(x + width), int(y + height))
                 img = img.crop(box)
-                
-                # DEBUG: Save immediate crop result
-                     # if not os.path.exists("debug_spectacle_crop_immediate.png"):
-                     #      try:
-                     #          img.save("debug_spectacle_crop_immediate.png")
-                     #          print("DEBUG: Saved debug_spectacle_crop_immediate.png")
-                     #      except: pass
 
             return img
 
@@ -114,7 +101,6 @@ def capture_fullscreen() -> Optional[Image.Image]:
     Pobiera zrzut całego ekranu.
     """
     try:
-        print(f"[capture_fullscreen] backend={SCREENSHOT_BACKEND}")
         if SCREENSHOT_BACKEND == 'kde_spectacle':
             try:
                 grabber = KWinSpectacleWrapper()
@@ -128,24 +114,12 @@ def capture_fullscreen() -> Optional[Image.Image]:
                 sct_img = sct.grab(monitor)
                 return Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
 
-        img = ImageGrab.grab()
-        try:
-            print(f"[capture_fullscreen] grabbed size={img.size}")
-        except Exception:
-            pass
-        return img
+        return ImageGrab.grab()
+
 
     except Exception as e:
         print(f"BŁĄD (capture_fullscreen): {e}", file=sys.stderr)
-        try:
-            img = ImageGrab.grab()
-            try:
-                print(f"[capture_fullscreen][fallback] grabbed size={img.size}")
-            except Exception:
-                pass
-            return img
-        except Exception:
-            return None
+        return None
 
 
 def capture_region(region: Dict[str, int]) -> Optional[Image.Image]:

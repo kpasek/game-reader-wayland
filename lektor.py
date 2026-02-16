@@ -929,7 +929,6 @@ class LektorApp:
             self.refresh_color_canvas() # Update in case Area 1 colors changed in manager
             # Restart reader to apply changes (geometry, enabled state, etc.)
             if self.is_running:
-                print("Obszary zmienione, restartuję czytanie...")
                 self.stop_reading()
                 self.root.after(200, self.start_reading)
 
@@ -1098,7 +1097,6 @@ class LektorApp:
                         sx = sw / iw
                         sy = sh / ih
                         if abs(sx - 1.0) > 0.001 or abs(sy - 1.0) > 0.001:
-                             print(f"[DEBUG] Scaling optimized area from {iw}x{ih} to {sw}x{sh} (x{sx:.2f})")
                              ox = float(ox * sx)
                              oy = float(oy * sy)
                              ow = float(ow * sx)
@@ -1156,12 +1154,8 @@ class LektorApp:
                 pass
             preset_data['areas'] = safe_areas
             try:
-                # Debugging: log how the rect will be normalized to 4K
                 try:
-                    print(f"[DEBUG][opt_save] optimized_area={optimized_area}, new_rect={new_rect}, screen_res={(sw,sh)}")
-                    # Show what normalize_areas_to_4k will produce
                     norm = self.config_mgr.normalize_areas_to_4k(current_areas, (sw, sh))
-                    print(f"[DEBUG][opt_save] normalize_areas_to_4k -> {norm}")
                 except Exception:
                     pass
                 self.config_mgr.save_preset_from_screen(preset_path, preset_data, (sw, sh))

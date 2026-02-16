@@ -145,10 +145,6 @@ class OptimizationWizard(tk.Toplevel):
                 r = sel.geometry
                 rect_tuple = (r['left'], r['top'], r['width'], r['height'])
                 self.frames.append({"image": img, "rect": rect_tuple})
-                try:
-                    print(f"[OptimizationWizard][_add_with_selection] added frame: rect={rect_tuple}, total_frames={len(self.frames)}")
-                except Exception:
-                    pass
                 self.lb_screens.insert(tk.END, f"Zrzut #{len(self.frames)} (Obszar: {rect_tuple})")
         except Exception as e:
             print(f"Error opening selector: {e}")
@@ -177,10 +173,6 @@ class OptimizationWizard(tk.Toplevel):
                     r = sel.geometry
                     rect_tuple = (r['left'], r['top'], r['width'], r['height'])
                     self.frames.append({"image": pil_img, "rect": rect_tuple})
-                    try:
-                        print(f"[OptimizationWizard][_import_screenshot] imported frame: path={path}, rect={rect_tuple}, total_frames={len(self.frames)}")
-                    except Exception:
-                        pass
                     self.lb_screens.insert(tk.END, f"Import - Obszar: {rect_tuple}")
         except Exception as e:
             messagebox.showerror("Błąd", f"Błąd importu: {e}")
@@ -200,7 +192,6 @@ class OptimizationWizard(tk.Toplevel):
 
     def _start_opt(self):
         if not self.frames:
-            messagebox.showerror("Błąd", "Dodaj przynajmniej jeden zrzut ekranu.")
             return
 
         disp_mode = self.var_match_mode.get()
@@ -209,6 +200,5 @@ class OptimizationWizard(tk.Toplevel):
 
         frames = self.frames
         callback = self.on_start
-        print(f"[UI][OptimizationWizard] Uruchomiono optymalizację: frames={len(frames)}, mode={mode}, initial_color={color}")
         self.destroy()
         callback(frames, mode=mode, initial_color=color)
