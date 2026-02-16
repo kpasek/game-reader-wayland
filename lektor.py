@@ -1015,16 +1015,12 @@ class LektorApp:
 
             fw, fh = valid_images[0].size
             fx, fy, real_w, real_h = calculate_merged_area(valid_rects, fw, fh, 0.02)
-            try:
-                print(f"[Lektor][detect_optimal_settings] frames={len(frames_data)}, target_rect={(fx,fy,real_w,real_h)}, mode={mode}, initial_color={initial_color}")
-            except Exception:
-                pass
 
             target_rect = (fx, fy, real_w, real_h)
 
             # Uruchomienie optymalizatora w wątku i pokazanie okna postępu
             prog = ProcessingWindow(self.root, "Trwa optymalizacja...")
-            prog.set_status("Analiza obrazu i szukanie optymalnych ustawień...")
+            prog.set_status("Analiza obrazu i szukanie optymalnych ustawień...\nMoże to potrwać kilka minut. Nie zamykaj tego okna.")
 
             thread_context = {"result": None, "error": None}
 
@@ -1057,7 +1053,7 @@ class LektorApp:
 
     # poprzednie funkcje _show_optimization_setup i _start_optimization_process zostały scalone
 
-    def _on_optimization_finished(self, context, preset_path, preset_data, subtitle_lines):
+    def _on_optimization_finished(self, context, preset_path, preset_data, subtitle_lines=None):
         if context["error"]:
             messagebox.showerror("Błąd", f"Błąd podczas optymalizacji: {context['error']}")
             return
@@ -1086,11 +1082,21 @@ class LektorApp:
             self.config_mgr.backup_preset(preset_path)
 
             target_id = dialog_res.get("target_id")
-            current_areas = preset_data.get('areas', [])
-            
+            sw, sh = self._get_screen_size()
+            screen_preset = self.config_mgr.get_preset_for_resolution(preset_path, (sw, sh))
+            current_areas = screen_preset.get('areas', [])
+
             if optimized_area:
                 ox, oy, ow, oh = optimized_area
                 new_rect = {'left': int(ox), 'top': int(oy), 'width': int(ow), 'height': int(oh)}
+
+                # Sanitize best_settings to avoid embedding 'areas'/'monitor' or
+                # other large structures into area['settings'] which would
+                # later cause nested/circular data during normalization.
+                try:
+                    sanitized_best = {k: v for k, v in (best_settings or {}).items() if k not in ('areas', 'monitor')}
+                except Exception:
+                    sanitized_best = best_settings or {}
 
                 if target_id is None:
                     existing_ids = [a.get('id', 0) for a in current_areas]
@@ -1100,14 +1106,17 @@ class LektorApp:
                         "type": "continuous",
                         "rect": new_rect,
                         "hotkey": "",
-                        "settings": best_settings
+                        "settings": sanitized_best
                     })
                 else:
                     for area in current_areas:
                         if area.get('id') == target_id:
                             area['rect'] = new_rect
-                            if 'settings' not in area: area['settings'] = {}
-                            area['settings'].update(best_settings)
+                            if 'settings' not in area:
+                                area['settings'] = {}
+                            # Update only allowed keys
+                            if isinstance(area['settings'], dict) and isinstance(sanitized_best, dict):
+                                area['settings'].update(sanitized_best)
                             break
             elif target_id is not None:
                 for area in current_areas:
@@ -1116,11 +1125,26 @@ class LektorApp:
                         area['settings'].update(best_settings)
                         break
 
-            preset_data['areas'] = current_areas
-            
-            # Save preset
-            sw, sh = self._get_screen_size()
+            # Work on a deep copy and sanitize nested settings to remove any
+            # accidental 'areas'/'monitor' keys before handing to ConfigManager.
+            import copy as _copy
+            safe_areas = _copy.deepcopy(current_areas)
             try:
+                for a in safe_areas:
+                    if isinstance(a, dict) and 'settings' in a and isinstance(a['settings'], dict):
+                        a['settings'] = {k: v for k, v in a['settings'].items() if k not in ('areas', 'monitor')}
+            except Exception:
+                pass
+            preset_data['areas'] = safe_areas
+            try:
+                # Debugging: log how the rect will be normalized to 4K
+                try:
+                    print(f"[DEBUG][opt_save] optimized_area={optimized_area}, new_rect={new_rect}, screen_res={(sw,sh)}")
+                    # Show what normalize_areas_to_4k will produce
+                    norm = self.config_mgr.normalize_areas_to_4k(current_areas, (sw, sh))
+                    print(f"[DEBUG][opt_save] normalize_areas_to_4k -> {norm}")
+                except Exception:
+                    pass
                 self.config_mgr.save_preset_from_screen(preset_path, preset_data, (sw, sh))
             except Exception as e:
                 messagebox.showerror("Błąd", f"Zapis nieudany: {e}")

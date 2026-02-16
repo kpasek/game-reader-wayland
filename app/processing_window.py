@@ -22,7 +22,12 @@ class ProcessingWindow(tk.Toplevel):
         main_f = ttk.Frame(self, padding=20)
         main_f.pack(fill=tk.BOTH, expand=True)
 
-        self.lbl_status = ttk.Label(main_f, text="Trwa optymalizacja ustawień...\nTo może chwilę potrwać.", justify=tk.CENTER)
+        # Warn user that optimization may be long-running when progressbar is shown
+        self.lbl_status = ttk.Label(
+            main_f,
+            text=("Trwa optymalizacja ustawień...\n"),
+            justify=tk.CENTER
+        )
         self.lbl_status.pack(pady=10)
 
         self.progress = ttk.Progressbar(main_f, mode='indeterminate')

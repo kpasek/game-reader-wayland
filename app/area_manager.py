@@ -49,11 +49,7 @@ class AreaManagerWindow(tk.Toplevel):
         self.config_mgr: Optional[ConfigManager] = app.config_mgr
         self.subtitle_lines: Optional[List[Dict[str, Any]]] = subtitle_lines
 
-        # Determine source resolution (screen) for scaling from the LektorApp.
-        try:
-            sw, sh = self.app._get_screen_size()
-        except Exception:
-            sw, sh = 3840, 2160
+        sw, sh = self.app._get_screen_size()
 
         preset_display = {}
         cfg_path = self.config_mgr.preset_path if self.config_mgr else None
