@@ -127,7 +127,7 @@ class SettingsOptimizer:
             "color_tolerances": range(1, 30, 1),
             "thickenings": [0, 1],
             "contrasts": [round(x * 0.2, 2) for x in range(0, 11)],
-            "brightness_threshold": range(100, 255, 2)
+            "brightness_threshold": range(150, 255, 2)
         }
 
         # Generujemy pełną listę wszystkich kombinacji ustawień do sprawdzenia

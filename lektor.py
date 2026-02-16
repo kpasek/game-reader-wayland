@@ -1022,7 +1022,7 @@ class LektorApp:
             prog = ProcessingWindow(self.root, "Trwa optymalizacja...")
             prog.set_status("Analiza obrazu i szukanie optymalnych ustawień...\nMoże to potrwać kilka minut. Nie zamykaj tego okna.")
 
-            thread_context = {"result": None, "error": None}
+            thread_context = {"result": None, "error": None, "img_size": (fw, fh)}
 
             def worker():
                 try:
@@ -1072,6 +1072,7 @@ class LektorApp:
 
         best_settings = result.get('settings', {})
         optimized_area = result.get('optimized_area')
+        img_size = context.get('img_size')
         
         # UI Callback definition
         def on_apply(dialog_res):
@@ -1088,7 +1089,22 @@ class LektorApp:
 
             if optimized_area:
                 ox, oy, ow, oh = optimized_area
-                new_rect = {'left': int(ox), 'top': int(oy), 'width': int(ow), 'height': int(oh)}
+                
+                # FIX: Przelicz koordynaty z rodzielczości obrazu (img_size) na rozdzielczość "ekranu" (sw, sh)
+                # Jeśli Lektor "myśli", że jest w 4K (sw=3840), a obraz był w 2K, musimy przeskalować rect w górę.
+                if img_size:
+                    iw, ih = img_size
+                    if iw > 0 and ih > 0:
+                        sx = sw / iw
+                        sy = sh / ih
+                        if abs(sx - 1.0) > 0.001 or abs(sy - 1.0) > 0.001:
+                             print(f"[DEBUG] Scaling optimized area from {iw}x{ih} to {sw}x{sh} (x{sx:.2f})")
+                             ox = float(ox * sx)
+                             oy = float(oy * sy)
+                             ow = float(ow * sx)
+                             oh = float(oh * sy)
+
+                new_rect = {'left': int(round(ox)), 'top': int(round(oy)), 'width': int(round(ow)), 'height': int(round(oh))}
 
                 # Sanitize best_settings to avoid embedding 'areas'/'monitor' or
                 # other large structures into area['settings'] which would
