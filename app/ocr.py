@@ -108,30 +108,18 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager, override
         thickening = preset.get("text_thickening", [])
         valid_colors = [c for c in subtitle_colors if c]
 
-        # Debug: Save original crop before processing
-        # if preset.get('save_debug_crops', True): # Default True for now to debug
-        #     try:
-        #         image.save("debug_raw_crop.png")
-        #     except: pass
 
         if valid_colors:
             tolerance = preset.get("color_tolerance", 10)
-            
-            # DEBUG
-            # if preset.get('save_debug_crops', True):
-            #      image.save(f"debug_before_remove_bg.png")
+
 
             image = remove_background(image, valid_colors, tolerance=tolerance)
-            
-            # DEBUG
-            # if preset.get('save_debug_crops', True):
-            #      image.save(f"debug_after_remove_bg.png")
+
 
             if thickening > 0:
                 filter_size = (thickening * 2) + 1
                 image = image.filter(ImageFilter.MaxFilter(filter_size))
-            # if preset.get('show_debug', False):
-            #     image.save("debug_img.png")
+
             text_color = "Light"
 
         if contrast != 0 and not valid_colors:

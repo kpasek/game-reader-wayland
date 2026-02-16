@@ -248,14 +248,10 @@ class ReaderThread(threading.Thread):
                 self.log_queue.put({"time": "ERROR", "line_text": "Nie znaleziono aktywnych obszarów. Sprawdź konfigurację."})
             return
         
-        # print(f"DEBUG: Valid areas: {len(valid_areas)}")
         
         # Initialize enabled continuous areas from config
         self.enabled_continuous_areas = set()
         for area in valid_areas:
-            # Area 1 is always implicitly enabled, we only track others here for filtering?
-            # Actually, logic below says "if area_id != 1 and area_id not in self.enabled_continuous_areas: continue"
-            # So we MUST add enabled areas here.
             if area.get('type') == 'continuous' and area.get('enabled', False):
                 self.enabled_continuous_areas.add(area.get('id'))
 
@@ -334,15 +330,7 @@ class ReaderThread(threading.Thread):
                     self.img_queue.get_nowait()
                 except queue.Empty:
                     pass
-            
-            # Zapisz pierwszy zrzut ekranu tylko jeśli włączony jest tryb DEBUG w ustawieniach
-            # if not getattr(self, '_debug_capture_saved', False) and self.config_manager.settings.get('debug', False):
-            #     if hasattr(full_img, 'save'):
-            #         try:
-            #             full_img.save("debug_first_capture.png")
-            #             self._debug_capture_saved = True
-            #         except Exception:
-            #             pass
+
 
             for idx, area_obj in enumerate(valid_areas):
                 t_start_proc = time.perf_counter()

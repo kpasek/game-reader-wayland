@@ -202,9 +202,6 @@ class ConfigManager:
             with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
 
-            # Normal load; no debug logs
-
-            # Uzupełnianie brakujących kluczy domyślnymi
             for k, v in DEFAULT_PRESET_CONTENT.items():
                 if k not in data:
                     data[k] = v
