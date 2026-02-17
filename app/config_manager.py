@@ -160,6 +160,150 @@ class ConfigManager:
         if self.preset_path:
             self.save_preset(self.preset_path, data)
 
+    # Additional preset properties used across the app
+    @property
+    def ocr_scale_factor(self) -> float:
+        return float(self._current_preset().get('ocr_scale_factor', DEFAULT_PRESET_CONTENT.get('ocr_scale_factor', 0.5)))
+
+    @ocr_scale_factor.setter
+    def ocr_scale_factor(self, value: float):
+        data = self._current_preset()
+        data['ocr_scale_factor'] = float(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, data)
+
+    @property
+    def text_alignment(self) -> str:
+        return str(self._current_preset().get('text_alignment', DEFAULT_PRESET_CONTENT.get('text_alignment', 'None')))
+
+    @text_alignment.setter
+    def text_alignment(self, value: str):
+        data = self._current_preset()
+        data['text_alignment'] = str(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, data)
+
+    @property
+    def save_logs(self) -> bool:
+        return bool(self._current_preset().get('save_logs', DEFAULT_PRESET_CONTENT.get('save_logs', False)))
+
+    @save_logs.setter
+    def save_logs(self, value: bool):
+        data = self._current_preset()
+        data['save_logs'] = bool(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, data)
+
+    @property
+    def min_line_length(self) -> int:
+        return int(self._current_preset().get('min_line_length', DEFAULT_PRESET_CONTENT.get('min_line_length', 3)))
+
+    @min_line_length.setter
+    def min_line_length(self, value: int):
+        data = self._current_preset()
+        data['min_line_length'] = int(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, data)
+
+    @property
+    def text_file_path(self) -> str:
+        return str(self._current_preset().get('text_file_path', DEFAULT_PRESET_CONTENT.get('text_file_path', 'subtitles.txt')))
+
+    @text_file_path.setter
+    def text_file_path(self, value: str):
+        data = self._current_preset()
+        data['text_file_path'] = str(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, data)
+
+    @property
+    def audio_dir(self) -> str:
+        return str(self._current_preset().get('audio_dir', DEFAULT_PRESET_CONTENT.get('audio_dir', 'audio')))
+
+    @audio_dir.setter
+    def audio_dir(self, value: str):
+        data = self._current_preset()
+        data['audio_dir'] = str(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, data)
+
+    @property
+    def audio_ext(self) -> str:
+        return str(self._current_preset().get('audio_ext', DEFAULT_PRESET_CONTENT.get('audio_ext', '.mp3')))
+
+    @audio_ext.setter
+    def audio_ext(self, value: str):
+        data = self._current_preset()
+        data['audio_ext'] = str(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, data)
+
+    @property
+    def text_color_mode(self) -> str:
+        return str(self._current_preset().get('text_color_mode', DEFAULT_PRESET_CONTENT.get('text_color_mode', 'Light')))
+
+    @text_color_mode.setter
+    def text_color_mode(self, value: str):
+        data = self._current_preset()
+        data['text_color_mode'] = str(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, data)
+
+    @property
+    def brightness_threshold(self) -> int:
+        return int(self._current_preset().get('brightness_threshold', self.settings.get('brightness_threshold', 200)))
+
+    @brightness_threshold.setter
+    def brightness_threshold(self, value: int):
+        data = self._current_preset()
+        data['brightness_threshold'] = int(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, data)
+
+    @property
+    def color_tolerance(self) -> int:
+        return int(self._current_preset().get('color_tolerance', DEFAULT_PRESET_CONTENT.get('color_tolerance', 10)))
+
+    @color_tolerance.setter
+    def color_tolerance(self, value: int):
+        data = self._current_preset()
+        data['color_tolerance'] = int(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, data)
+
+    @property
+    def text_thickening(self) -> int:
+        return int(self._current_preset().get('text_thickening', DEFAULT_PRESET_CONTENT.get('text_thickening', 0)))
+
+    @text_thickening.setter
+    def text_thickening(self, value: int):
+        data = self._current_preset()
+        data['text_thickening'] = int(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, data)
+
+    @property
+    def subtitle_colors(self) -> List[str]:
+        return list(self._current_preset().get('subtitle_colors', DEFAULT_PRESET_CONTENT.get('subtitle_colors', [])))
+
+    @subtitle_colors.setter
+    def subtitle_colors(self, value: List[str]):
+        data = self._current_preset()
+        data['subtitle_colors'] = list(value) if value is not None else []
+        if self.preset_path:
+            self.save_preset(self.preset_path, data)
+
+    @property
+    def auto_remove_names(self) -> bool:
+        return bool(self._current_preset().get('auto_remove_names', DEFAULT_PRESET_CONTENT.get('auto_remove_names', True)))
+
+    @auto_remove_names.setter
+    def auto_remove_names(self, value: bool):
+        data = self._current_preset()
+        data['auto_remove_names'] = bool(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, data)
+
 
     def backup_preset(self, path: str) -> Optional[str]:
         """Tworzy kopię zapasową pliku preset z timestampem."""

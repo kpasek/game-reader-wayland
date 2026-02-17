@@ -98,19 +98,20 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager, override
     Zwraca krotkę: (przetworzony_obraz, czy_zawiera_tresc, bbox).
     """
     try:
-        preset = config_manager.load_preset()
-        text_color = preset.get('text_color_mode', 'Light')
-        brightness_threshold = preset.get("brightness_threshold", 200)
-        align_mode = preset.get('text_alignment', "None")
-        scale = preset.get("ocr_scale_factor", 0.5)
-        contrast = preset.get("contract", 0)
-        subtitle_colors = override_colors if override_colors is not None else preset.get("subtitle_colors", [])
-        thickening = preset.get("text_thickening", [])
+        # Use ConfigManager properties instead of raw preset dict
+        text_color = config_manager.text_color_mode
+        brightness_threshold = config_manager.brightness_threshold
+        align_mode = config_manager.text_alignment
+        scale = config_manager.ocr_scale_factor
+        # backward-compatible key: some presets may have 'contrast' misspelled; fall back to 0
+        contrast = config_manager._current_preset().get('contrast', 0) or config_manager._current_preset().get('contract', 0) or 0
+        subtitle_colors = override_colors if override_colors is not None else config_manager.subtitle_colors
+        thickening = config_manager.text_thickening
         valid_colors = [c for c in subtitle_colors if c]
 
 
         if valid_colors:
-            tolerance = preset.get("color_tolerance", 10)
+            tolerance = config_manager.color_tolerance
 
 
             image = remove_background(image, valid_colors, tolerance=tolerance)
@@ -219,7 +220,8 @@ def recognize_text(image: Image.Image, config_manager: ConfigManager) -> str:
     """
     Główna funkcja OCR.
     """
-    preset = config_manager.load_preset()
+    # Use ConfigManager to read behaviour flags
+    # note: we keep backward compatibility by consulting preset dict via helper where needed
 
     try:
         if HAS_CONFIG_FILE:
@@ -231,8 +233,7 @@ def recognize_text(image: Image.Image, config_manager: ConfigManager) -> str:
         if not text: return ""
 
         text = text.strip().replace('\n', ' ')
-        auto_remove_names = preset.get('auto_remove_names')
-        if auto_remove_names:
+        if config_manager.auto_remove_names:
             text = smart_remove_name(text)
         return text
     except Exception as e:

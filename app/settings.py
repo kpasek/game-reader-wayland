@@ -26,6 +26,7 @@ class SettingsDialog(tk.Toplevel):
         # Zmienne UI (Globalne)
         self.var_brightness_threshold = tk.IntVar(value=settings.get('brightness_threshold', 150))
         self.var_hk_start = tk.StringVar(value=settings.get('hotkey_start_stop', '<f2>'))
+        self.var_hk_area3 = tk.StringVar(value=settings.get('hotkey_area3', '<f3>'))
 
         self._ensure_app_vars()
 
@@ -44,28 +45,22 @@ class SettingsDialog(tk.Toplevel):
         if not hasattr(self.app, 'var_partial_min_len'): self.app.var_partial_min_len = tk.IntVar()
         if not hasattr(self.app, 'var_similarity'): self.app.var_similarity = tk.IntVar()
 
-        # Inicjalizuj wartości z przekazanych ustawień (fallbacky zgodne z użyciem w kodzie)
-        try:
-            self.app.var_match_score_short.set(int(self.settings.get('match_score_short', 90)))
-        except Exception:
-            pass
-        try:
-            self.app.var_match_score_long.set(int(self.settings.get('match_score_long', 75)))
-        except Exception:
-            pass
-        try:
-            self.app.var_match_len_diff.set(float(self.settings.get('match_len_diff_ratio', 0.25)))
-        except Exception:
-            pass
-        try:
-            self.app.var_partial_min_len.set(int(self.settings.get('partial_mode_min_len', 25)))
-        except Exception:
-            pass
-        try:
+        # Inicjalizuj wartości z `ConfigManager` (preferuj properties);
+        # fallback na `self.settings` gdy `config_mgr` nie jest dostępny.
+        if hasattr(self.app, 'config_mgr') and self.app.config_mgr:
+            cm = self.app.config_mgr
+            self.app.var_match_score_short.set(int(cm.match_score_short))
+            self.app.var_match_score_long.set(int(cm.match_score_long))
+            self.app.var_match_len_diff.set(float(cm.match_len_diff_ratio))
+            self.app.var_partial_min_len.set(int(cm.partial_mode_min_len))
             # similarity jest zapisywane jako liczba (np. 5.0) — traktujemy jako int procentowy
+            self.app.var_similarity.set(int(cm.similarity))
+        else:
+            self.app.var_match_score_short.set(int(self.settings.get('match_score_short', 90)))
+            self.app.var_match_score_long.set(int(self.settings.get('match_score_long', 75)))
+            self.app.var_match_len_diff.set(float(self.settings.get('match_len_diff_ratio', 0.25)))
+            self.app.var_partial_min_len.set(int(self.settings.get('partial_mode_min_len', 25)))
             self.app.var_similarity.set(int(self.settings.get('similarity', 5)))
-        except Exception:
-            pass
 
 
     def _build_ui(self):
@@ -260,4 +255,5 @@ class SettingsDialog(tk.Toplevel):
     def save(self):
         # Zapisz ustawienia globalne
         self.settings['hotkey_start_stop'] = self.var_hk_start.get()
+        self.settings['hotkey_area3'] = self.var_hk_area3.get()
         self.destroy()

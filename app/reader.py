@@ -109,14 +109,10 @@ class ReaderThread(threading.Thread):
 
         self.ocr_scale = 1.0
         self.empty_threshold = 0.15
-        self.text_alignment = "None"
-        self.save_logs = False
+        # config-managed values (access via ConfigManager when needed)
 
-        self.matcher_config = {}
-        self.audio_speed_inc = 1.2
-
-        text_color_mode = config_manager.settings.get('text_color_mode', 'Light')
-        self.text_color = text_color_mode
+        # Use ConfigManager for text color
+        self.text_color = config_manager.text_color_mode
 
         self.ocr_binarize = True
 
@@ -198,25 +194,22 @@ class ReaderThread(threading.Thread):
         preset = self.config_manager.load_preset()
         if not preset: return
 
-        # Ładowanie parametrów
-        self.ocr_scale = preset.get('ocr_scale_factor', 1.0)
-        self.text_alignment = preset.get('text_alignment', "None")
-        self.save_logs = preset.get('save_logs', False)
+        # Ładowanie parametrów z ConfigManager (zawiera domyślne)
         interval = self.config_manager.capture_interval
         similarity = self.config_manager.similarity
-        min_line_len = preset.get('min_line_length', 0)
+        min_line_len = self.config_manager.min_line_length
 
-        self.audio_speed_inc = self.config_manager.audio_speed_inc
+        audio_speed = self.config_manager.audio_speed_inc
 
-        # Konfiguracja dla matchera
-        self.matcher_config = {
+        # Konfiguracja dla matchera (lokalna zmienna)
+        matcher_config = {
             'match_score_short': self.config_manager.match_score_short,
             'match_score_long': self.config_manager.match_score_long,
             'match_len_diff_ratio': self.config_manager.match_len_diff_ratio,
             'partial_mode_min_len': self.config_manager.partial_mode_min_len
         }
 
-        raw_subtitles = ConfigManager.load_text_lines(preset.get('text_file_path'))
+        raw_subtitles = ConfigManager.load_text_lines(self.config_manager.text_file_path)
         precomputed_data = precompute_subtitles(raw_subtitles, min_line_len) if raw_subtitles else ([], {})
 
         # --- LOAD AREAS ---
@@ -302,8 +295,8 @@ class ReaderThread(threading.Thread):
 
         queue_size = 4
         self.img_queue = queue.Queue(maxsize=queue_size)
-        audio_dir = preset.get('audio_dir', '')
-        audio_ext = preset.get('audio_ext', '.mp3')
+        audio_dir = self.config_manager.audio_dir
+        audio_ext = self.config_manager.audio_ext
 
         capture_worker = CaptureWorker(self.stop_event, self.img_queue, unified_area, interval, log_queue=self.log_queue)
         capture_worker.start()
@@ -418,7 +411,7 @@ class ReaderThread(threading.Thread):
                 # Przekazanie dynamicznego trybu dopasowania (Area Specific)
                 match = find_best_match(text, precomputed_data, current_subtitle_mode,
                                         last_index=self.last_matched_idx,
-                                        matcher_config=self.matcher_config)
+                                        matcher_config=matcher_config)
                 t_match = (time.perf_counter() - t_match_start) * 1000
 
                 if self.log_queue:
@@ -435,7 +428,7 @@ class ReaderThread(threading.Thread):
                         }
                     }
                     self.log_queue.put(log_entry)
-                    if self.save_logs:
+                    if self.config_manager.save_logs:
                         with open("session_log.txt", "a", encoding='utf-8') as f:
                             match_str = f"MATCH({match[1]}%): {line_txt}" if match else "NO MATCH"
                             log_line = (f"{log_entry['time']} | A{area_id} | "
@@ -458,7 +451,7 @@ class ReaderThread(threading.Thread):
                         speed_multiplier = 1.0
 
                         if q_size > 0:
-                            speed_multiplier = self.audio_speed_inc
+                            speed_multiplier = audio_speed
 
                         self.audio_queue.put((audio_path, speed_multiplier))
 
