@@ -202,18 +202,18 @@ class ReaderThread(threading.Thread):
         self.ocr_scale = preset.get('ocr_scale_factor', 1.0)
         self.text_alignment = preset.get('text_alignment', "None")
         self.save_logs = preset.get('save_logs', False)
-        interval = preset.get('capture_interval', 0.5)
-        similarity = preset.get('similarity', 5.0)
+        interval = self.config_manager.capture_interval
+        similarity = self.config_manager.similarity
         min_line_len = preset.get('min_line_length', 0)
 
-        self.audio_speed_inc = preset.get('audio_speed_inc', 1.20)
+        self.audio_speed_inc = self.config_manager.audio_speed_inc
 
         # Konfiguracja dla matchera
         self.matcher_config = {
-            'match_score_short': preset.get('match_score_short', 90),
-            'match_score_long': preset.get('match_score_long', 75),
-            'match_len_diff_ratio': preset.get('match_len_diff_ratio', 0.25),
-            'partial_mode_min_len': preset.get('partial_mode_min_len', 25)
+            'match_score_short': self.config_manager.match_score_short,
+            'match_score_long': self.config_manager.match_score_long,
+            'match_len_diff_ratio': self.config_manager.match_len_diff_ratio,
+            'partial_mode_min_len': self.config_manager.partial_mode_min_len
         }
 
         raw_subtitles = ConfigManager.load_text_lines(preset.get('text_file_path'))

@@ -55,6 +55,112 @@ class ConfigManager:
         self.settings = DEFAULT_CONFIG.copy()
         self.load_app_config()
 
+    # --------------------- Typed accessors (properties) ---------------------
+    # These provide attribute-style access instead of using raw dict keys.
+    def _current_preset(self) -> Dict[str, Any]:
+        """Helper returning the currently loaded preset dict (may be empty)."""
+        p = self.load_preset(self.preset_path) if self.preset_path else self.load_preset()
+        if p is None:
+            return {}
+        return p
+
+    # App-level settings
+    @property
+    def hotkey_start_stop(self) -> str:
+        return self.settings.get('hotkey_start_stop', DEFAULT_CONFIG.get('hotkey_start_stop'))
+
+    @hotkey_start_stop.setter
+    def hotkey_start_stop(self, value: str):
+        self.update_setting('hotkey_start_stop', value)
+
+    @property
+    def hotkey_area3(self) -> str:
+        return self.settings.get('hotkey_area3', DEFAULT_CONFIG.get('hotkey_area3'))
+
+    @hotkey_area3.setter
+    def hotkey_area3(self, value: str):
+        self.update_setting('hotkey_area3', value)
+
+    # Preset-level shortcuts (operate on currently opened preset)
+    @property
+    def capture_interval(self) -> float:
+        return float(self._current_preset().get('capture_interval', DEFAULT_PRESET_CONTENT.get('capture_interval', 0.5)))
+
+    @capture_interval.setter
+    def capture_interval(self, value: float):
+        data = self._current_preset()
+        data['capture_interval'] = float(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, data)
+
+    @property
+    def similarity(self) -> float:
+        # similarity historically used as percent (e.g. 5)
+        return float(self._current_preset().get('similarity', self.settings.get('similarity', 5)))
+
+    @similarity.setter
+    def similarity(self, value: float):
+        data = self._current_preset()
+        data['similarity'] = float(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, data)
+
+    @property
+    def partial_mode_min_len(self) -> int:
+        return int(self._current_preset().get('partial_mode_min_len', DEFAULT_PRESET_CONTENT.get('partial_mode_min_len', 25)))
+
+    @partial_mode_min_len.setter
+    def partial_mode_min_len(self, value: int):
+        data = self._current_preset()
+        data['partial_mode_min_len'] = int(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, data)
+
+    @property
+    def match_len_diff_ratio(self) -> float:
+        return float(self._current_preset().get('match_len_diff_ratio', DEFAULT_PRESET_CONTENT.get('match_len_diff_ratio', 0.25)))
+
+    @match_len_diff_ratio.setter
+    def match_len_diff_ratio(self, value: float):
+        data = self._current_preset()
+        data['match_len_diff_ratio'] = float(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, data)
+
+    @property
+    def match_score_short(self) -> int:
+        return int(self._current_preset().get('match_score_short', DEFAULT_PRESET_CONTENT.get('match_score_short', 90)))
+
+    @match_score_short.setter
+    def match_score_short(self, value: int):
+        data = self._current_preset()
+        data['match_score_short'] = int(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, data)
+
+    @property
+    def match_score_long(self) -> int:
+        return int(self._current_preset().get('match_score_long', DEFAULT_PRESET_CONTENT.get('match_score_long', 75)))
+
+    @match_score_long.setter
+    def match_score_long(self, value: int):
+        data = self._current_preset()
+        data['match_score_long'] = int(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, data)
+
+    @property
+    def audio_speed_inc(self) -> float:
+        return float(self._current_preset().get('audio_speed_inc', DEFAULT_PRESET_CONTENT.get('audio_speed_inc', 1.2)))
+
+    @audio_speed_inc.setter
+    def audio_speed_inc(self, value: float):
+        data = self._current_preset()
+        data['audio_speed_inc'] = float(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, data)
+
+
     def backup_preset(self, path: str) -> Optional[str]:
         """Tworzy kopię zapasową pliku preset z timestampem."""
         if not path or not os.path.exists(path):

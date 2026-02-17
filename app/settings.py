@@ -222,8 +222,6 @@ class SettingsDialog(tk.Toplevel):
         lf_hk.pack(fill=tk.X, pady=10, padx=10)
         ttk.Label(lf_hk, text="Start / Stop:").pack(anchor=tk.W)
         ttk.Entry(lf_hk, textvariable=self.var_hk_start).pack(fill=tk.X, pady=(0, 10))
-        ttk.Label(lf_hk, text="Obszar 3 (Czasowy):").pack(anchor=tk.W)
-        ttk.Entry(lf_hk, textvariable=self.var_hk_area3).pack(fill=tk.X, pady=(0, 10))
         ttk.Label(lf_hk, text="Przykłady: <ctrl>+<f5>, <alt>+x, <f9>", foreground="gray").pack(anchor=tk.W)
 
     def _add_slider(self, parent, label, variable, from_, to, config_key, fmt="{:.2f}", resolution=None):
