@@ -26,12 +26,11 @@ class SettingsDialog(tk.Toplevel):
         # Zmienne UI (Globalne)
         self.var_brightness_threshold = tk.IntVar(value=settings.get('brightness_threshold', 150))
         self.var_hk_start = tk.StringVar(value=settings.get('hotkey_start_stop', '<f2>'))
-        self.var_hk_area3 = tk.StringVar(value=settings.get('hotkey_area3', '<f3>'))
 
         self._ensure_app_vars()
 
         self._build_ui()
-        self.geometry("700x750")
+        self.geometry("700x900")
         self.grab_set()
 
     def _ensure_app_vars(self):
@@ -43,24 +42,44 @@ class SettingsDialog(tk.Toplevel):
         if not hasattr(self.app, 'var_match_score_long'): self.app.var_match_score_long = tk.IntVar()
         if not hasattr(self.app, 'var_match_len_diff'): self.app.var_match_len_diff = tk.DoubleVar()
         if not hasattr(self.app, 'var_partial_min_len'): self.app.var_partial_min_len = tk.IntVar()
+        if not hasattr(self.app, 'var_similarity'): self.app.var_similarity = tk.IntVar()
+
+        # Inicjalizuj wartości z przekazanych ustawień (fallbacky zgodne z użyciem w kodzie)
+        try:
+            self.app.var_match_score_short.set(int(self.settings.get('match_score_short', 90)))
+        except Exception:
+            pass
+        try:
+            self.app.var_match_score_long.set(int(self.settings.get('match_score_long', 75)))
+        except Exception:
+            pass
+        try:
+            self.app.var_match_len_diff.set(float(self.settings.get('match_len_diff_ratio', 0.25)))
+        except Exception:
+            pass
+        try:
+            self.app.var_partial_min_len.set(int(self.settings.get('partial_mode_min_len', 25)))
+        except Exception:
+            pass
+        try:
+            # similarity jest zapisywane jako liczba (np. 5.0) — traktujemy jako int procentowy
+            self.app.var_similarity.set(int(self.settings.get('similarity', 5)))
+        except Exception:
+            pass
 
 
     def _build_ui(self):
         tabs = ttk.Notebook(self)
         tabs.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-        # Jeden tab: Ustawienia
+        
         tab_main = ttk.Frame(tabs)
         tab_hk = ttk.Frame(tabs)
 
         tabs.add(tab_main, text="Ustawienia")
         tabs.add(tab_hk, text="Skróty klawiszowe")
-
-        # Jeden scrollowany panel z całością ustawień
-        self._setup_scroll_frame(tab_main, self._fill_main_tab)
+        self._fill_main_tab(tab_main)
         self._fill_hk_tab(tab_hk)
 
-        # Przyciski
         btn_f = ttk.Frame(self)
         btn_f.pack(side=tk.BOTTOM, fill=tk.X, pady=10, padx=10)
         ttk.Button(btn_f, text="Zapisz", command=self.save).pack(side=tk.RIGHT)
@@ -87,8 +106,6 @@ class SettingsDialog(tk.Toplevel):
 
         fill_function(scrollable_frame)
 
-    # ================= ZAWARTOSC TABÓW =================
-
 
     def _fill_main_tab(self, pnl):
         # 1. Konfiguracja Obrazu (Filtry)
@@ -100,7 +117,9 @@ class SettingsDialog(tk.Toplevel):
         grp_ocr.pack(fill=tk.X, pady=10, padx=10)
 
         self._add_slider(grp_ocr, "Częstotliwość skanowania (s):", self.app.var_capture_interval, 0.3, 1.0, "capture_interval", fmt="{:.2f}s")
-            # Usunięto suwak Skala OCR
+        self._add_slider(grp_ocr, "Minimalne podobieństwo zrzutów (%):", self.app.var_similarity, 1, 15,
+                         "similarity", fmt="{:.0f}%", resolution=1)
+
         ttk.Checkbutton(grp_ocr, text="DEBUG: Pokaż obszar wykrytych napisów", variable=self.app.var_show_debug,
                         command=lambda: self.app._save_preset_val("show_debug", self.app.var_show_debug.get())).pack(
             anchor=tk.W, pady=2)
@@ -109,14 +128,16 @@ class SettingsDialog(tk.Toplevel):
         grp_opt = ttk.LabelFrame(pnl, text="Optymalizacja Tekstu", padding=10)
         grp_opt.pack(fill=tk.X, pady=10, padx=10)
 
-        f_align = ttk.Frame(grp_opt)
-        f_align.pack(fill=tk.X, pady=5)
-        ttk.Label(f_align, text="Wyrównanie tekstu:").pack(side=tk.LEFT)
-        cb_align = ttk.Combobox(f_align, textvariable=self.app.var_text_alignment, values=["None","Left", "Center", "Right"],
-                                state="readonly", width=15)
-        cb_align.pack(side=tk.LEFT, padx=5)
-        cb_align.bind("<<ComboboxSelected>>",
-                      lambda e: self.app._save_preset_val("text_alignment", self.app.var_text_alignment.get()))
+        self._add_slider(grp_opt, "Minimalna długość dla partial (zn):", self.app.var_partial_min_len, 5, 50,
+                         "partial_mode_min_len", fmt="{:.0f}", resolution=1)
+
+        self._add_slider(grp_opt, "Max różnica długości (ratio):", self.app.var_match_len_diff, 0.0, 0.5,
+                         "match_len_diff_ratio", fmt="{:.2f}", resolution=0.05)
+
+        self._add_slider(grp_opt, "Min score (krótkie <=6 zn):", self.app.var_match_score_short, 50, 100,
+                         "match_score_short", fmt="{:.0f}", resolution=1)
+        self._add_slider(grp_opt, "Min score (długie):", self.app.var_match_score_long, 50, 100,
+                         "match_score_long", fmt="{:.0f}", resolution=1)
 
         f_color = ttk.Frame(grp_opt)
         f_color.pack(fill=tk.X, pady=5)
@@ -219,10 +240,8 @@ class SettingsDialog(tk.Toplevel):
         scale = ttk.Scale(f, from_=from_, to=to, variable=variable,
                           command=lambda v: val_lbl.config(text=fmt.format(float(v))))
 
-        # Opcjonalnie podmieniamy callback, żeby zaokrąglał wynik przy zapisie
         def on_release(event):
             val = variable.get()
-            # Jeśli to int, rzutujemy na int przy zapisie
             if isinstance(variable, tk.IntVar):
                 val = int(round(val))
             else:
@@ -231,8 +250,8 @@ class SettingsDialog(tk.Toplevel):
                 if resolution >= 0.01:
                     val = round(val, 3)
 
-            variable.set(val)  # Aktualizuj zmienną w UI
-            val_lbl.config(text=fmt.format(val))  # Aktualizuj label
+            variable.set(val)
+            val_lbl.config(text=fmt.format(val))
             self.app._save_preset_val(config_key, val)
 
         scale.bind("<ButtonRelease-1>", on_release)
@@ -243,5 +262,4 @@ class SettingsDialog(tk.Toplevel):
     def save(self):
         # Zapisz ustawienia globalne
         self.settings['hotkey_start_stop'] = self.var_hk_start.get()
-        self.settings['hotkey_area3'] = self.var_hk_area3.get()
         self.destroy()
