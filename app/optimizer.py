@@ -308,7 +308,7 @@ class SettingsOptimizer:
             if not ocr_text or len(ocr_text.strip()) < 2:
                 return 0, None
 
-            match_result = find_best_match(ocr_text, precomputed_db, mode=match_mode)
+            match_result = find_best_match(ocr_text, precomputed_db, mode=match_mode, matcher_config=mock_cfg)
         except Exception:
             # Jeśli cokolwiek pójdzie nie tak (preprocess/OCR/matching), traktujemy jako brak wyniku
             return 0, None

@@ -6,6 +6,12 @@ MATCH_MODE_PARTIAL = "Partial"
 import re
 from typing import List, Optional, Tuple, Dict, Any
 from app.text_processing import clean_text, smart_remove_name
+from app.config_manager import ConfigManager
+
+
+# Note: we expect `matcher_config` passed to matcher functions to be an instance
+# of `ConfigManager` (or an object providing the same typed properties). This
+# keeps the code typed and avoids dynamic getattr usage.
 
 try:
     from rapidfuzz import fuzz
@@ -47,15 +53,15 @@ def find_best_match(ocr_text: str,
                     precomputed_data: Tuple[List[SubtitleEntry], Dict[str, int]],
                     mode: str,
                     last_index: int = -1,
-                    matcher_config: Dict[str, Any] = None) -> Optional[Tuple[int, int]]:
+                    matcher_config: Optional[ConfigManager] = None) -> Optional[Tuple[int, int]]:
     """
     Znajduje najlepsze dopasowanie tekstu z OCR w bazie napisów, używając konfiguracji.
     """
     if not ocr_text:
         return None
 
-    if matcher_config is None:
-        matcher_config = {}
+    # matcher_config should be a ConfigManager-like object; if None we'll
+    # construct a default ConfigManager later.
 
     subtitles_list, exact_map = precomputed_data
 
@@ -88,7 +94,13 @@ def find_best_match(ocr_text: str,
 
     ocr_len = len(ocr_clean)
 
-    partial_min_len = matcher_config.get('partial_mode_min_len', 25)
+    # Expect a ConfigManager-like object; fall back to defaults if None
+    if matcher_config is None:
+        cm = ConfigManager()
+        # Ensure load_preset won't attempt to stat a None path
+        cm.preset_path = ""
+        matcher_config = cm
+    partial_min_len = matcher_config.partial_mode_min_len
 
     from app.matcher import MATCH_MODE_FULL
     effective_mode = MATCH_MODE_FULL if ocr_len < partial_min_len else mode
@@ -110,7 +122,7 @@ def find_best_match(ocr_text: str,
     return global_match
 
 
-def _scan_list(ocr_text: str, ocr_len: int, candidates: List[SubtitleEntry], mode: str, config: Dict[str, Any]) -> \
+def _scan_list(ocr_text: str, ocr_len: int, candidates: List[SubtitleEntry], mode: str, config: ConfigManager) -> \
 Optional[Tuple[int, int]]:
     """Wewnętrzna funkcja iterująca po kandydatach i licząca Levenshtein ratio."""
     best_score = 0
@@ -118,9 +130,9 @@ Optional[Tuple[int, int]]:
     best_len_diff = float('inf')
 
     # Pobieranie parametrów z konfigu
-    ratio_limit = config.get('match_len_diff_ratio', 0.25)
-    score_short = config.get('match_score_short', 90)
-    score_long = config.get('match_score_long', 75)
+    ratio_limit = config.match_len_diff_ratio
+    score_short = config.match_score_short
+    score_long = config.match_score_long
 
     from app.matcher import MATCH_MODE_FULL, MATCH_MODE_STARTS, MATCH_MODE_PARTIAL
     for _, sub_clean, original_idx, sub_len in candidates:

@@ -98,52 +98,52 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager, override
     Zwraca krotkę: (przetworzony_obraz, czy_zawiera_tresc, bbox).
     """
     try:
-        # Use ConfigManager properties instead of raw preset dict
-        text_color = config_manager.text_color_mode
-        brightness_threshold = config_manager.brightness_threshold
-        align_mode = config_manager.text_alignment
-        scale = config_manager.ocr_scale_factor
-        # backward-compatible key: some presets may have 'contrast' misspelled; fall back to 0
-        contrast = config_manager._current_preset().get('contrast', 0) or config_manager._current_preset().get('contract', 0) or 0
-        subtitle_colors = override_colors if override_colors is not None else config_manager.subtitle_colors
-        thickening = config_manager.text_thickening
-        valid_colors = [c for c in subtitle_colors if c]
+        # Korzystamy bezpośrednio z ConfigManager — bez tymczasowych zmiennych.
+        # Jeśli użytkownik przekazał override_colors, użyjemy ich, w przeciwnym razie
+        # korzystamy z config_manager.subtitle_colors.
+        colors_source = (override_colors if override_colors is not None else config_manager.subtitle_colors)
+        has_valid_colors = any(c for c in colors_source if c)
 
-
-        if valid_colors:
+        if has_valid_colors:
+            # tolerance i thickening pobieramy bezpośrednio z config_manager
             tolerance = config_manager.color_tolerance
+            colors = [c for c in colors_source if c]
+            image = remove_background(image, colors, tolerance=tolerance)
 
-
-            image = remove_background(image, valid_colors, tolerance=tolerance)
-
-
-            if thickening > 0:
-                filter_size = (thickening * 2) + 1
+            if config_manager.text_thickening > 0:
+                filter_size = (config_manager.text_thickening * 2) + 1
                 image = image.filter(ImageFilter.MaxFilter(filter_size))
 
-            text_color = "Light"
-
-        if contrast != 0 and not valid_colors:
+        # Pobierz contrast bezpośrednio z ConfigManager jeśli jest dostępny,
+        # inaczej użyjemy starego presetu jako fallback.
+        if hasattr(config_manager, 'contrast'):
+            contrast = config_manager.contrast or 0
+        else:
+            contrast = config_manager._current_preset().get('contrast', 0) or config_manager._current_preset().get('contract', 0) or 0
+        if contrast != 0 and not has_valid_colors:
             contrast += 1
-
             enhancer = ImageEnhance.Contrast(image)
             image = enhancer.enhance(contrast)
 
-        if text_color != "Mixed":
+        # Effective text color: jeśli wykryto kolory napisów, traktujemy jako Light,
+        # w przeciwnym razie bierzemy ustawienie z config_manager.
+        effective_text_color = "Light" if has_valid_colors else config_manager.text_color_mode
+
+        if effective_text_color != "Mixed":
             image = ImageOps.grayscale(image)
 
-        if text_color == "Dark":
+        if effective_text_color == "Dark":
             image = ImageOps.invert(image)
 
         crop_box = None
         try:
+            # brightness_threshold pochodzi z ConfigManager
+            brightness_threshold = config_manager.brightness_threshold
             mask = image.point(lambda x: 255 if x > brightness_threshold else 0, '1')
             mask = mask.filter(ImageFilter.MaxFilter(3))
             bbox = mask.getbbox()
 
             if bbox:
-                if not check_alignment(bbox, image.width, align_mode):
-                    return image, False, None
 
                 padding = 4
                 left, upper, right, lower = bbox
@@ -167,13 +167,14 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager, override
             print(f"Błąd przycinania (mask): {e}")
             crop_box = (0, 0, image.width, image.height)
         # Skalowanie
+        scale = config_manager.ocr_scale_factor
         if abs(scale - 1.0) > 0.05:
             new_w = int(image.width * scale)
             new_h = int(image.height * scale)
             image = image.resize((new_w, new_h), Image.BICUBIC)
 
 
-        if text_color != "Mixed":
+        if config_manager.text_color_mode != "Mixed":
             image = ImageOps.invert(image)
             total_pixels = image.width * image.height
             if total_pixels == 0:
@@ -287,13 +288,9 @@ def find_text_bounds(image: Image.Image, config_str: str = "") -> Optional[Tuple
     lub None, jeśli tekst nie został znaleziony.
     """
     try:
-        # Domyślny config string jeśli pusty
         if not config_str:
-             # Używamy prostego configu, bo nie mamy dostępu do complex logic z recognize_text tutaj łatwo
-             # Ale spróbujmy użyć logic podobnej do recognize_text
              pass
 
-        # Determnistic config construction similar to recognize_text but simpler
         cfg = f"--psm 6 -l {OCR_LANGUAGE}"
         if HAS_CONFIG_FILE:
              cfg += f" {CONFIG_FILE_PATH}"

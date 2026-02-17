@@ -1,5 +1,18 @@
 import pytest
+from typing import Dict, Any
 from app.matcher import precompute_subtitles, find_best_match, SubtitleEntry, MATCH_MODE_FULL, MATCH_MODE_STARTS, MATCH_MODE_PARTIAL
+from app.config_manager import ConfigManager
+
+
+class DummyConfig(ConfigManager):
+    def __init__(self, data: Dict[str, Any]):
+        # Don't call super to avoid file IO; just store provided data
+        self._data = data or {}
+        self.settings = {}
+        self.preset_path = None
+
+    def _current_preset(self):
+        return self._data
 
 @pytest.fixture
 def sample_subtitles():
@@ -32,7 +45,7 @@ def test_find_best_match_exact(precomputed_data):
 def test_find_best_match_fuzzy(precomputed_data):
     # Typos: "swiecie" instead of "świecie", "Witaj" -> "Wita"
     ocr_text = "Wita w moim swiecie" 
-    match = find_best_match(ocr_text, precomputed_data, MATCH_MODE_FULL, matcher_config={'match_score_long': 60, 'match_score_short': 60})
+    match = find_best_match(ocr_text, precomputed_data, MATCH_MODE_FULL, matcher_config=DummyConfig({'match_score_long': 60, 'match_score_short': 60}))
     assert match is not None
     idx, score = match
     assert idx == 0
@@ -42,10 +55,8 @@ def test_find_best_match_partial_lines(precomputed_data):
     # OCR catches only start
     ocr_text = "Bardzo długa linia"
     # Need to lower partial_mode_min_len because len("Bardzo długa linia") is 18, default threshold is 25
-    matcher_config = {
-        'partial_mode_min_len': 10
-    }
-    match = find_best_match(ocr_text, precomputed_data, MATCH_MODE_PARTIAL, matcher_config=matcher_config)
+    matcher_cfg = DummyConfig({'partial_mode_min_len': 10})
+    match = find_best_match(ocr_text, precomputed_data, MATCH_MODE_PARTIAL, matcher_config=matcher_cfg)
     assert match is not None
     idx, score = match
     assert idx == 3 

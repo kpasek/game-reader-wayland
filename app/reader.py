@@ -5,7 +5,7 @@ import queue
 import copy
 from collections import deque
 from datetime import datetime
-from typing import Optional, Tuple, Dict, List
+from typing import Any, Optional, Tuple, Dict, List
 # ImageChops jest wykorzystywany w funkcji _images_are_similar, a ImageStat w tej samej funkcji.
 from PIL import Image, ImageChops, ImageStat
 
@@ -15,17 +15,22 @@ from app.matcher import find_best_match, precompute_subtitles
 from app.config_manager import ConfigManager
 
 
-class AreaConfigContext:
+class AreaConfigContext(ConfigManager):
+    """Konkretny kontekst ustawień dla jednego obszaru: zachowuje API
+    `ConfigManager`, ale zwraca wartości z przekazanego słownika presetu.
     """
-    Pomocnicza klasa udająca ConfigManager, ale zwracająca ustawienia
-    specyficzne dla danego obszaru (połączone z globalnymi).
-    """
-    def __init__(self, effective_preset_data):
-        self.preset_data = effective_preset_data
-        self.settings = effective_preset_data
+    def __init__(self, effective_preset_data: Dict[str, Any]):
+        # Nie wywołujemy super().__init__() aby nie ładować plików.
+        # Inicjalizujemy niezbędne pola i przechowujemy presety lokalnie.
+        self.preset_data = effective_preset_data or {}
+        self.settings = {}
+        self.preset_path = None
 
-    def load_preset(self, path=None):
-        return self.preset_data
+    def _current_preset(self) -> Dict[str, Any]:
+        return self.preset_data or {}
+
+    def load_preset(self, path=None) -> Dict[str, Any]:
+        return self._current_preset()
 
 
 class CaptureWorker(threading.Thread):
@@ -201,13 +206,9 @@ class ReaderThread(threading.Thread):
 
         audio_speed = self.config_manager.audio_speed_inc
 
-        # Konfiguracja dla matchera (lokalna zmienna)
-        matcher_config = {
-            'match_score_short': self.config_manager.match_score_short,
-            'match_score_long': self.config_manager.match_score_long,
-            'match_len_diff_ratio': self.config_manager.match_len_diff_ratio,
-            'partial_mode_min_len': self.config_manager.partial_mode_min_len
-        }
+        # Nie budujemy dicta — przekażemy obiekt ConfigManager (lub AreaConfigContext)
+        # bezpośrednio do matchera aby korzystał z typed properties.
+        # (area-specific overrides będą przekazywane poniżej jako `area_ctx`).
 
         raw_subtitles = ConfigManager.load_text_lines(self.config_manager.text_file_path)
         precomputed_data = precompute_subtitles(raw_subtitles, min_line_len) if raw_subtitles else ([], {})
@@ -304,7 +305,7 @@ class ReaderThread(threading.Thread):
         if self.log_queue:
              self.log_queue.put({"time": "INFO", "line_text": f"Reader started. Areas: {len(valid_areas)}. Logging enabled."})
 
-        if self.save_logs:
+        if self.config_manager.save_logs:
             if self.log_queue: self.log_queue.put({"time": "INFO", "line_text": f"Saving logs to session_log.txt"})
             with open("session_log.txt", "a", encoding='utf-8') as f:
                 f.write(f"\n=== SESSION START {datetime.now()} ===\n")
@@ -409,9 +410,10 @@ class ReaderThread(threading.Thread):
 
                 t_match_start = time.perf_counter()
                 # Przekazanie dynamicznego trybu dopasowania (Area Specific)
+                # Przekazujemy kontekst ustawień obszaru (implementuje ConfigManager API)
                 match = find_best_match(text, precomputed_data, current_subtitle_mode,
                                         last_index=self.last_matched_idx,
-                                        matcher_config=matcher_config)
+                                        matcher_config=area_ctx)
                 t_match = (time.perf_counter() - t_match_start) * 1000
 
                 if self.log_queue:
