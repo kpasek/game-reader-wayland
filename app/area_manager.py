@@ -347,7 +347,10 @@ class AreaManagerWindow(tk.Toplevel):
 
         for tab in [self.tab_general, self.tab_colors]:
             for child in tab.winfo_children():
-                child.config(state=tk.NORMAL)
+                try:
+                    child.config(state=tk.NORMAL)
+                except tk.TclError:
+                    pass
 
     def _on_field_change(self, event=None):
         if self.current_selection_idx < 0:

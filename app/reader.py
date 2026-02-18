@@ -15,24 +15,6 @@ from app.matcher import find_best_match, precompute_subtitles
 from app.config_manager import ConfigManager
 
 
-class AreaConfigContext(ConfigManager):
-    """Konkretny kontekst ustawień dla jednego obszaru: zachowuje API
-    `ConfigManager`, ale zwraca wartości z przekazanego słownika presetu.
-    """
-    def __init__(self, effective_preset_data: Dict[str, Any]):
-        # Nie wywołujemy super().__init__() aby nie ładować plików.
-        # Inicjalizujemy niezbędne pola i przechowujemy presety lokalnie.
-        self.preset_data = effective_preset_data or {}
-        self.settings = {}
-        self.preset_path = None
-
-    def _current_preset(self) -> Dict[str, Any]:
-        return self.preset_data or {}
-
-    def load_preset(self, path=None) -> Dict[str, Any]:
-        return self._current_preset()
-
-
 class CaptureWorker(threading.Thread):
     """Wątek PRODUCENTA: Robi zrzuty ekranu."""
 
@@ -149,28 +131,8 @@ class ReaderThread(threading.Thread):
             })
 
 
-    def _scale_monitor_areas_legacy(self, monitors: List[Dict], original_res_str: str) -> List[Dict]:
-        """Original Implementation for Reference"""
-        if not self.target_resolution or not original_res_str: return monitors
-        try:
-            orig_w, orig_h = map(int, original_res_str.lower().split('x'))
-            target_w, target_h = self.target_resolution
-            if (orig_w, orig_h) == (target_w, target_h): return monitors
-            sx, sy = target_w / orig_w, target_h / orig_h
-            return [{'left': int(m['left'] * sx), 'top': int(m['top'] * sy),
-                     'width': int(m['width'] * sx), 'height': int(m['height'] * sy)} for m in monitors]
-        except:
-            return monitors
-
-    def _scale_monitor_areas(self, monitors: List[Dict]) -> List[Dict]:
-        """Delegate scaling to central utilities (4K -> physical)."""
-        try:
-            dest_w, dest_h = self.target_resolution
-
-            from app import scale_utils
-            return scale_utils.scale_list_to_physical(monitors, dest_w, dest_h)
-        except Exception:
-            return monitors
+    # (Area-specific overrides handled explicitly during processing;
+    # no helper methods for applying/restoring are used here.)
                  
     def _images_are_similar(self, img1: Image.Image, img2: Image.Image, similarity: float) -> bool:
         if similarity == 0: return False
@@ -191,23 +153,11 @@ class ReaderThread(threading.Thread):
 
         audio_speed = self.config_manager.audio_speed_inc
 
-        # Nie budujemy dicta — przekażemy obiekt ConfigManager (lub AreaConfigContext)
-        # bezpośrednio do matchera aby korzystał z typed properties.
-        # (area-specific overrides będą przekazywane poniżej jako `area_ctx`).
-
-        raw_subtitles = ConfigManager.load_text_lines(self.config_manager.text_file_path)
+        raw_subtitles = self.config_manager.load_text_lines()
         precomputed_data = precompute_subtitles(raw_subtitles, min_line_len) if raw_subtitles else ([], {})
 
-        # --- LOAD AREAS ---
-        # Centralne skalowanie: pobierz preset i przeskaluj recty z 4K do fizycznej rozdzielczości
-        from app.capture import capture_fullscreen
-        dest_w = dest_h = None
-
-        dest_w, dest_h = self.target_resolution
-
-        # Use ConfigManager helper to fetch preset with areas already scaled to dest resolution
-        preset_for_display = self.config_manager.get_preset_for_resolution(None, (dest_w, dest_h))
-        areas_config = copy.deepcopy(preset_for_display.get('areas', []))
+        # Get areas already scaled to the manager's display resolution
+        areas_config = copy.deepcopy(self.config_manager.get_areas() or [])
         valid_areas = areas_config
 
         if not valid_areas:
@@ -222,35 +172,8 @@ class ReaderThread(threading.Thread):
             if area.get('type') == 'continuous' and area.get('enabled', False):
                 self.enabled_continuous_areas.add(area.get('id'))
 
-        # Skaluje recty z kanonicznego 4K do aktualnej rozdzielczości obrazu
-        try:
-            # If rects already look like physical coordinates (fit within dest), skip scaling.
-            dest_w, dest_h = dest_w, dest_h
-            rects = [a['rect'] for a in valid_areas]
-            need_scale = False
-            for r in rects:
-                if not r: continue
-                try:
-                    # If any rect exceeds destination bounds, assume it's in 4K and needs scaling
-                    if (r.get('left', 0) < 0 or r.get('top', 0) < 0 or
-                        r.get('left', 0) + r.get('width', 0) > dest_w or
-                        r.get('top', 0) + r.get('height', 0) > dest_h):
-                        need_scale = True
-                        break
-                except Exception:
-                    need_scale = True
-                    break
-
-            if need_scale:
-                scaled_rects = self._scale_monitor_areas(rects)
-                for i, a in enumerate(valid_areas):
-                    a['rect'] = scaled_rects[i]
-            else:
-                # Rects already in physical coords; leave as-is
-                pass
-        except Exception:
-            # Fallback: użyj oryginalnych rectów jeżeli skalowanie nie powiedzie się
-            pass
+        # Areas returned by `get_preset_for_display` are already scaled to the
+        # manager's `display_resolution` (if set). No further scaling required.
 
         monitors = [a['rect'] for a in valid_areas] # For Unified Calculation
 
@@ -351,15 +274,17 @@ class ReaderThread(threading.Thread):
                 merged_preset = preset.copy()
                 merged_preset.update(area_settings)
 
-                area_ctx = AreaConfigContext(merged_preset)
+                # Prepare typed area settings and pass them explicitly to
+                # processing functions — do NOT modify `config_manager`.
+                # NOTE: use `area_obj` (not `area`) which is the local variable here
+                area_settings_obj = self.config_manager.make_area_settings(area_obj.get('settings', None))
                 from app.matcher import MATCH_MODE_FULL
                 current_subtitle_mode = merged_preset.get('subtitle_mode', MATCH_MODE_FULL)
 
                 t_pre_start = time.perf_counter()
 
-                # Używamy area_ctx zamiast globalnego configa. override_colors nie jest już potrzebne
-                # bo settings w kontekście ma już poprawne kolory.
-                processed, has_content, crop_bbox = preprocess_image(crop, area_ctx)
+                # Use explicit area settings for preprocessing (no mutation of config)
+                processed, has_content, crop_bbox = preprocess_image(crop, self.config_manager, area_settings=area_settings_obj)
 
                 if not has_content:
                     continue
@@ -367,9 +292,30 @@ class ReaderThread(threading.Thread):
                 t_pre = (time.perf_counter() - t_pre_start) * 1000
 
                 t_ocr_start = time.perf_counter()
-                text = recognize_text(processed, area_ctx)
+                text = recognize_text(processed, self.config_manager)
 
                 t_ocr = (time.perf_counter() - t_ocr_start) * 1000
+
+                # Matching: log debug info, then use global ConfigManager and area-specific subtitle mode
+                try:
+                    pre_lines_count = len(precomputed_data[0]) if precomputed_data and isinstance(precomputed_data, tuple) else 0
+                except Exception:
+                    pre_lines_count = 0
+
+                dbg_msg = (
+                    f"MATCH DEBUG: text='{text}' | pre_lines={pre_lines_count} | "
+                    f"mode={current_subtitle_mode} | partial_min_len={self.config_manager.partial_mode_min_len} | "
+                    f"match_score_short={self.config_manager.match_score_short} | match_score_long={self.config_manager.match_score_long} | "
+                    f"match_len_diff_ratio={self.config_manager.match_len_diff_ratio}"
+                )
+                if self.log_queue:
+                    self.log_queue.put({"time": datetime.now().strftime('%H:%M:%S.%f')[:-3], "line_text": dbg_msg})
+
+                t_match_start = time.perf_counter()
+                match = find_best_match(text, precomputed_data, current_subtitle_mode,
+                                        last_index=self.last_matched_idx,
+                                        matcher_config=self.config_manager)
+                t_match = (time.perf_counter() - t_match_start) * 1000
 
                 if not text:
                     continue
@@ -387,13 +333,7 @@ class ReaderThread(threading.Thread):
 
                 self.last_ocr_texts.append(text)
 
-                t_match_start = time.perf_counter()
-                # Przekazanie dynamicznego trybu dopasowania (Area Specific)
-                # Przekazujemy kontekst ustawień obszaru (implementuje ConfigManager API)
-                match = find_best_match(text, precomputed_data, current_subtitle_mode,
-                                        last_index=self.last_matched_idx,
-                                        matcher_config=area_ctx)
-                t_match = (time.perf_counter() - t_match_start) * 1000
+                # `match` and `t_match` already computed while overrides were active
 
                 if self.log_queue:
                     line_txt = raw_subtitles[match[0]] if match else ""

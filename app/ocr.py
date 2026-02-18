@@ -93,39 +93,48 @@ def check_alignment(bbox: Tuple[int, int, int, int], width: int, align_mode: str
     return False
 
 
-def preprocess_image(image: Image.Image, config_manager: ConfigManager, override_colors: List[str] = None) -> Tuple[Image.Image, bool, Optional[Tuple[int, int, int, int]]]:
+def preprocess_image(image: Image.Image, config_manager: ConfigManager, area_settings: Optional[dict] = None, override_colors: List[str] = None) -> Tuple[Image.Image, bool, Optional[Tuple[int, int, int, int]]]:
     """
     Zwraca krotkę: (przetworzony_obraz, czy_zawiera_tresc, bbox).
     """
     try:
-        # Korzystamy bezpośrednio z ConfigManager — bez tymczasowych zmiennych.
-        # Jeśli użytkownik przekazał override_colors, użyjemy ich, w przeciwnym razie
-        # korzystamy z config_manager.subtitle_colors.
-        colors_source = (override_colors if override_colors is not None else config_manager.subtitle_colors)
-        has_valid_colors = any(c for c in colors_source if c)
+        # Prefer explicit area_settings where provided, otherwise fall back
+        # to values from `config_manager`. `override_colors` still has highest precedence.
+        def _get(name, default=None):
+            if area_settings is not None:
+                try:
+                    if isinstance(area_settings, dict) and name in area_settings:
+                        return area_settings.get(name)
+                    # AreaSettings dataclass support
+                    val = getattr(area_settings, name)
+                    return val
+                except Exception:
+                    pass
+            try:
+                return getattr(config_manager, name)
+            except Exception:
+                return default
+
+        colors_source = override_colors if override_colors is not None else _get('subtitle_colors', [])
+        has_valid_colors = any(c for c in (colors_source or []) if c)
 
         if has_valid_colors:
-            # tolerance i thickening pobieramy bezpośrednio z config_manager
-            tolerance = config_manager.color_tolerance
-            colors = [c for c in colors_source if c]
+            tolerance = _get('color_tolerance', 10)
+            colors = [c for c in (colors_source or []) if c]
             image = remove_background(image, colors, tolerance=tolerance)
 
-            if config_manager.text_thickening > 0:
-                filter_size = (config_manager.text_thickening * 2) + 1
+            text_thick = _get('text_thickening', 0)
+            if text_thick and text_thick > 0:
+                filter_size = (int(text_thick) * 2) + 1
                 image = image.filter(ImageFilter.MaxFilter(filter_size))
 
-        # Pobierz contrast bezpośrednio z ConfigManager jeśli jest dostępny,
-        # inaczej użyjemy starego presetu jako fallback.
-        # Direct access to `contrast` on ConfigManager (let AttributeError surface if missing)
-        contrast = config_manager.contrast or 0
+        contrast = _get('contrast', 0) or 0
         if contrast != 0 and not has_valid_colors:
             contrast += 1
             enhancer = ImageEnhance.Contrast(image)
             image = enhancer.enhance(contrast)
 
-        # Effective text color: jeśli wykryto kolory napisów, traktujemy jako Light,
-        # w przeciwnym razie bierzemy ustawienie z config_manager.
-        effective_text_color = "Light" if has_valid_colors else config_manager.text_color_mode
+        effective_text_color = "Light" if has_valid_colors else _get('text_color_mode', 'Light')
 
         if effective_text_color != "Mixed":
             image = ImageOps.grayscale(image)
@@ -135,8 +144,8 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager, override
 
         crop_box = None
         try:
-            # brightness_threshold pochodzi z ConfigManager
-            brightness_threshold = config_manager.brightness_threshold
+            # brightness_threshold pochodzi z area_settings lub ConfigManager
+            brightness_threshold = _get('brightness_threshold', 200)
             mask = image.point(lambda x: 255 if x > brightness_threshold else 0, '1')
             mask = mask.filter(ImageFilter.MaxFilter(3))
             bbox = mask.getbbox()
@@ -165,14 +174,14 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager, override
             print(f"Błąd przycinania (mask): {e}")
             crop_box = (0, 0, image.width, image.height)
         # Skalowanie
-        scale = config_manager.ocr_scale_factor
+        scale = _get('ocr_scale_factor', 0.5)
         if abs(scale - 1.0) > 0.05:
             new_w = int(image.width * scale)
             new_h = int(image.height * scale)
             image = image.resize((new_w, new_h), Image.BICUBIC)
 
 
-        if config_manager.text_color_mode != "Mixed":
+        if _get('text_color_mode', 'Light') != "Mixed":
             image = ImageOps.invert(image)
             total_pixels = image.width * image.height
             if total_pixels == 0:

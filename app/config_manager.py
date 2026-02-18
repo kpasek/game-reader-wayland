@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Tuple
 from dataclasses import dataclass, field
 from app import scale_utils
+import copy
 
 APP_CONFIG_FILE = Path.home() / '.config' / 'app_config.json'
 
@@ -588,7 +589,7 @@ class ConfigManager:
 
         This centralizes scaling so callers don't implement scaling logic.
         """
-        p = self.get_preset_for_display(self.preset_path)
+        p = self.get_preset_for_display()
         if not p:
             return []
         return p.get('areas', [])
@@ -747,5 +748,17 @@ class ConfigManager:
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 return [line.strip() for line in f]
+        except Exception:
+            return []
+
+    def load_text_lines(self) -> List[str]:
+        """Instance wrapper: load text lines using the current preset's `text_file_path`.
+
+        Provides the convenience so callers can do `self.config_manager.load_text_lines()`
+        instead of passing the path explicitly.
+        """
+        try:
+            path = self.text_file_path
+            return ConfigManager.load_text_lines(path)
         except Exception:
             return []
