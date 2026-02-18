@@ -55,7 +55,7 @@ audio_queue = queue.Queue()
 log_queue = queue.Queue()
 debug_queue = queue.Queue()
 
-APP_VERSION = "v1.4.1"
+APP_VERSION = "v1.5.0"
 
 
 class LektorApp:
@@ -111,6 +111,8 @@ class LektorApp:
 
         # Audio
         self.var_resolution = tk.StringVar()
+        # Ensure any change to var_resolution updates ConfigManager immediately
+        self.var_resolution.trace_add("write", lambda *a: self._on_resolution_selected())
         self.var_speed = tk.DoubleVar(value=1.2)
         self.var_volume = tk.DoubleVar(value=1.0)
         self.var_audio_ext = tk.StringVar(value=".ogg")
@@ -162,6 +164,18 @@ class LektorApp:
             new_scale = self._calc_auto_scale(w, h)
 
         self.var_ocr_scale.set(new_scale)
+
+    def _on_resolution_selected(self, event=None):
+        """Handler for resolution combobox selection: persist and update ConfigManager."""
+        res_str = self.var_resolution.get()
+        # Persist user choice
+        self.config_mgr.settings['last_resolution_key'] = res_str
+        self.config_mgr.save_app_config()
+        # Update scale and ConfigManager display resolution
+        self._update_scale_for_resolution(res_str)
+        if "x" in res_str:
+            w, h = map(int, res_str.split('x'))
+            self.config_mgr.display_resolution = (w, h)
 
     def on_manual_scale_change(self, event=None):
         val = round(self.var_ocr_scale.get(), 2)
@@ -270,10 +284,7 @@ class LektorApp:
         ttk.Label(f_res, text="Rozdzielczość:").pack(side=tk.LEFT)
         self.cb_res = ttk.Combobox(f_res, textvariable=self.var_resolution, values=self.resolutions)
         self.cb_res.pack(side=tk.LEFT, padx=5)
-        self.cb_res.bind("<<ComboboxSelected>>", lambda e: [
-            self.config_mgr.update_setting('last_resolution_key', self.var_resolution.get()),
-            self._update_scale_for_resolution(self.var_resolution.get())
-        ])
+        self.cb_res.bind("<<ComboboxSelected>>", self._on_resolution_selected)
         ttk.Button(f_res, text="Dopasuj rozdz.", command=self.auto_detect_resolution).pack(side=tk.LEFT, padx=5)
 
 
@@ -351,7 +362,10 @@ class LektorApp:
         h = self.root.winfo_screenheight()
         res_str = f"{w}x{h}"
         self.var_resolution.set(res_str)
-        self.config_mgr.update_setting('last_resolution_key', res_str)
+        # Persist and inform ConfigManager about current UI resolution
+        self.config_mgr.settings['last_resolution_key'] = res_str
+        self.config_mgr.save_app_config()
+        self.config_mgr.display_resolution = (w, h)
         self._update_scale_for_resolution(res_str)
 
     def _load_initial_state(self, autostart_path):
@@ -471,7 +485,8 @@ class LektorApp:
                 # Widget mógł zostać zniszczony po zamknięciu okna ustawień
                 self.ent_regex = None
 
-        self.config_mgr.update_setting('last_regex_mode', mode)
+        self.config_mgr.settings['last_regex_mode'] = mode
+        self.config_mgr.save_app_config()
         if mode != "Własny (Regex)":
             self._save_preset_val("regex_pattern", self.regex_map.get(mode, ""))
             self._save_preset_val("regex_mode_name", mode)

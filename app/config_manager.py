@@ -99,8 +99,10 @@ class ConfigManager:
     """Zarządza ładowaniem i zapisywaniem głównej konfiguracji aplikacji oraz presetów."""
 
     def __init__(self, preset_path: Optional[str] = None):
+        # Minimal constructor: store preset path and optionally display resolution
         self.preset_cache = None
         self.preset_path = preset_path
+        self.display_resolution: Optional[Tuple[int, int]] = None
         self.settings = DEFAULT_CONFIG.copy()
         self.load_app_config()
 
@@ -120,7 +122,8 @@ class ConfigManager:
 
     @hotkey_start_stop.setter
     def hotkey_start_stop(self, value: str):
-        self.update_setting('hotkey_start_stop', value)
+        self.settings['hotkey_start_stop'] = value
+        self.save_app_config()
 
     @property
     def capture_interval(self) -> float:
@@ -436,9 +439,7 @@ class ConfigManager:
         except Exception as e:
             print(f"Błąd zapisu konfigu: {e}")
 
-    def update_setting(self, key: str, value: Any):
-        self.settings[key] = value
-        self.save_app_config()
+    # Note: `update_setting` removed; use `config_mgr.settings[...] = val` and `config_mgr.save_app_config()`.
 
     def add_recent_preset(self, path: str):
         path = os.path.abspath(path)
@@ -545,37 +546,77 @@ class ConfigManager:
 
     # --- New helpers for scaling areas ---
     def get_preset_for_resolution(self, path: Optional[str], dest_resolution: Tuple[int, int]) -> Dict[str, Any]:
-        """Return preset dict where `areas` rects are scaled from canonical 4K to dest_resolution.
+        # Deprecated compatibility wrapper — prefer using `get_preset_for_display`
+        return self.get_preset_for_display(path, dest_resolution)
 
-        This does NOT modify the stored preset on disk; it returns a copy with scaled rects suitable
-        for immediate use by UI and processing code.
+    def get_preset_for_display(self, path: Optional[str] = None, dest_resolution: Optional[Tuple[int, int]] = None) -> Dict[str, Any]:
+        """Return a preset dict where `areas` rects are scaled from canonical 4K to
+        the provided `dest_resolution` or the manager's `display_resolution`.
+
+        This does NOT modify the stored preset on disk; it returns a deep copy with
+        scaled rects suitable for immediate use by UI and processing code.
         """
         data = self.load_preset(path)
         if not data:
             return {}
-        # Work on a deep-ish copy for safety
         import copy as _copy
         out = _copy.deepcopy(data)
         try:
+            if dest_resolution is None:
+                dest_resolution = self.display_resolution
+            if dest_resolution is None:
+                # No scaling requested — return raw copy
+                return out
             dest_w, dest_h = dest_resolution
             areas = out.get('areas', [])
             for a in areas:
                 if not a or 'rect' not in a:
                     continue
-                # Diagnostic log: show rect before scaling
                 try:
-                    print(f"[ConfigManager] get_preset_for_resolution: scaling area id={a.get('id')} rect_before={a.get('rect')} -> dest={dest_w}x{dest_h}")
+                    a['rect'] = scale_utils.scale_rect_to_physical(a['rect'], dest_w, dest_h)
                 except Exception:
-                    pass
-                a['rect'] = scale_utils.scale_rect_to_physical(a['rect'], dest_w, dest_h)
-                try:
-                    print(f"[ConfigManager] get_preset_for_resolution: area id={a.get('id')} rect_after={a.get('rect')}")
-                except Exception:
+                    # keep original rect on failure
                     pass
             out['areas'] = areas
         except Exception:
             pass
         return out
+
+    # High-level helpers for area-level access
+    def get_areas(self) -> List[Dict[str, Any]]:
+        """Return the list of areas scaled to the manager's `display_resolution`.
+
+        This centralizes scaling so callers don't implement scaling logic.
+        """
+        p = self.get_preset_for_display(self.preset_path)
+        if not p:
+            return []
+        return p.get('areas', [])
+
+    def set_areas_from_display(self, areas: List[Dict[str, Any]], src_resolution: Optional[Tuple[int, int]] = None):
+        """Accept areas expressed in display coordinates and persist them (scaling to canonical 4K).
+
+        Requires `self.preset_path` to be set and a source resolution either provided
+        or available via `self.display_resolution`.
+        """
+        if not self.preset_path:
+            raise ValueError("ConfigManager has no preset_path configured")
+        if src_resolution is None:
+            if self.display_resolution is None:
+                raise ValueError("No source resolution provided and ConfigManager.display_resolution is not set")
+            src_resolution = self.display_resolution
+        data = {'areas': areas}
+        self.save_preset_from_screen(self.preset_path, data, src_resolution)
+
+    def set_areas(self, areas: List[Dict[str, Any]]):
+        """Persist areas provided in current display coordinates.
+
+        This is a thin wrapper that uses `self.display_resolution` as the
+        source resolution and delegates to `set_areas_from_display`.
+        """
+        if self.display_resolution is None:
+            raise ValueError("ConfigManager.display_resolution is not set")
+        return self.set_areas_from_display(areas, src_resolution=self.display_resolution)
 
     def normalize_areas_to_4k(self, areas: List[Dict[str, Any]], src_resolution: Tuple[int, int]) -> List[Dict[str, Any]]:
         """Convert a list of rect dicts given in src_resolution up to canonical 4K for storage."""

@@ -167,8 +167,11 @@ class SettingsDialog(tk.Toplevel):
         mode = self.app.var_regex_mode.get()
         ent_regex.config(state="normal" if mode == "Własny (Regex)" else "disabled")
         self.app.ent_regex = ent_regex  # Hack referencyjny
-        ent_regex.bind("<FocusOut>", lambda e: self.app.config_mgr.update_setting('last_custom_regex',
-                                                                                  self.app.var_custom_regex.get()))
+        def _save_last_custom_regex(e=None):
+            self.app.config_mgr.settings['last_custom_regex'] = self.app.var_custom_regex.get()
+            self.app.config_mgr.save_app_config()
+
+        ent_regex.bind("<FocusOut>", _save_last_custom_regex)
         ttk.Checkbutton(grp_flt, text="Usuwaj imiona (Smart)", variable=self.app.var_auto_names,
                         command=lambda: self.app._save_preset_val("auto_remove_names",
                                                                   self.app.var_auto_names.get())).pack(anchor=tk.W,
@@ -203,8 +206,7 @@ class SettingsDialog(tk.Toplevel):
         mode = self.app.var_regex_mode.get()
         ent_regex.config(state="normal" if mode == "Własny (Regex)" else "disabled")
         self.app.ent_regex = ent_regex  # Hack referencyjny
-        ent_regex.bind("<FocusOut>", lambda e: self.app.config_mgr.update_setting('last_custom_regex',
-                                                                                  self.app.var_custom_regex.get()))
+        ent_regex.bind("<FocusOut>", _save_last_custom_regex)
 
         ttk.Checkbutton(grp_flt, text="Usuwaj imiona (Smart)", variable=self.app.var_auto_names,
                         command=lambda: self.app._save_preset_val("auto_remove_names",
