@@ -119,7 +119,7 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager, override
         if hasattr(config_manager, 'contrast'):
             contrast = config_manager.contrast or 0
         else:
-            contrast = config_manager._current_preset().get('contrast', 0) or config_manager._current_preset().get('contract', 0) or 0
+            contrast = config_manager.contrast
         if contrast != 0 and not has_valid_colors:
             contrast += 1
             enhancer = ImageEnhance.Contrast(image)

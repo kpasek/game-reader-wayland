@@ -134,7 +134,7 @@ Optional[Tuple[int, int]]:
     score_short = config.match_score_short
     score_long = config.match_score_long
 
-    from app.matcher import MATCH_MODE_FULL, MATCH_MODE_STARTS, MATCH_MODE_PARTIAL
+    from app.matcher import MATCH_MODE_STARTS, MATCH_MODE_PARTIAL
     for _, sub_clean, original_idx, sub_len in candidates:
         len_diff = abs(ocr_len - sub_len)
 

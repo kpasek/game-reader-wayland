@@ -28,39 +28,41 @@ class SettingsDialog(tk.Toplevel):
         self.var_hk_start = tk.StringVar(value=settings.get('hotkey_start_stop', '<f2>'))
         self.var_hk_area3 = tk.StringVar(value=settings.get('hotkey_area3', '<f3>'))
 
-        self._ensure_app_vars()
+        self._initialize_app_variables()
 
         self._build_ui()
         self.geometry("700x900")
         self.grab_set()
 
-    def _ensure_app_vars(self):
-        """Pomocnicza funkcja do upewnienia się, że zmienne istnieją w obiekcie aplikacji."""
-        # Nowe parametry
-        if not hasattr(self.app, 'var_ocr_density'): self.app.var_ocr_density = tk.DoubleVar()
-        if not hasattr(self.app, 'var_audio_speed'): self.app.var_audio_speed = tk.DoubleVar()
-        if not hasattr(self.app, 'var_match_score_short'): self.app.var_match_score_short = tk.IntVar()
-        if not hasattr(self.app, 'var_match_score_long'): self.app.var_match_score_long = tk.IntVar()
-        if not hasattr(self.app, 'var_match_len_diff'): self.app.var_match_len_diff = tk.DoubleVar()
-        if not hasattr(self.app, 'var_partial_min_len'): self.app.var_partial_min_len = tk.IntVar()
-        if not hasattr(self.app, 'var_similarity'): self.app.var_similarity = tk.IntVar()
+    def _initialize_app_variables(self):
+        """Inicjalizuje wymagane zmienne aplikacji (`tk.Variable`).
 
-        # Inicjalizuj wartości z `ConfigManager` (preferuj properties);
-        # fallback na `self.settings` gdy `config_mgr` nie jest dostępny.
-        if hasattr(self.app, 'config_mgr') and self.app.config_mgr:
-            cm = self.app.config_mgr
-            self.app.var_match_score_short.set(int(cm.match_score_short))
-            self.app.var_match_score_long.set(int(cm.match_score_long))
-            self.app.var_match_len_diff.set(float(cm.match_len_diff_ratio))
-            self.app.var_partial_min_len.set(int(cm.partial_mode_min_len))
-            # similarity jest zapisywane jako liczba (np. 5.0) — traktujemy jako int procentowy
-            self.app.var_similarity.set(int(cm.similarity))
-        else:
-            self.app.var_match_score_short.set(int(self.settings.get('match_score_short', 90)))
-            self.app.var_match_score_long.set(int(self.settings.get('match_score_long', 75)))
-            self.app.var_match_len_diff.set(float(self.settings.get('match_len_diff_ratio', 0.25)))
-            self.app.var_partial_min_len.set(int(self.settings.get('partial_mode_min_len', 25)))
-            self.app.var_similarity.set(int(self.settings.get('similarity', 5)))
+        Ta metoda traktowana jest jak konstruktor dla zmiennych UI na obiekcie
+        `self.app`: zawsze (ponownie) ustawia potrzebne `tk.*Var` z wartościami
+        pobranymi z `config_mgr` gdy dostępny, a w przeciwnym razie z
+        `self.settings`.
+        """
+        cm = self.app.config_mgr
+
+        self.app.var_capture_interval = tk.DoubleVar(value=float(cm.capture_interval))
+        self.app.var_ocr_density = tk.DoubleVar(value=float(cm.ocr_scale_factor))
+        self.app.var_audio_speed = tk.DoubleVar(value=float(cm.audio_speed_inc))
+
+        self.app.var_match_score_short = tk.IntVar(value=int(cm.match_score_short))
+        self.app.var_match_score_long = tk.IntVar(value=int(cm.match_score_long))
+        self.app.var_match_len_diff = tk.DoubleVar(value=float(cm.match_len_diff_ratio))
+        self.app.var_partial_min_len = tk.IntVar(value=int(cm.partial_mode_min_len))
+        self.app.var_similarity = tk.IntVar(value=int(cm.similarity))
+        self.app.var_show_debug = tk.BooleanVar(value=bool(cm.show_debug))
+        self.app.var_text_color = tk.StringVar(value=str(cm.text_color_mode))
+        rm = self.app.regex_map or {}
+        default_regex_mode = next(iter(rm.keys())) if rm else 'Własny (Regex)'
+        self.app.var_regex_mode = tk.StringVar(value=self.settings.get('regex_mode', default_regex_mode))
+        self.app.var_custom_regex = tk.StringVar(value=cm.get('last_custom_regex', self.settings.get('last_custom_regex', '')))
+        self.app.var_auto_names = tk.BooleanVar(value=bool(cm.auto_remove_names))
+        self.app.var_save_logs = tk.BooleanVar(value=bool(cm.save_logs))
+
+        return None
 
 
     def _build_ui(self):

@@ -28,17 +28,13 @@ DEFAULT_PRESET_CONTENT = {
     "audio_volume": 1.0,
     "audio_ext": ".mp3",
     "auto_remove_names": True,
-    "text_alignment": "Center",
     "save_logs": False,
-    "min_line_length": 3,
+    "min_line_length": 2,
     "match_score_short": 90,
     "match_score_long": 75,
     "match_len_diff_ratio": 0.30,
-    "partial_mode_min_len": 25,
+    "partial_mode_min_len": 20,
     "audio_speed_inc": 1.20,
-    "text_thickening": 0,
-    "subtitle_colors": [],
-    "color_tolerance": 10,
     "areas": []
 }
 
@@ -73,15 +69,6 @@ class ConfigManager:
     def hotkey_start_stop(self, value: str):
         self.update_setting('hotkey_start_stop', value)
 
-    @property
-    def hotkey_area3(self) -> str:
-        return self.settings.get('hotkey_area3', DEFAULT_CONFIG.get('hotkey_area3'))
-
-    @hotkey_area3.setter
-    def hotkey_area3(self, value: str):
-        self.update_setting('hotkey_area3', value)
-
-    # Preset-level shortcuts (operate on currently opened preset)
     @property
     def capture_interval(self) -> float:
         return float(self._current_preset().get('capture_interval', DEFAULT_PRESET_CONTENT.get('capture_interval', 0.5)))
@@ -169,17 +156,6 @@ class ConfigManager:
     def ocr_scale_factor(self, value: float):
         data = self._current_preset()
         data['ocr_scale_factor'] = float(value)
-        if self.preset_path:
-            self.save_preset(self.preset_path, data)
-
-    @property
-    def text_alignment(self) -> str:
-        return str(self._current_preset().get('text_alignment', DEFAULT_PRESET_CONTENT.get('text_alignment', 'None')))
-
-    @text_alignment.setter
-    def text_alignment(self, value: str):
-        data = self._current_preset()
-        data['text_alignment'] = str(value)
         if self.preset_path:
             self.save_preset(self.preset_path, data)
 
@@ -301,6 +277,17 @@ class ConfigManager:
     def auto_remove_names(self, value: bool):
         data = self._current_preset()
         data['auto_remove_names'] = bool(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, data)
+            
+    @property
+    def show_debug(self) -> bool:
+        return bool(self._current_preset().get('show_debug', DEFAULT_PRESET_CONTENT.get('show_debug', False)))
+
+    @show_debug.setter
+    def show_debug(self, value: bool):
+        data = self._current_preset()
+        data['show_debug'] = bool(value)
         if self.preset_path:
             self.save_preset(self.preset_path, data)
 
