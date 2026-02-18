@@ -78,7 +78,7 @@ class CaptureWorker(threading.Thread):
             except queue.Full:
                 pass
         else:
-            if not getattr(self, '_logged_fail', False):
+            if not self._logged_fail:
                 self._logged_fail = True
                 msg = "CaptureWorker: Failed to grab screen (returned None/Empty)!"
                 if self.log_queue:
@@ -165,22 +165,7 @@ class ReaderThread(threading.Thread):
     def _scale_monitor_areas(self, monitors: List[Dict]) -> List[Dict]:
         """Delegate scaling to central utilities (4K -> physical)."""
         try:
-            # Determine dest resolution similarly to other code paths
-            if not hasattr(self, '_physical_res') or not self._physical_res:
-                from app.capture import capture_fullscreen
-                try:
-                    img = capture_fullscreen()
-                    if img:
-                        self._physical_res = img.size
-                except Exception:
-                    pass
-
-            if hasattr(self, '_physical_res') and self._physical_res:
-                dest_w, dest_h = self._physical_res
-            elif self.target_resolution:
-                dest_w, dest_h = self.target_resolution
-            else:
-                dest_w, dest_h = 3840, 2160
+            dest_w, dest_h = self.target_resolution
 
             from app import scale_utils
             return scale_utils.scale_list_to_physical(monitors, dest_w, dest_h)
@@ -217,20 +202,8 @@ class ReaderThread(threading.Thread):
         # Centralne skalowanie: pobierz preset i przeskaluj recty z 4K do fizycznej rozdzielczości
         from app.capture import capture_fullscreen
         dest_w = dest_h = None
-        try:
-            if not hasattr(self, '_physical_res') or not self._physical_res:
-                img_tmp = capture_fullscreen()
-                if img_tmp:
-                    self._physical_res = img_tmp.size
-        except Exception:
-            pass
 
-        if hasattr(self, '_physical_res') and self._physical_res:
-            dest_w, dest_h = self._physical_res
-        elif self.target_resolution:
-            dest_w, dest_h = self.target_resolution
-        else:
-            dest_w, dest_h = 3840, 2160
+        dest_w, dest_h = self.target_resolution
 
         # Use ConfigManager helper to fetch preset with areas already scaled to dest resolution
         preset_for_display = self.config_manager.get_preset_for_resolution(None, (dest_w, dest_h))
@@ -364,7 +337,13 @@ class ReaderThread(threading.Thread):
                 self.last_monitor_crops[idx] = crop.copy()
 
                 # --- Prepare Context for Area ---
-                area_settings = area_obj.get('settings', {}).copy()
+                # Support typed AreaSettings (from ConfigManager) or plain dicts
+                aset = area_obj.get('settings', {})
+                try:
+                    # Prefer to_dict() when available; allow AttributeError to surface if misconfigured
+                    area_settings = aset.to_dict().copy()
+                except Exception:
+                    area_settings = aset.copy()
                 # Legacy fallback for colors
                 if 'subtitle_colors' not in area_settings and 'colors' in area_obj:
                      area_settings['subtitle_colors'] = area_obj['colors']

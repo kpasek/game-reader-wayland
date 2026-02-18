@@ -116,10 +116,8 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager, override
 
         # Pobierz contrast bezpośrednio z ConfigManager jeśli jest dostępny,
         # inaczej użyjemy starego presetu jako fallback.
-        if hasattr(config_manager, 'contrast'):
-            contrast = config_manager.contrast or 0
-        else:
-            contrast = config_manager.contrast
+        # Direct access to `contrast` on ConfigManager (let AttributeError surface if missing)
+        contrast = config_manager.contrast or 0
         if contrast != 0 and not has_valid_colors:
             contrast += 1
             enhancer = ImageEnhance.Contrast(image)

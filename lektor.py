@@ -1123,23 +1123,38 @@ class LektorApp:
                         "type": "continuous",
                         "rect": new_rect,
                         "hotkey": "",
-                        "settings": sanitized_best
+                        "settings": self.config_mgr.make_area_settings(sanitized_best)
                     })
                 else:
                     for area in current_areas:
                         if area.get('id') == target_id:
                             area['rect'] = new_rect
                             if 'settings' not in area:
-                                area['settings'] = {}
+                                area['settings'] = self.config_mgr.make_area_settings({})
                             # Update only allowed keys
                             if isinstance(area['settings'], dict) and isinstance(sanitized_best, dict):
                                 area['settings'].update(sanitized_best)
+                            else:
+                                # AreaSettings: set attributes individually
+                                try:
+                                    for k, v in (sanitized_best or {}).items():
+                                        area['settings'][k] = v
+                                except Exception:
+                                    pass
                             break
             elif target_id is not None:
                 for area in current_areas:
                     if area.get('id') == target_id:
-                        if 'settings' not in area: area['settings'] = {}
-                        area['settings'].update(best_settings)
+                        if 'settings' not in area:
+                            area['settings'] = self.config_mgr.make_area_settings({})
+                        if isinstance(area['settings'], dict) and isinstance(best_settings, dict):
+                            area['settings'].update(best_settings)
+                        else:
+                            try:
+                                for k, v in (best_settings or {}).items():
+                                    area['settings'][k] = v
+                            except Exception:
+                                pass
                         break
 
             # Work on a deep copy and sanitize nested settings to remove any
@@ -1148,8 +1163,14 @@ class LektorApp:
             safe_areas = _copy.deepcopy(current_areas)
             try:
                 for a in safe_areas:
-                    if isinstance(a, dict) and 'settings' in a and isinstance(a['settings'], dict):
-                        a['settings'] = {k: v for k, v in a['settings'].items() if k not in ('areas', 'monitor')}
+                    if isinstance(a, dict) and 'settings' in a:
+                        # If AreaSettings instance, convert to sanitized dict
+                        s = a['settings']
+                        if hasattr(s, 'to_dict') and callable(getattr(s, 'to_dict')):
+                            sd = s.to_dict()
+                            a['settings'] = {k: v for k, v in sd.items() if k not in ('areas', 'monitor')}
+                        elif isinstance(s, dict):
+                            a['settings'] = {k: v for k, v in s.items() if k not in ('areas', 'monitor')}
             except Exception:
                 pass
             preset_data['areas'] = safe_areas

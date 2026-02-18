@@ -3,7 +3,7 @@ from tkinter import ttk, messagebox
 import os
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 
-from app.config_manager import ConfigManager
+from app.config_manager import ConfigManager, AreaSettings
 
 if TYPE_CHECKING:
     from lektor import LektorApp
@@ -84,6 +84,17 @@ class AreaManagerWindow(tk.Toplevel):
                 if 'subtitle_colors' not in a['settings']:
                     a['settings']['subtitle_colors'] = list(a['colors'])
                 del a['colors']
+
+        # Zamień słowniki `settings` na typ `AreaSettings` udostępniany przez ConfigManager.
+        for a in self.areas:
+            # ensure settings exists as dict first
+            s = a.get('settings') or {}
+            # Use ConfigManager helper to create typed settings
+            try:
+                a['settings'] = self.config_mgr.make_area_settings(s)
+            except Exception:
+                # Jeśli konwersja zawiedzie, zachowaj surowy dict żeby nie psuć interfejsu
+                a['settings'] = s
 
         self.current_selection_idx = -1
 
@@ -363,23 +374,44 @@ class AreaManagerWindow(tk.Toplevel):
         self.var_hotkey.set(area.get('hotkey', ''))
 
         # Tab OCR
-        self.var_thickening.set(settings.get('text_thickening', 0))
+        try:
+            self.var_thickening.set(settings.text_thickening)
+        except Exception:
+            self.var_thickening.set(0)
 
         from app.matcher import MATCH_MODE_FULL
-        mode_val = settings.get('subtitle_mode', MATCH_MODE_FULL)
+        try:
+            mode_val = settings.subtitle_mode
+        except Exception:
+            mode_val = MATCH_MODE_FULL
         self.var_mode.set(self.mode_mapping.get(mode_val, mode_val))
 
         # Removed var_cmode logic
-        self.var_brightness.set(settings.get('brightness_threshold', 200))
-        self.var_contrast.set(settings.get('contrast', 0.0))
+        try:
+            self.var_brightness.set(settings.brightness_threshold)
+        except Exception:
+            self.var_brightness.set(200)
+        try:
+            self.var_contrast.set(settings.contrast)
+        except Exception:
+            self.var_contrast.set(0.0)
 
         # Tab Colors
-        self.var_use_colors.set(settings.get('use_colors', True))
-        self.var_tolerance.set(settings.get('color_tolerance', 10))
+        try:
+            self.var_use_colors.set(settings.use_colors)
+        except Exception:
+            self.var_use_colors.set(True)
+        try:
+            self.var_tolerance.set(settings.color_tolerance)
+        except Exception:
+            self.var_tolerance.set(10)
 
         self.lb_colors.delete(0, tk.END)
-        for c in settings.get('subtitle_colors', []):
-            self.lb_colors.insert(tk.END, c)
+        try:
+            for c in settings.subtitle_colors:
+                self.lb_colors.insert(tk.END, c)
+        except Exception:
+            pass
 
         # Note: we intentionally do not block _on_field_change here —
         # settings are saved explicitly via the "Zapisz i Zamknij" button.
@@ -396,7 +428,7 @@ class AreaManagerWindow(tk.Toplevel):
             return
         area = self.areas[self.current_selection_idx]
         if 'settings' not in area:
-            area['settings'] = {}
+            area['settings'] = self.config_mgr.make_area_settings({})
         s = area['settings']
 
         # Map back to area/settings struct
@@ -559,7 +591,7 @@ class AreaManagerWindow(tk.Toplevel):
             "type": TYPE_MANUAL,
             "rect": None,
             "hotkey": "",
-            "settings": {}
+            "settings": self.config_mgr.make_area_settings({})
         })
         self.current_selection_idx = len(self.areas) - 1
         self._refresh_list()
@@ -607,7 +639,7 @@ class AreaManagerWindow(tk.Toplevel):
             "type": TYPE_CONTINUOUS,
             "rect": None,
             "hotkey": "",
-            "settings": {}
+            "settings": self.config_mgr.make_area_settings({}) if self.config_mgr else AreaSettings()
         })
         self._refresh_list()
 
@@ -620,7 +652,7 @@ class AreaManagerWindow(tk.Toplevel):
             "type": TYPE_MANUAL,
             "rect": None,
             "hotkey": "",
-            "settings": {}
+            "settings": self.config_mgr.make_area_settings({}) if self.config_mgr else AreaSettings()
         }
         self.areas.append(new_area)
         self.current_selection_idx = len(self.areas) - 1
@@ -676,16 +708,37 @@ class AreaManagerWindow(tk.Toplevel):
         if self.current_selection_idx < 0:
             return
         area = self.areas[self.current_selection_idx]
+        # Ensure we have an AreaSettings instance
         if 'settings' not in area:
-            area['settings'] = {}
+            area['settings'] = self.config_mgr.make_area_settings({}) if self.config_mgr else AreaSettings()
 
-        colors = area['settings'].setdefault('subtitle_colors', [])
+        s = area['settings']
+        try:
+            colors = s.subtitle_colors
+            if colors is None:
+                colors = []
+                s.subtitle_colors = colors
+        except Exception:
+            # Fallback for dict-style
+            if isinstance(s, dict):
+                colors = s.setdefault('subtitle_colors', [])
+            else:
+                colors = []
+                try:
+                    s.subtitle_colors = colors
+                except Exception:
+                    pass
+
         if color not in colors:
             colors.append(color)
-            # Safe update
-            s = set(colors)
-            area['settings']['subtitle_colors'] = list(s)
-            self._load_details(self.current_selection_idx)
+            # Keep insertion order unique
+            uniq = list(dict.fromkeys(colors))
+            try:
+                s.subtitle_colors = uniq
+            except Exception:
+                if isinstance(s, dict):
+                    s['subtitle_colors'] = uniq
+        self._load_details(self.current_selection_idx)
 
     def _remove_color(self):
         if self.current_selection_idx < 0:
@@ -696,10 +749,19 @@ class AreaManagerWindow(tk.Toplevel):
 
         idx = sel_idx[0]
         area = self.areas[self.current_selection_idx]
-        colors = area['settings'].get('subtitle_colors', [])
+        s = area.get('settings')
+        try:
+            colors = s.subtitle_colors
+        except Exception:
+            colors = s.get('subtitle_colors', []) if isinstance(s, dict) else []
 
         if 0 <= idx < len(colors):
             del colors[idx]
+            try:
+                s.subtitle_colors = colors
+            except Exception:
+                if isinstance(s, dict):
+                    s['subtitle_colors'] = colors
             self._load_details(self.current_selection_idx)
 
     def _pick_color_screen(self):
@@ -769,10 +831,15 @@ class AreaManagerWindow(tk.Toplevel):
         area_copy['id'] = max_id + 1
 
         if 'settings' in area_copy:
-            area_copy['settings'] = area_copy['settings'].copy()
-            if 'subtitle_colors' in area_copy['settings']:
-                area_copy['settings']['subtitle_colors'] = list(
-                    area_copy['settings']['subtitle_colors'])
+            # Convert to a standalone AreaSettings instance copy
+            if isinstance(area_copy['settings'], dict):
+                area_copy['settings'] = self.config_mgr.make_area_settings(area_copy['settings']) if self.config_mgr else AreaSettings.from_dict(area_copy['settings'])
+            elif isinstance(area_copy['settings'], AreaSettings):
+                area_copy['settings'] = AreaSettings.from_dict(area_copy['settings'].to_dict())
+            try:
+                area_copy['settings'].subtitle_colors = list(area_copy['settings'].subtitle_colors or [])
+            except Exception:
+                pass
         if 'rect' in area_copy:
             area_copy['rect'] = area_copy['rect'].copy()
 
@@ -843,15 +910,20 @@ class AreaManagerWindow(tk.Toplevel):
             pre_db = precompute_subtitles(self.subtitle_lines)
             optimizer = SettingsOptimizer()
             from app.matcher import MATCH_MODE_FULL
-            mode = settings.get('subtitle_mode', MATCH_MODE_FULL)
+            try:
+                mode = settings.subtitle_mode
+            except Exception:
+                mode = MATCH_MODE_FULL
+
+            settings_dict = settings.to_dict() if isinstance(settings, AreaSettings) else (settings if isinstance(settings, dict) else {})
 
             score_original, _ = optimizer._evaluate_settings(
-                normal_crop, settings, pre_db, mode)
+                normal_crop, settings_dict, pre_db, mode)
 
             # Evaluate expanded
             # We use the SAME settings on expanded crop to see if we missed text
             score_expanded, _ = optimizer._evaluate_settings(
-                expanded_crop, settings, pre_db, mode)
+                expanded_crop, settings_dict, pre_db, mode)
 
             # Logic: If expanded score is significantly better OR (if both are good, check bounds)
             # Actually, if we expand, we might catch garbage which lowers score.

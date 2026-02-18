@@ -3,6 +3,7 @@ import os
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 from typing import Tuple
+from dataclasses import dataclass, field
 from app import scale_utils
 
 APP_CONFIG_FILE = Path.home() / '.config' / 'app_config.json'
@@ -41,6 +42,58 @@ DEFAULT_PRESET_CONTENT = {
 
 import shutil
 import datetime
+
+
+@dataclass
+class AreaSettings:
+    """Typed container for per-area settings.
+
+    Behaves like a minimal dict (supports `get`, `__getitem__`, `__setitem__`)
+    and can be converted to/from plain dicts for serialization.
+    """
+    text_thickening: int = 0
+    subtitle_mode: str = "Full Lines"
+    brightness_threshold: int = 200
+    contrast: float = 0.0
+    use_colors: bool = True
+    color_tolerance: int = 10
+    subtitle_colors: List[str] = field(default_factory=list)
+    # Removed shared/preset-level fields (they are not per-area).
+    # Area-level settings kept below.
+    setting_mode: str = ''
+    show_debug: bool = False
+    scale_overrides: Dict[str, float] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, d: Optional[Dict[str, Any]]):
+        if not d:
+            return cls()
+        # Merge provided dict with defaults
+        kw = {}
+        for f in cls.__dataclass_fields__.keys():
+            if f in d:
+                kw[f] = d.get(f)
+        # Ensure types where necessary
+        if 'subtitle_colors' in kw and kw['subtitle_colors'] is None:
+            kw['subtitle_colors'] = []
+        return cls(**kw)
+
+    def to_dict(self) -> Dict[str, Any]:
+        out = {}
+        for k in self.__dataclass_fields__.keys():
+            val = object.__getattribute__(self, k)
+            out[k] = val
+        return out
+
+    # Dict-like helpers used by UI code
+    # Direct attribute access is preferred; `get` removed per design.
+
+    def __getitem__(self, key: str):
+        return object.__getattribute__(self, key)
+
+    def __setitem__(self, key: str, value):
+        setattr(self, key, value)
+
 
 class ConfigManager:
     """Zarządza ładowaniem i zapisywaniem głównej konfiguracji aplikacji oraz presetów."""
@@ -290,6 +343,10 @@ class ConfigManager:
         data['show_debug'] = bool(value)
         if self.preset_path:
             self.save_preset(self.preset_path, data)
+
+    def make_area_settings(self, settings: Optional[Dict[str, Any]]) -> AreaSettings:
+        """Create an AreaSettings instance from a plain dict (or None)."""
+        return AreaSettings.from_dict(settings if isinstance(settings, dict) else {})
 
 
     def backup_preset(self, path: str) -> Optional[str]:
@@ -607,8 +664,18 @@ class ConfigManager:
                     return obj
                 else:
                     # Try to convert custom types (int64 etc)
-                    if hasattr(obj, 'item'): 
-                         return obj.item()
+                    # If object exposes `to_dict`, prefer that for serialization
+                    # Prefer `.to_dict()` for custom types (AreaSettings etc.).
+                    try:
+                        fn = obj.to_dict
+                        if callable(fn):
+                            return sanitize(fn(), memo)
+                    except Exception:
+                        pass
+                    try:
+                        return obj.item()
+                    except Exception:
+                        pass
                     return str(obj)
 
             save_data = sanitize(data)
