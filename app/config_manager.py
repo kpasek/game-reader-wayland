@@ -67,7 +67,7 @@ class AreaConfig:
     def _to_dict(self) -> Dict[str, Any]:
         """Returns a full dictionary representation of the AreaConfig for persistence."""
         return {
-            "id": int(self.id),
+            "id": int(self.id) if str(self.id).isdigit() else self.id,
             "type": str(self.type),
             "rect": dict(self.rect),
             "hotkey": str(self.hotkey or ''),
@@ -95,7 +95,7 @@ class AreaConfig:
             return cls()
 
         kw: Dict[str, Any] = {}
-        kw['id'] = int(d.get('id', 0))
+        aid = d.get('id', 0); kw['id'] = int(aid) if str(aid).isdigit() else aid
         kw['type'] = str(d.get('type', 'manual'))
         kw['rect'] = dict(d.get('rect', {'left': 0, 'top': 0, 'width': 0, 'height': 0}))
         kw['hotkey'] = str(d.get('hotkey', '')) if d.get('hotkey') is not None else ''
@@ -530,28 +530,6 @@ class ConfigManager:
             self.save_preset(self.preset_path, obj)
 
     @property
-    def text_color_mode(self) -> str:
-        return self._get_preset_obj().text_color_mode
-
-    @text_color_mode.setter
-    def text_color_mode(self, value: str):
-        obj = self._get_preset_obj()
-        obj.text_color_mode = str(value)
-        if self.preset_path:
-            self.save_preset(self.preset_path, obj)
-
-    @property
-    def auto_remove_names(self) -> bool:
-        return self._get_preset_obj().auto_remove_names
-
-    @auto_remove_names.setter
-    def auto_remove_names(self, value: bool):
-        obj = self._get_preset_obj()
-        obj.auto_remove_names = bool(value)
-        if self.preset_path:
-            self.save_preset(self.preset_path, obj)
-            
-    @property
     def regex_mode_name(self) -> str:
         return self._get_preset_obj().regex_mode_name
 
@@ -574,61 +552,6 @@ class ConfigManager:
             self.save_preset(self.preset_path, obj)
 
     @property
-    def text_thickening(self) -> int:
-        return self._get_preset_obj().text_thickening
-
-    @text_thickening.setter
-    def text_thickening(self, value: int):
-        obj = self._get_preset_obj()
-        obj.text_thickening = int(value)
-        if self.preset_path:
-            self.save_preset(self.preset_path, obj)
-
-    @property
-    def brightness_threshold(self) -> int:
-        return self._get_preset_obj().brightness_threshold
-
-    @brightness_threshold.setter
-    def brightness_threshold(self, value: int):
-        obj = self._get_preset_obj()
-        obj.brightness_threshold = int(value)
-        if self.preset_path:
-            self.save_preset(self.preset_path, obj)
-
-    @property
-    def contrast(self) -> float:
-        return self._get_preset_obj().contrast
-
-    @contrast.setter
-    def contrast(self, value: float):
-        obj = self._get_preset_obj()
-        obj.contrast = float(value)
-        if self.preset_path:
-            self.save_preset(self.preset_path, obj)
-
-    @property
-    def color_tolerance(self) -> int:
-        return self._get_preset_obj().color_tolerance
-
-    @color_tolerance.setter
-    def color_tolerance(self, value: int):
-        obj = self._get_preset_obj()
-        obj.color_tolerance = int(value)
-        if self.preset_path:
-            self.save_preset(self.preset_path, obj)
-
-    @property
-    def show_debug(self) -> bool:
-        return self._get_preset_obj().show_debug
-
-    @show_debug.setter
-    def show_debug(self, value: bool):
-        obj = self._get_preset_obj()
-        obj.show_debug = bool(value)
-        if self.preset_path:
-            self.save_preset(self.preset_path, obj)
-
-    @property
     def subtitle_colors(self) -> List[str]:
         return self._get_preset_obj().subtitle_colors
 
@@ -636,31 +559,6 @@ class ConfigManager:
     def subtitle_colors(self, value: List[str]):
         obj = self._get_preset_obj()
         obj.subtitle_colors = list(value)
-        if self.preset_path:
-            self.save_preset(self.preset_path, obj)
-
-
-    @property
-    def areas(self) -> List[AreaConfig]:
-        """Return the list of areas (as `AreaConfig`) scaled to the manager's `display_resolution`."""
-        return self.get_areas()
-
-    @areas.setter
-    def areas(self, value: List[AreaConfig]):
-        """Sets areas and saves the preset.
-        Scales the provided area rects FROM display resolution TO 4K canonical.
-        """
-        obj = self._get_preset_obj()
-        import copy as _copy
-        canonical_areas = _copy.deepcopy(list(value))
-        
-        # Scale back to 4K before storing in the canonical memory cache
-        if self.display_resolution:
-            sw, sh = self.display_resolution
-            for area in canonical_areas:
-                area.rect = scale_utils.scale_rect_to_4k(area.rect, sw, sh)
-        
-        obj.areas = canonical_areas
         if self.preset_path:
             self.save_preset(self.preset_path, obj)
 

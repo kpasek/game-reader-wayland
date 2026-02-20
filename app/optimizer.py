@@ -159,20 +159,22 @@ class SettingsOptimizer:
                 s.text_color_mode = "Light" 
                 s.brightness_threshold = 200 
                 s.contrast = contrast
+                s.subtitle_mode = match_mode  # Zastosuj wybrany tryb
                 candidates.append(s)
         
         # Branch B: Brightness Mode (Light/Dark/Mixed)
-        for mode in ["Light", "Dark"]:
+        for mode, thick in itertools.product(["Light", "Dark"], params["thickenings"]):
             for contrast, brightness in itertools.product(params["contrasts"], params["brightness_threshold"]):
                 s = copy.deepcopy(self.base_preset)
                 s._setting_mode = "brightness"
                 s.auto_remove_names = True
                 s.subtitle_colors = []
                 s.text_color_mode = mode
-                s.text_thickening = 0
+                s.text_thickening = thick
                 s.ocr_scale_factor = 1.0
                 s.brightness_threshold = brightness
                 s.contrast = contrast
+                s.subtitle_mode = match_mode  # Zastosuj wybrany tryb
                 candidates.append(s)
 
 
@@ -269,6 +271,7 @@ class SettingsOptimizer:
                 best_score_list, best_preset, best_bbox = finalists[0]
                 avg_score = sum(best_score_list) / len(best_score_list)
                 opt_rect = rough_area
+                print(f"best settings: {best_preset}")
                 return {
                     "score": avg_score, 
                     "settings": best_preset, 
@@ -279,6 +282,7 @@ class SettingsOptimizer:
         # Fallback jeśli tylko 1 obraz LUB brak survivors
         if best_settings_st1:
             opt_rect = rough_area
+            print(f"best settings: {best_settings_st1}")
             return {
                 "match_mode": match_mode,
                 "score": best_score_st1, 

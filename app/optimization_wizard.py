@@ -5,12 +5,13 @@ from PIL import Image
 from app.capture import capture_fullscreen
 from app.area_selector import AreaSelector, ColorSelector
 from app.matcher import MATCH_MODE_FULL, MATCH_MODE_STARTS, MATCH_MODE_PARTIAL
+from app.gui_utils import create_tooltip
 
 class OptimizationWizard(tk.Toplevel):
     def __init__(self, parent, on_start):
         super().__init__(parent)
         self.title("Optymalizacja Ustawień")
-        self.geometry("500x500")
+        self.geometry("600x600")
         
         # Shortcuts
         self.bind("<F4>", lambda e: self._add_with_selection())
@@ -33,9 +34,10 @@ class OptimizationWizard(tk.Toplevel):
             "\n"
             "Im lepiej przygotujesz zrzuty i zaznaczysz napisy, tym lepszy będzie efekt optymalizacji!"
         )
-        # Przycisk "Instrukcja" z tooltipem
-        btn_instr = ttk.Button(main_f, text="Pokaż Instrukcję", command=lambda: messagebox.showinfo("Instrukcja", instrukcja))
+        # Przycisk "Instrukcja" z tooltipem zamiast okna
+        btn_instr = ttk.Label(main_f, text="❓ Instrukcja", foreground="blue", cursor="hand2")
         btn_instr.pack(anchor=tk.NE, pady=(0, 0), padx=(0, 5))
+        create_tooltip(btn_instr, instrukcja)
         
         self.list_frame = ttk.Frame(main_f)
         self.list_frame.pack(fill=tk.BOTH, expand=True, pady=10)

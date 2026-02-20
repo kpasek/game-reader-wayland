@@ -55,7 +55,7 @@ audio_queue = queue.Queue()
 log_queue = queue.Queue()
 debug_queue = queue.Queue()
 
-APP_VERSION = "v1.5.4"
+APP_VERSION = "v1.5.5"
 
 
 class LektorApp:
@@ -1107,10 +1107,13 @@ class LektorApp:
                     target_area.rect = new_rect
                 
                 # Apply settings from best_settings (must be PresetConfig object)
+                # Log values for debugging
+                print(f"APPLYING to Area #{target_area.id}: thick={best_settings.text_thickening}, brightness={best_settings.brightness_threshold}, mode={best_settings.subtitle_mode}")
                 target_area.text_thickening = int(best_settings.text_thickening)
                 target_area.brightness_threshold = int(best_settings.brightness_threshold)
                 target_area.contrast = float(best_settings.contrast)
                 target_area.color_tolerance = int(best_settings.color_tolerance)
+                target_area.subtitle_mode = best_settings.subtitle_mode
                 
                 # AreaConfig uses 'colors', while PresetConfig/Optimizer uses 'subtitle_colors'
                 target_area.colors = list(best_settings.subtitle_colors or [])

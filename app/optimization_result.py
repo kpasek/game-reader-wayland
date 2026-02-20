@@ -5,7 +5,7 @@ class OptimizationResultWindow(tk.Toplevel):
     def __init__(self, parent, score, settings, optimized_area, existing_areas, on_apply):
         super().__init__(parent)
         self.title("Wynik Optymalizacji")
-        self.geometry("450x600")
+        self.geometry("500x500")
         self.on_apply = on_apply
         self.result_data = None
         

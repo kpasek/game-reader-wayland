@@ -5,7 +5,7 @@ class ProcessingWindow(tk.Toplevel):
     def __init__(self, parent, title="Przetwarzanie"):
         super().__init__(parent)
         self.title(title)
-        self.geometry("400x150")
+        self.geometry("500x200")
         self.resizable(False, False)
         self.transient(parent)
         self.grab_set()

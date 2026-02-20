@@ -44,7 +44,7 @@ class AreaManagerWindow(tk.Toplevel):
         """
         super().__init__(parent)
         self.title("Zarządzanie Obszarami")
-        self.geometry("900x600")
+        self.geometry("1000x700")
         self.app: 'LektorApp' = app
         self.config_mgr: Optional[ConfigManager] = app.config_mgr
         self.subtitle_lines: Optional[List[Dict[str, Any]]] = subtitle_lines
@@ -230,7 +230,7 @@ class AreaManagerWindow(tk.Toplevel):
         from app.matcher import MATCH_MODE_FULL, MATCH_MODE_STARTS, MATCH_MODE_PARTIAL
         self.mode_mapping = {
             MATCH_MODE_FULL: "Pełne linie",
-            MATCH_MODE_STARTS: "Zaczyna się na",
+            MATCH_MODE_STARTS: "Zaczyna się od",
             MATCH_MODE_PARTIAL: "Częściowe"
         }
         self.rev_mode_mapping = {v: k for k, v in self.mode_mapping.items()}
