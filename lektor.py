@@ -748,7 +748,7 @@ class LektorApp:
             a1 = next((a for a in areas if self._is_main_area(a.id)), None)
             if a1: colors = a1.colors
         else:
-            colors = self.config_mgr.subtitle_colors
+            colors = self.config_mgr.colors
 
         x_offset = 2
         y_pos = 2
@@ -1115,8 +1115,7 @@ class LektorApp:
                 target_area.color_tolerance = int(best_settings.color_tolerance)
                 target_area.subtitle_mode = best_settings.subtitle_mode
                 
-                # AreaConfig uses 'colors', while PresetConfig/Optimizer uses 'subtitle_colors'
-                target_area.colors = list(best_settings.subtitle_colors or [])
+                target_area.colors = list(best_settings.colors or [])
 
             # Save via ConfigManager
             old_res = self.config_mgr.display_resolution

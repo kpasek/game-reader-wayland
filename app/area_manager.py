@@ -639,16 +639,13 @@ class AreaManagerWindow(tk.Toplevel):
         if self.current_selection_idx < 0:
             return
         area = self.areas[self.current_selection_idx]
-        # Ensure area has subtitle_colors list
-        if area.subtitle_colors is None:
-            area.subtitle_colors = list(area.colors or [])
-        colors = area.subtitle_colors
+        colors = area.colors
 
         if color not in colors:
             colors.append(color)
             # Keep insertion order unique
             uniq = list(dict.fromkeys(colors))
-            area.subtitle_colors = uniq
+            area.colors = uniq
         # Persist change and refresh details
         self.config_mgr.set_areas(self.areas)
         self._load_details(self.current_selection_idx)
@@ -662,11 +659,11 @@ class AreaManagerWindow(tk.Toplevel):
 
         idx = sel_idx[0]
         area = self.areas[self.current_selection_idx]
-        colors = area.subtitle_colors or []
+        colors = area.colors or []
 
         if 0 <= idx < len(colors):
             del colors[idx]
-            area.subtitle_colors = colors
+            area.colors = colors
             self.config_mgr.set_areas(self.areas)
             self._load_details(self.current_selection_idx)
 
@@ -746,9 +743,9 @@ class AreaManagerWindow(tk.Toplevel):
 
         # Normalize subtitle colors on the copy (flattened area attributes)
         try:
-            area_copy.subtitle_colors = list(area_copy.subtitle_colors or area_copy.colors or [])
+            area_copy.colors = list(area_copy.colors or area_copy.colors or [])
         except Exception:
-            area_copy.subtitle_colors = list(area_copy.colors or [])
+            area_copy.colors = list(area_copy.colors or [])
         
         self.areas.append(area_copy)
         self.config_mgr.set_areas(self.areas)

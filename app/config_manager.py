@@ -102,11 +102,9 @@ class AreaConfig:
         kw['name'] = str(d.get('name', '')) if d.get('name') is not None else ''
         kw['enabled'] = bool(d.get('enabled', False))
         
-        # Unify colors/subtitle_colors into 'colors'
-        kw['colors'] = list(d.get('colors', d.get('subtitle_colors', [])) or [])
+        kw['colors'] = list(d.get('colors', d.get('colors', [])) or [])
 
         # Per-area settings may be nested under 'settings' or present at top-level
-        s = d.get('settings', {}) if isinstance(d, dict) else {}
         def _pick(name, default):
             if isinstance(d, dict) and name in d and d.get(name) is not None:
                 return d.get(name)
@@ -121,9 +119,9 @@ class AreaConfig:
         kw['use_colors'] = bool(_pick('use_colors', True))
         kw['color_tolerance'] = int(_pick('color_tolerance', 10))
         
-        # If 'colors' still empty, check 'subtitle_colors' in settings
+        # If 'colors' still empty, check 'colors' in settings
         if not kw['colors']:
-            kw['colors'] = list(_pick('subtitle_colors', []) or [])
+            kw['colors'] = list(_pick('colors', []) or [])
             
         kw['setting_mode'] = str(_pick('setting_mode', ''))
         kw['show_debug'] = bool(_pick('show_debug', False))
@@ -160,7 +158,7 @@ class PresetConfig:
     contrast: float = 0.0
     use_colors: bool = True
     color_tolerance: int = 10
-    subtitle_colors: List[str] = field(default_factory=list)
+    colors: List[str] = field(default_factory=list)
     show_debug: bool = False
     
     areas: List[AreaConfig] = field(default_factory=list)
@@ -173,9 +171,9 @@ class PresetConfig:
                 # Convert list of dicts to list of AreaConfig
                 raw = d.get('areas', d.get('monitor', []))
                 kw['areas'] = [AreaConfig._from_dict(a) if isinstance(a, dict) else a for a in raw if a]
-            elif f == 'subtitle_colors':
+            elif f == 'colors':
                 # Handle both naming conventions
-                kw['subtitle_colors'] = list(d.get('subtitle_colors', d.get('colors', [])) or [])
+                kw['colors'] = list(d.get('colors', d.get('colors', [])) or [])
             elif f in d:
                 kw[f] = d[f]
         return cls(**kw)
@@ -552,13 +550,13 @@ class ConfigManager:
             self.save_preset(self.preset_path, obj)
 
     @property
-    def subtitle_colors(self) -> List[str]:
-        return self._get_preset_obj().subtitle_colors
+    def colors(self) -> List[str]:
+        return self._get_preset_obj().colors
 
-    @subtitle_colors.setter
-    def subtitle_colors(self, value: List[str]):
+    @colors.setter
+    def colors(self, value: List[str]):
         obj = self._get_preset_obj()
-        obj.subtitle_colors = list(value)
+        obj.colors = list(value)
         if self.preset_path:
             self.save_preset(self.preset_path, obj)
 
@@ -740,9 +738,9 @@ class ConfigManager:
             return PresetConfig()
 
     def _migrate_legacy_areas(self, data: Dict[str, Any]):
-        """Konwertuje stare ustawienia 'monitor' i 'subtitle_colors' na nową strukturę 'areas'."""
+        """Konwertuje stare ustawienia 'monitor' i 'colors' na nową strukturę 'areas'."""
         monitors = data.get('monitor', [])
-        colors = data.get('subtitle_colors', [])
+        colors = data.get('colors', [])
         
         new_areas = []
 

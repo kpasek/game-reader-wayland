@@ -152,7 +152,7 @@ class SettingsOptimizer:
                 # Attach metadata for sorting/reporting
                 s._setting_mode = "color" 
                 s.auto_remove_names = True
-                s.subtitle_colors = [color]
+                s.colors = [color]
                 s.color_tolerance = tol
                 s.text_thickening = thick
                 s.ocr_scale_factor = 1.0
@@ -168,7 +168,7 @@ class SettingsOptimizer:
                 s = copy.deepcopy(self.base_preset)
                 s._setting_mode = "brightness"
                 s.auto_remove_names = True
-                s.subtitle_colors = []
+                s.colors = []
                 s.text_color_mode = mode
                 s.text_thickening = thick
                 s.ocr_scale_factor = 1.0
@@ -212,7 +212,7 @@ class SettingsOptimizer:
         def print_summary(ranked, img_idx, total_imgs):
             print(f"\nPODSUMOWANIE 5 NAJLEPSZYCH USTAWIEŃ po zrzucie {img_idx+1}/{total_imgs}:")
             for idx, (score_list, s, bbox) in enumerate(ranked[:5], 1):
-                color = s.subtitle_colors[0] if s.subtitle_colors else '-'
+                color = s.colors[0] if s.colors else '-'
                 match_mode_str = match_mode
                 final_score = sum(score_list) / len(score_list) if score_list else 0
                 score_this_img = score_list[-1] if score_list else 0

@@ -112,7 +112,7 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager, area_con
             thick = int(config_manager.text_thickening)
             thresh = int(config_manager.brightness_threshold)
             contr = float(config_manager.contrast)
-            cols_source = override_colors if override_colors is not None else config_manager.subtitle_colors
+            cols_source = override_colors if override_colors is not None else config_manager.colors
             color_tol = int(config_manager.color_tolerance)
             show_debug = bool(config_manager.show_debug)
 

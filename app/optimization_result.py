@@ -32,7 +32,7 @@ class OptimizationResultWindow(tk.Toplevel):
         add_row("Skala OCR:", settings.ocr_scale_factor)
         
         # Colors
-        cols = getattr(settings, 'subtitle_colors', [])
+        cols = getattr(settings, 'colors', [])
         f_cols = ttk.Frame(content)
         f_cols.pack(fill="x", pady=3)
         ttk.Label(f_cols, text="Kolory:", width=22, anchor="w").pack(side="left")
