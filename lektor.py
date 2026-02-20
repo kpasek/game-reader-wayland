@@ -55,7 +55,7 @@ audio_queue = queue.Queue()
 log_queue = queue.Queue()
 debug_queue = queue.Queue()
 
-APP_VERSION = "v1.5.0"
+APP_VERSION = "v1.5.1"
 
 
 class LektorApp:
@@ -397,76 +397,66 @@ class LektorApp:
         
         # Mark as current in manager
         self.config_mgr.preset_path = path
-        preset = self.config_mgr.load_preset(path)
+        self.config_mgr.load_preset(path)
 
         base_dir = os.path.dirname(path)
-        modified = False
 
-        if not preset.text_file_path:
+        if not self.config_mgr.text_file_path:
             try:
                 for f in sorted(os.listdir(base_dir)):
                     if f.lower().endswith(".txt"):
-                        preset.text_file_path = os.path.join(base_dir, f)
-                        modified = True
+                        self.config_mgr.text_file_path = os.path.join(base_dir, f)
                         break
             except Exception:
                 pass
 
-        if not preset.audio_dir:
+        if not self.config_mgr.audio_dir:
             try:
                 for f in sorted(os.listdir(base_dir)):
                     full_p = os.path.join(base_dir, f)
                     if os.path.isdir(full_p):
-                        preset.audio_dir = full_p
-                        modified = True
+                        self.config_mgr.audio_dir = full_p
                         break
             except Exception:
                 pass
 
-        if modified:
-            self.config_mgr.save_preset(path, preset)
-
-        # Sync UI state from canonical Preset object
-        self.var_speed.set(preset.audio_speed)
+        # Sync UI state from canonical properties via ConfigManager
+        self.var_speed.set(self.config_mgr.audio_speed)
         self.lbl_spd.config(text=f"{self.var_speed.get():.2f}x")
 
-        self.var_volume.set(preset.audio_volume)
+        self.var_volume.set(self.config_mgr.audio_volume)
         self.lbl_vol.config(text=f"{self.var_volume.get():.2f}")
 
         # Automatyczna detekcja formatu audio
-        detected_ext = self._detect_audio_format(preset.audio_dir or "")
-        current_ext = preset.audio_ext
+        detected_ext = self._detect_audio_format(self.config_mgr.audio_dir or "")
+        if detected_ext and detected_ext != self.config_mgr.audio_ext:
+            self.config_mgr.audio_ext = detected_ext
 
-        if detected_ext and detected_ext != current_ext:
-            preset.audio_ext = detected_ext
-            self.config_mgr.save_preset(path, preset)
-            current_ext = detected_ext
+        self.var_audio_ext.set(self.config_mgr.audio_ext)
+        self.var_auto_names.set(self.config_mgr.auto_remove_names)
+        self.var_ocr_scale.set(self.config_mgr.ocr_scale_factor)
+        self.var_capture_interval.set(self.config_mgr.capture_interval)
+        self.var_min_line_len.set(self.config_mgr.min_line_length)
+        self.var_text_color.set(self.config_mgr.text_color_mode)
+        self.var_text_alignment.set(self.config_mgr.text_alignment)
+        self.var_save_logs.set(self.config_mgr.save_logs)
+        self.var_show_debug.set(self.config_mgr.show_debug)
+        self.var_brightness_threshold.set(self.config_mgr.brightness_threshold)
+        self.var_similarity.set(self.config_mgr.similarity)
+        self.var_contrast.set(self.config_mgr.contrast)
+        self.var_tolerance.set(self.config_mgr.color_tolerance)
+        self.var_text_thickening.set(self.config_mgr.text_thickening)
 
-        self.var_audio_ext.set(current_ext)
-        self.var_auto_names.set(preset.auto_remove_names)
-        self.var_ocr_scale.set(preset.ocr_scale_factor)
-        self.var_capture_interval.set(preset.capture_interval)
-        self.var_min_line_len.set(preset.min_line_length)
-        self.var_text_color.set(preset.text_color_mode)
-        self.var_text_alignment.set(preset.text_alignment)
-        self.var_save_logs.set(preset.save_logs)
-        self.var_show_debug.set(preset.show_debug)
-        self.var_brightness_threshold.set(preset.brightness_threshold)
-        self.var_similarity.set(preset.similarity)
-        self.var_contrast.set(preset.contrast)
-        self.var_tolerance.set(preset.color_tolerance)
-        self.var_text_thickening.set(preset.text_thickening)
+        self.var_match_score_short.set(self.config_mgr.match_score_short)
+        self.var_match_score_long.set(self.config_mgr.match_score_long)
+        self.var_match_len_diff.set(self.config_mgr.match_len_diff_ratio)
+        self.var_partial_min_len.set(self.config_mgr.partial_mode_min_len)
+        self.var_audio_speed.set(self.config_mgr.audio_speed_inc)
 
-        self.var_match_score_short.set(preset.match_score_short)
-        self.var_match_score_long.set(preset.match_score_long)
-        self.var_match_len_diff.set(preset.match_len_diff_ratio)
-        self.var_partial_min_len.set(preset.partial_mode_min_len)
-        self.var_audio_speed.set(preset.audio_speed_inc)
-
-        if preset.regex_mode_name:
-            self.var_regex_mode.set(preset.regex_mode_name)
-            if preset.regex_mode_name == "Własny (Regex)":
-                self.var_custom_regex.set(preset.regex_pattern or "")
+        if self.config_mgr.regex_mode_name:
+            self.var_regex_mode.set(self.config_mgr.regex_mode_name)
+            if self.config_mgr.regex_mode_name == "Własny (Regex)":
+                self.var_custom_regex.set(self.config_mgr.regex_pattern or "")
             self.on_regex_changed()
 
         self.refresh_color_canvas()
@@ -488,29 +478,10 @@ class LektorApp:
 
     def _save_preset_val(self, key, val):
         """Authoritative save via ConfigManager properties."""
-        if key == 'audio_dir': self.config_mgr.audio_dir = val
-        elif key == 'text_file_path': self.config_mgr.text_file_path = val
-        elif key == 'regex_pattern': self.config_mgr.regex_pattern = val
-        elif key == 'regex_mode_name': self.config_mgr.regex_mode_name = val
-        elif key == 'audio_ext': self.config_mgr.audio_ext = val
-        elif key == 'ocr_scale_factor': self.config_mgr.ocr_scale_factor = val
-        elif key == 'capture_interval': self.config_mgr.capture_interval = val
-        elif key == 'auto_remove_names': self.config_mgr.auto_remove_names = val
-        elif key == 'save_logs': self.config_mgr.save_logs = val
-        elif key == 'min_line_length': self.config_mgr.min_line_length = val
-        elif key == 'text_color_mode': self.config_mgr.text_color_mode = val
-        elif key == 'brightness_threshold': self.config_mgr.brightness_threshold = val
-        elif key == 'contrast': self.config_mgr.contrast = val
-        elif key == 'color_tolerance': self.config_mgr.color_tolerance = val
-        elif key == 'text_thickening': self.config_mgr.text_thickening = val
-        elif key == 'match_score_short': self.config_mgr.match_score_short = val
-        elif key == 'match_score_long': self.config_mgr.match_score_long = val
-        elif key == 'match_len_diff_ratio': self.config_mgr.match_len_diff_ratio = val
-        elif key == 'partial_mode_min_len': self.config_mgr.partial_mode_min_len = val
-        elif key == 'audio_speed_inc': self.config_mgr.audio_speed_inc = val
-        elif key == 'similarity': self.config_mgr.similarity = val
-        elif key == 'audio_speed': self.config_mgr.audio_speed = val
-        elif key == 'audio_volume': self.config_mgr.audio_volume = val
+        if hasattr(self.config_mgr, key):
+            setattr(self.config_mgr, key, val)
+        else:
+            print(f"Ostrzeżenie: Próba zapisu nieznanego klucza: {key} = {val}")
 
     def browse_lector_folder(self):
         d = filedialog.askdirectory(title="Wybierz katalog z lektorem")
@@ -1067,7 +1038,7 @@ class LektorApp:
                 except Exception:
                     pass
                 self.root.deiconify()
-                self._on_optimization_finished(thread_context, path, data)
+                self._on_optimization_finished(thread_context, path)
 
             check_thread()
 
@@ -1076,7 +1047,7 @@ class LektorApp:
 
     # poprzednie funkcje _show_optimization_setup i _start_optimization_process zostały scalone
 
-    def _on_optimization_finished(self, context, preset_path, preset_data):
+    def _on_optimization_finished(self, context, preset_path):
         if context["error"]:
             messagebox.showerror("Błąd", f"Błąd podczas optymalizacji: {context['error']}")
             return
@@ -1093,7 +1064,7 @@ class LektorApp:
             messagebox.showwarning("Wynik", f"Nie znaleziono dobrych ustawień (Score: {display_score:.1f}%).\nSpróbuj zmienić obszar lub klatkę z gry. Najlepsze co mamy to: {display_score:.1f}%")
             return
 
-        best_settings = result.get('settings', {})
+        best_settings = result.get('settings') # This is a PresetConfig object
         optimized_area = result.get('optimized_area')
         img_size = context.get('img_size')
         
@@ -1130,11 +1101,13 @@ class LektorApp:
             # Find or create target area
             target_area = None
             if target_id is not None:
-                target_area = next((a for a in current_areas if a.id == target_id), None)
+                target_area = next((a for a in current_areas if str(a.id) == str(target_id)), None)
             
             if not target_area and new_rect:
                 from app.config_manager import AreaConfig
-                new_id = (max(a.id for a in current_areas) if current_areas else 0) + 1
+                import random
+                # Generujemy unikalny string ID jak area_XXXXXXXX
+                new_id = f"area_{random.randint(1000, 9999)}"
                 target_area = AreaConfig(id=new_id, type="continuous")
                 current_areas.append(target_area)
 
@@ -1142,24 +1115,26 @@ class LektorApp:
                 if new_rect:
                     target_area.rect = new_rect
                 
-                # Apply settings from best_settings (dict)
-                if isinstance(best_settings, dict):
-                    target_area.text_thickening = int(best_settings.get('text_thickening', target_area.text_thickening))
-                    target_area.brightness_threshold = int(best_settings.get('brightness_threshold', target_area.brightness_threshold))
-                    target_area.contrast = float(best_settings.get('contrast', target_area.contrast))
-                    target_area.color_tolerance = int(best_settings.get('color_tolerance', target_area.color_tolerance))
-                    target_area.use_colors = bool(best_settings.get('use_colors', target_area.use_colors))
-                    target_area.subtitle_colors = list(best_settings.get('subtitle_colors', target_area.subtitle_colors))
-                    target_area.setting_mode = str(best_settings.get('setting_mode', target_area.setting_mode))
-                    target_area.show_debug = bool(best_settings.get('show_debug', target_area.show_debug))
-                
-                target_area.subtitle_mode = context.get('match_mode', target_area.subtitle_mode)
+                # Apply settings from best_settings (object or dict)
+                if hasattr(best_settings, 'text_thickening'):
+                    target_area.text_thickening = int(best_settings.text_thickening)
+                    target_area.brightness_threshold = int(best_settings.brightness_threshold)
+                    target_area.contrast = float(best_settings.contrast)
+                    target_area.color_tolerance = int(best_settings.color_tolerance)
+                    target_area.subtitle_colors = list(best_settings.subtitle_colors or [])
+                elif isinstance(best_settings, dict):
+                    target_area.text_thickening = int(best_settings.get('text_thickening', target_area.text_thickening or 0))
+                    target_area.brightness_threshold = int(best_settings.get('brightness_threshold', target_area.brightness_threshold or 200))
+                    target_area.contrast = float(best_settings.get('contrast', target_area.contrast or 0.0))
+                    target_area.color_tolerance = int(best_settings.get('color_tolerance', target_area.color_tolerance or 10))
+                    target_area.subtitle_colors = list(best_settings.get('subtitle_colors', target_area.subtitle_colors or []))
 
             # Save via ConfigManager
             old_res = self.config_mgr.display_resolution
             try:
                 self.config_mgr.display_resolution = (sw, sh)
-                self.config_mgr.set_areas(current_areas)
+                # Use authoritative setter
+                self.config_mgr.areas = current_areas
             finally:
                 self.config_mgr.display_resolution = old_res
 
@@ -1169,7 +1144,8 @@ class LektorApp:
                 self.stop_reading()
                 self.root.after(200, self.start_reading)
             
-            self.on_preset_selected_from_combo(None)
+            # Full sync reload
+            self.on_preset_loaded()
 
         # Show result dialog
         OptimizationResultWindow(
@@ -1177,7 +1153,7 @@ class LektorApp:
             score, 
             best_settings, 
             optimized_area, 
-            preset_data.get('areas', []), 
+            self.config_mgr.get_areas(), 
             on_apply
         )
 

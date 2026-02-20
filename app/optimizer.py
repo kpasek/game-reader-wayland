@@ -5,22 +5,19 @@ from typing import Tuple, List, Dict, Any, Optional
 
 from app.ocr import preprocess_image, recognize_text
 from app.matcher import find_best_match, precompute_subtitles, MATCH_MODE_FULL
-from app.config_manager import ConfigManager
+from app.config_manager import ConfigManager, PresetConfig
 
 class OptimizerConfigManager(ConfigManager):
     """
     Specjalna wersja ConfigManager używana podczas optymalizacji.
     Używa obiektu PresetConfig w pamięci zamiast ładować z pliku.
     """
-    def __init__(self, settings_dict: Dict[str, Any]):
+    def __init__(self, preset: 'PresetConfig'):
         # Inicjalizujemy bez ładowania konfigu aplikacji
         self.settings = {} 
         self.preset_path = None
         self.display_resolution = None
-        
-        from app.config_manager import PresetConfig
-        # Tworzymy mockowany preset z przekazanych ustawień
-        self.preset_cache = PresetConfig._from_dict(settings_dict)
+        self.preset_cache = preset
 
     def _get_preset_obj(self):
         return self.preset_cache
@@ -33,22 +30,16 @@ class OptimizerConfigManager(ConfigManager):
 
 class SettingsOptimizer:
     def __init__(self, original_config_manager: ConfigManager = None):
-        # Use the original to get some defaults. Store as dict for variations.
-        self.base_settings = {}
+        # Use simple object to hold base candidates. We will copy it and adjust.
+        self.base_preset = PresetConfig()
         if original_config_manager:
-            preset = original_config_manager.load_preset()
-            # We only need area-level candidate settings
-            self.base_settings = {
-                "text_thickening": preset.text_thickening,
-                "brightness_threshold": preset.brightness_threshold,
-                "contrast": preset.contrast,
-                "color_tolerance": preset.color_tolerance,
-                "colors": list(preset.subtitle_colors or []),
-                "show_debug": preset.show_debug,
-                "setting_mode": ""
-            }
+            loaded_preset = original_config_manager.load_preset()
+            import copy
+            self.base_preset = copy.deepcopy(loaded_preset)
 
     def _extract_dominant_colors(self, image: Image.Image, num_colors: int = 3) -> List[str]:
+        # ... no changes here ...
+        # (Rest of _extract_dominant_colors omitted for brevity)
         """
         Znajduje domuniujące kolory na obrazie, ignorując ciemne tło (prawdopodobnie tło gry).
         Zwraca listę kolorów w formacie HEX (np. ["#FFFFFF", "#FF0000"]).
@@ -152,42 +143,38 @@ class SettingsOptimizer:
             "brightness_threshold": range(150, 255, 2)
         }
 
+        import copy
         # Generujemy pełną listę wszystkich kombinacji ustawień do sprawdzenia
         # Branch A: Color-based
         for color in candidate_colors_list:
             for tol, thick, contrast in itertools.product(params["color_tolerances"], params["thickenings"], params["contrasts"]):
-                s = self.base_settings.copy()
-                s.update({
-                    "setting_mode": "color",
-                    "auto_remove_names": True,
-                    "text_alignment": "None",
-                    "subtitle_colors": [color], # Still useful for internal OptimizerConfigManager
-                    "colors": [color],
-                    "color_tolerance": tol,
-                    "text_thickening": thick,
-                    "ocr_scale_factor": 1.0,
-                    "text_color_mode": "Light", 
-                    "brightness_threshold": 200, 
-                    "contrast": contrast
-                })
+                s = copy.deepcopy(self.base_preset)
+                # Attach metadata for sorting/reporting
+                s._setting_mode = "color" 
+                s.auto_remove_names = True
+                s.text_alignment = "None"
+                s.subtitle_colors = [color]
+                s.color_tolerance = tol
+                s.text_thickening = thick
+                s.ocr_scale_factor = 1.0
+                s.text_color_mode = "Light" 
+                s.brightness_threshold = 200 
+                s.contrast = contrast
                 candidates.append(s)
         
         # Branch B: Brightness Mode (Light/Dark/Mixed)
         for mode in ["Light", "Dark"]:
             for contrast, brightness in itertools.product(params["contrasts"], params["brightness_threshold"]):
-                s = self.base_settings.copy()
-                s.update({
-                    "setting_mode": "brightness",
-                    "auto_remove_names": True,
-                    "text_alignment": "None",
-                    "subtitle_colors": [],
-                    "colors": [],
-                    "text_color_mode": mode,
-                    "text_thickening": 0,
-                    "ocr_scale_factor": 1.0,
-                    "brightness_threshold": brightness,
-                    "contrast": contrast
-                })
+                s = copy.deepcopy(self.base_preset)
+                s._setting_mode = "brightness"
+                s.auto_remove_names = True
+                s.text_alignment = "None"
+                s.subtitle_colors = []
+                s.text_color_mode = mode
+                s.text_thickening = 0
+                s.ocr_scale_factor = 1.0
+                s.brightness_threshold = brightness
+                s.contrast = contrast
                 candidates.append(s)
 
 
@@ -198,31 +185,25 @@ class SettingsOptimizer:
 
         ranked_candidates = []
 
-        for settings in candidates:
-            score, bbox = self._evaluate_settings(crop0, settings, precomputed_db, match_mode)
+        for preset_obj in candidates:
+            score, bbox = self._evaluate_settings(crop0, preset_obj, precomputed_db, match_mode)
 
             if score > best_score_st1:
                 best_score_st1 = score
-                best_settings_st1 = settings
+                best_settings_st1 = preset_obj
             
             if score > 50:
-                ranked_candidates.append((score, settings, bbox))
+                ranked_candidates.append((score, preset_obj, bbox))
 
         def sort_key(item):
-            score, settings, _ = item
+            score, s, _ = item
             # Prefer color-mode candidates over brightness-mode when otherwise equal.
-            mode_prio = 1 if settings.get('setting_mode') == 'color' else 0
+            mode_prio = 1 if getattr(s, '_setting_mode', '') == 'color' else 0
 
-            if settings.get('setting_mode') == 'color':
-                tolerance = settings.get('color_tolerance', 9999)
-                thick = settings.get('text_thickening', 1)
-                contrast = settings.get('contrast', 9999)
-                # Higher mode_prio (color) helps color candidates win in reverse sorting
-                return (score, mode_prio, -tolerance, -int(thick == 0), -contrast)
+            if getattr(s, '_setting_mode', '') == 'color':
+                return (score, mode_prio, -s.color_tolerance, -int(s.text_thickening == 0), -s.contrast)
 
-            brightness = settings.get('brightness_threshold', 1)
-            contrast = settings.get('contrast', 9999)
-            return (score, mode_prio, brightness, 1, -contrast)
+            return (score, mode_prio, s.brightness_threshold, 1, -s.contrast)
 
         ranked_candidates.sort(key=sort_key, reverse=True)
         survivors = ranked_candidates[:50]
@@ -230,18 +211,15 @@ class SettingsOptimizer:
         # --- PODSUMOWANIE 5 NAJLEPSZYCH USTAWIEŃ po każdym zrzucie ---
         def print_summary(ranked, img_idx, total_imgs):
             print(f"\nPODSUMOWANIE 5 NAJLEPSZYCH USTAWIEŃ po zrzucie {img_idx+1}/{total_imgs}:")
-            for idx, (score_list, settings, bbox) in enumerate(ranked[:5], 1):
-                color = settings.get('subtitle_colors', [''])[0] if settings.get('subtitle_colors') else '-'
+            for idx, (score_list, s, bbox) in enumerate(ranked[:5], 1):
+                color = s.subtitle_colors[0] if s.subtitle_colors else '-'
                 match_mode_str = match_mode
-                tolerance = settings.get('color_tolerance', '-')
-                contrast = settings.get('contrast', '-')
-                thick = settings.get('text_thickening', '-')
                 final_score = sum(score_list) / len(score_list) if score_list else 0
                 score_this_img = score_list[-1] if score_list else 0
-                print(f"{idx}. Final Score: {final_score:.1f}% | Score: {score_this_img:.1f}% | Kolor: {color} | Tryb: {match_mode_str} | Tolerancja: {tolerance} | Kontrast: {contrast} | Pogrubienie: {thick}")
+                print(f"{idx}. Final Score: {final_score:.1f}% | Score: {score_this_img:.1f}% | Kolor: {color} | Tryb: {match_mode_str} | Tolerancja: {s.color_tolerance} | Kontrast: {s.contrast} | Pogrubienie: {s.text_thickening}")
 
         # Pierwszy zrzut: score_list = [score]
-        survivors = [([score], settings, bbox) for score, settings, bbox in survivors]
+        survivors = [([score], s, bbox) for score, s, bbox in survivors]
         print_summary(survivors, 0, len(input_images))
 
         # Jeśli mamy więcej obrazów, filtrujemy
@@ -256,19 +234,20 @@ class SettingsOptimizer:
                 best_ocr = None
                 best_ocr_score = -1
                 best_ocr_img = None
-                for score_list, settings, _ in finalists:
-                    score, bbox = self._evaluate_settings(crop_n, settings, precomputed_db, match_mode)
+                for score_list, s, _ in finalists:
+                    score, bbox = self._evaluate_settings(crop_n, s, precomputed_db, match_mode)
                     if score > best_ocr_score:
                         best_ocr_score = score
                         best_ocr_img = crop_n
                         try:
-                            ocr_text = recognize_text(crop_n, OptimizerConfigManager(settings))
+                            best_ocr = recognize_text(crop_n, OptimizerConfigManager(s))
                         except Exception:
-                            ocr_text = "<OCR error>"
-                        best_ocr = ocr_text
+                            best_ocr = "<OCR error>"
                     if score > 50:
-                        next_round.append((score_list + [score], settings, bbox))
+                        next_round.append((score_list + [score], s, bbox))
                 if not next_round:
+                    # Zapisz info o odrzuconym zrzucie
+                    # (Rest of loop remains mostly similar but uses s instead of settings)
                     # Zapisz info o odrzuconym zrzucie
                     preview_path = None
                     if best_ocr_img is not None:
@@ -289,19 +268,18 @@ class SettingsOptimizer:
                 print_summary(finalists, idx, len(input_images))
             if finalists:
                 finalists.sort(key=sort_key, reverse=True)
-                best_score_list, best_settings, best_bbox = finalists[0]
+                best_score_list, best_preset, best_bbox = finalists[0]
                 avg_score = sum(best_score_list) / len(best_score_list)
                 opt_rect = rough_area
                 return {
                     "score": avg_score, 
-                    "settings": best_settings, 
+                    "settings": best_preset, 
                     "optimized_area": opt_rect,
                     "rejected_screens": rejected_screens
                 }
 
         # Fallback jeśli tylko 1 obraz LUB brak survivors
         if best_settings_st1:
-            # Same fix here
             opt_rect = rough_area
             return {
                 "match_mode": match_mode,
@@ -310,18 +288,18 @@ class SettingsOptimizer:
                 "optimized_area": opt_rect,
                 "rejected_screens": []
             }
-        return {"score": 0, "settings": {}, "optimized_area": rough_area, "match_mode": match_mode, "rejected_screens": []}
+        return {"score": 0, "settings": None, "optimized_area": rough_area, "match_mode": match_mode, "rejected_screens": []}
 
     def _evaluate_settings(self, 
                            crop: Image.Image, 
-                           settings: Dict[str, Any], 
+                           preset: PresetConfig, 
                            precomputed_db: Any,
                            match_mode: str = MATCH_MODE_FULL) -> Tuple[float, Optional[Tuple[int, int, int, int]]]:
         """
         Pomocnicza funkcja wykonująca jeden krok ewaluacji: Preprocess -> OCR -> Match.
         Zwraca (score, bbox) lub (0, None) w przypadku błędu/braku wyniku.
         """
-        mock_cfg = OptimizerConfigManager(settings)
+        mock_cfg = OptimizerConfigManager(preset)
 
         try:
             processed_img, has_content, bbox = preprocess_image(crop.copy(), mock_cfg)

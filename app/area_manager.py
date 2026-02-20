@@ -49,9 +49,8 @@ class AreaManagerWindow(tk.Toplevel):
         self.config_mgr: Optional[ConfigManager] = app.config_mgr
         self.subtitle_lines: Optional[List[Dict[str, Any]]] = subtitle_lines
 
-        self.current_selection_idx = -1
         self.areas: List[AreaConfig] = self.config_mgr.get_areas() if self.config_mgr else []
-
+        self.current_selection_idx = 0 if self.areas else -1
         self._init_ui()
         self._refresh_list()
 

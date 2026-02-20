@@ -477,6 +477,17 @@ class ConfigManager:
             self.save_preset(self.preset_path, obj)
 
     @property
+    def text_alignment(self) -> str:
+        return self._get_preset_obj().text_alignment
+
+    @text_alignment.setter
+    def text_alignment(self, value: str):
+        obj = self._get_preset_obj()
+        obj.text_alignment = str(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, obj)
+
+    @property
     def show_debug(self) -> bool:
         return self._get_preset_obj().show_debug
 
