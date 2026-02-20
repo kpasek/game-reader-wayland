@@ -270,8 +270,8 @@ class ReaderThread(threading.Thread):
 
                 t_pre_start = time.perf_counter()
 
-                # Use explicit area settings for preprocessing (no mutation of config)
-                processed, has_content, crop_bbox = preprocess_image(crop, self.config_manager, area_settings=area_settings)
+                # Use explicit area object for preprocessing (no mutation of global config)
+                processed, has_content, crop_bbox = preprocess_image(crop, self.config_manager, area_config=area_obj)
 
                 if not has_content:
                     continue

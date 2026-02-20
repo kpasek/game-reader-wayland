@@ -295,10 +295,9 @@ class AreaManagerWindow(tk.Toplevel):
     def _load_details(self, idx):
         areas = self.config_mgr.get_areas() or []
         area = areas[idx]
-        # AreaConfig is flattened; authoritative settings must be read via
-        # `ConfigManager` so callers can't bypass central source-of-truth.
+        # AreaConfig is flattened; authoritative settings are accessed directly
+        # via the AreaConfig instance belonging to the manager.
         settings = area
-        settings_obj = self.config_mgr.get_area_settings(area) if self.config_mgr else {}
 
         # Tab General
         typ = area.type
@@ -830,8 +829,7 @@ class AreaManagerWindow(tk.Toplevel):
                 mode = MATCH_MODE_FULL
             # Build a plain settings dict for the optimizer by reading authoritative
             # properties from the AreaConfig instance returned by ConfigManager.
-            # Ask ConfigManager for authoritative per-area settings
-            settings_dict = self.config_mgr.get_area_settings(settings) if self.config_mgr else {}
+            settings_dict = settings.to_settings_dict()
 
             score_original, _ = optimizer._evaluate_settings(
                 normal_crop, settings_dict, pre_db, mode)
@@ -901,9 +899,25 @@ class AreaManagerWindow(tk.Toplevel):
                 r['height'] = int(bh)
                 area.rect = r
                 # Persist change
-                areas = self.config_mgr.get_areas() or []
-                areas[self.current_selection_idx] = area
-                self.config_mgr.set_areas(areas)
+                areas_objs = self.config_mgr.get_areas() or []
+                if self.current_selection_idx < len(areas_objs):
+                    areas_objs[self.current_selection_idx] = area
+                else:
+                    areas_objs.append(area)
+                # Persist via ConfigManager.save_preset using display resolution
+                cfg_path = self.config_mgr.preset_path
+                base = self.config_mgr.load_preset(cfg_path) or {}
+                base['areas'] = areas_objs
+                try:
+                    sw, sh = self.app._get_screen_size()
+                except Exception:
+                    sw, sh = 3840, 2160
+                old_disp = self.config_mgr.display_resolution
+                try:
+                    self.config_mgr.display_resolution = (sw, sh)
+                    self.config_mgr.save_preset(cfg_path, base)
+                finally:
+                    self.config_mgr.display_resolution = old_disp
                 # Update UI
                 self._load_details(self.current_selection_idx)
 
@@ -923,9 +937,17 @@ class AreaManagerWindow(tk.Toplevel):
             except Exception:
                 sw, sh = 3840, 2160
 
-            # Persist areas expressed in display coordinates; ConfigManager
-            # will scale and write the preset file.
-            self.config_mgr.set_areas_from_display(areas, src_resolution=(sw, sh))
+            # Persist areas expressed in display coordinates by updating
+            # AreaConfig instances and calling save_preset (uses display_resolution).
+            cfg_path = self.config_mgr.preset_path
+            base = self.config_mgr.load_preset(cfg_path) or {}
+            base['areas'] = areas
+            old_disp = self.config_mgr.display_resolution
+            try:
+                self.config_mgr.display_resolution = (sw, sh)
+                self.config_mgr.save_preset(cfg_path, base)
+            finally:
+                self.config_mgr.display_resolution = old_disp
             self.destroy()
         except Exception as e:
             messagebox.showerror("Błąd zapisu", f"Nie udało się zapisać obszarów: {e}")

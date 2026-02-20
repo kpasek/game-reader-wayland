@@ -7,9 +7,8 @@ IMPORTANT: These low-level scaling helpers are implementation details used by
 `ConfigManager` to convert between screen (physical) coordinates and the
 canonical 4K representation stored in presets. Do NOT call these functions
 from other modules; always go through `ConfigManager` (e.g. use
-`ConfigManager.save_preset_from_screen` or `ConfigManager.get_preset_for_resolution`).
-Using the scaling helpers outside `ConfigManager` risks double-scaling or
-inconsistent conversions.
+`ConfigManager.set_areas_from_display` or `ConfigManager.get_preset_for_resolution`). Using the scaling helpers
+outside `ConfigManager` risks double-scaling or inconsistent conversions.
 """
 STANDARD_W = 3840
 STANDARD_H = 2160
@@ -39,7 +38,8 @@ def scale_rect_to_4k(rect: Dict[str, int], src_w: int, src_h: int) -> Dict[str, 
     """Scale a rect given in `src_w`x`src_h` (physical) up to canonical 4K.
 
     WARNING: Intended for use only by `ConfigManager`. Do not call directly
-    from UI or other modules; use `ConfigManager.save_preset_from_screen`.
+    from UI or other modules; use `ConfigManager.set_areas_from_display` or
+    `ConfigManager.set_monitor_from_display`.
     """
     if not rect:
         return rect

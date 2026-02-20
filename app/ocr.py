@@ -4,7 +4,7 @@ import platform
 import tempfile
 from typing import Optional, Tuple, List
 
-from app.config_manager import ConfigManager
+from app.config_manager import ConfigManager, AreaConfig
 
 try:
     import pytesseract
@@ -93,74 +93,69 @@ def check_alignment(bbox: Tuple[int, int, int, int], width: int, align_mode: str
     return False
 
 
-def preprocess_image(image: Image.Image, config_manager: ConfigManager, area_settings: Optional[dict] = None, override_colors: List[str] = None) -> Tuple[Image.Image, bool, Optional[Tuple[int, int, int, int]]]:
+def preprocess_image(image: Image.Image, config_manager: ConfigManager, area_config: Optional[AreaConfig] = None, override_colors: Optional[List[str]] = None) -> Tuple[Image.Image, bool, Optional[Tuple[int, int, int, int]]]:
     """
     Zwraca krotkę: (przetworzony_obraz, czy_zawiera_tresc, bbox).
+    Przetwarza obraz pod kątem OCR w oparciu o jawną konfigurację.
     """
     try:
-        # Prefer explicit area_settings where provided, otherwise fall back
-        # to values from `config_manager`. `override_colors` still has highest precedence.
-        def _get(name, default=None):
-            if area_settings is not None:
-                try:
-                    if isinstance(area_settings, dict) and name in area_settings:
-                        return area_settings.get(name)
-                    # AreaSettings dataclass support
-                    val = getattr(area_settings, name)
-                    return val
-                except Exception:
-                    pass
-            try:
-                return getattr(config_manager, name)
-            except Exception:
-                return default
+        # Pobieranie parametrów z area_config lub config_manager
+        if area_config:
+            thick = int(area_config.text_thickening)
+            thresh = int(area_config.brightness_threshold)
+            contr = float(area_config.contrast or 0.0)
+            # Priorytet: override_colors > area subtitle_colors > area colors
+            cols_source = override_colors if override_colors is not None else (area_config.subtitle_colors or area_config.colors)
+            color_tol = int(area_config.color_tolerance)
+            show_debug = bool(area_config.show_debug)
+        else:
+            thick = int(config_manager.text_thickening)
+            thresh = int(config_manager.brightness_threshold)
+            contr = float(config_manager.contrast)
+            cols_source = override_colors if override_colors is not None else config_manager.subtitle_colors
+            color_tol = int(config_manager.color_tolerance)
+            show_debug = bool(config_manager.show_debug)
 
-        colors_source = override_colors if override_colors is not None else _get('subtitle_colors', [])
-        has_valid_colors = any(c for c in (colors_source or []) if c)
+        # Parametry globalne
+        color_mode = str(config_manager.text_color_mode)
+        scale_factor = float(config_manager.ocr_scale_factor)
+
+        if show_debug:
+            print(f"Preprocess area: thinning={thick}, threshold={thresh}, contrast={contr}, color_tol={color_tol}, colors={cols_source}")
+
+        has_valid_colors = any(c for c in (cols_source or []) if c)
 
         if has_valid_colors:
-            tolerance = _get('color_tolerance', 10)
-            colors = [c for c in (colors_source or []) if c]
-            image = remove_background(image, colors, tolerance=tolerance)
-
-            text_thick = _get('text_thickening', 0)
-            if text_thick and text_thick > 0:
-                filter_size = (int(text_thick) * 2) + 1
+            image = remove_background(image, [c for c in (cols_source or []) if c], tolerance=color_tol)
+            if thick > 0:
+                filter_size = (int(thick) * 2) + 1
                 image = image.filter(ImageFilter.MaxFilter(filter_size))
 
-        contrast = _get('contrast', 0) or 0
-        if contrast != 0 and not has_valid_colors:
-            contrast += 1
+        if contr != 0 and not has_valid_colors:
             enhancer = ImageEnhance.Contrast(image)
-            image = enhancer.enhance(contrast)
+            image = enhancer.enhance(contr + 1.0)
 
-        effective_text_color = "Light" if has_valid_colors else _get('text_color_mode', 'Light')
+        effective_text_color = "Light" if has_valid_colors else color_mode
 
         if effective_text_color != "Mixed":
             image = ImageOps.grayscale(image)
-
         if effective_text_color == "Dark":
             image = ImageOps.invert(image)
 
         crop_box = None
         try:
-            # brightness_threshold pochodzi z area_settings lub ConfigManager
-            brightness_threshold = _get('brightness_threshold', 200)
-            mask = image.point(lambda x: 255 if x > brightness_threshold else 0, '1')
+            mask = image.point(lambda x: 255 if x > thresh else 0, '1')
             mask = mask.filter(ImageFilter.MaxFilter(3))
             bbox = mask.getbbox()
 
             if bbox:
-
                 padding = 4
                 left, upper, right, lower = bbox
                 width, height = image.size
-
                 left = max(0, left - padding)
                 upper = max(0, upper - padding)
                 right = min(width, right + padding)
                 lower = min(height, lower + padding)
-
                 crop_box = (left, upper, right, lower)
 
                 if (right - left) > 10 and (lower - upper) > 10:
@@ -169,26 +164,17 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager, area_set
                     crop_box = (0, 0, image.width, image.height)
             else:
                 return image, False, (0, 0, image.width, image.height)
-
         except Exception as e:
             print(f"Błąd przycinania (mask): {e}")
             crop_box = (0, 0, image.width, image.height)
-        # Skalowanie
-        scale = _get('ocr_scale_factor', 0.5)
-        if abs(scale - 1.0) > 0.05:
-            new_w = int(image.width * scale)
-            new_h = int(image.height * scale)
+
+        if abs(scale_factor - 1.0) > 0.05:
+            new_w = int(image.width * scale_factor)
+            new_h = int(image.height * scale_factor)
             image = image.resize((new_w, new_h), Image.BICUBIC)
 
-
-        if _get('text_color_mode', 'Light') != "Mixed":
+        if color_mode != "Mixed":
             image = ImageOps.invert(image)
-            total_pixels = image.width * image.height
-            if total_pixels == 0:
-                return image, False, None
-
-            is_cropped = (crop_box[2] - crop_box[0]) < (image.width * 0.9) if 'new_w' in locals() else False
-            min_pixels = 30 if is_cropped else 80
 
         return image, True, crop_box
 

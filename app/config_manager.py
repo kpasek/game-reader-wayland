@@ -74,6 +74,35 @@ class AreaConfig:
     show_debug: bool = False
     scale_overrides: Dict[str, float] = field(default_factory=dict)
 
+    def to_settings_dict(self) -> Dict[str, Any]:
+        """Returns a dictionary of per-area settings for legacy/optimizer compatibility."""
+        return {
+            "text_thickening": int(self.text_thickening),
+            "subtitle_mode": str(self.subtitle_mode),
+            "brightness_threshold": int(self.brightness_threshold),
+            "contrast": float(self.contrast or 0.0),
+            "use_colors": bool(self.use_colors),
+            "color_tolerance": int(self.color_tolerance),
+            "subtitle_colors": list(self.subtitle_colors or []),
+            "setting_mode": str(self.setting_mode or ''),
+            "show_debug": bool(self.show_debug),
+            "scale_overrides": dict(self.scale_overrides or {})
+        }
+
+    def to_full_dict(self) -> Dict[str, Any]:
+        """Returns a full dictionary representation of the AreaConfig for persistence."""
+        base = {
+            "id": int(self.id),
+            "type": str(self.type),
+            "rect": dict(self.rect) if isinstance(self.rect, dict) else self.rect,
+            "hotkey": str(self.hotkey or ''),
+            "name": str(self.name or ''),
+            "enabled": bool(self.enabled),
+            "colors": list(self.colors or []),
+        }
+        base.update(self.to_settings_dict())
+        return base
+
     @classmethod
     def from_dict(cls, d: Optional[Dict[str, Any]]):
         if not d:
@@ -112,37 +141,6 @@ class AreaConfig:
 
         return cls(**kw)
 
-    def to_dict(self) -> Dict[str, Any]:
-        # Persist area as a flat dict: per-area settings live at the same
-        # level as other area keys (no nested 'settings' key).
-        out = {
-            'id': self.id,
-            'type': self.type,
-            'rect': dict(self.rect) if isinstance(self.rect, dict) else self.rect,
-            'hotkey': self.hotkey,
-            'name': self.name,
-            'enabled': self.enabled,
-            'colors': list(self.colors or []),
-            'text_thickening': int(self.text_thickening),
-            'subtitle_mode': str(self.subtitle_mode),
-            'brightness_threshold': int(self.brightness_threshold),
-            'contrast': float(self.contrast or 0.0),
-            'use_colors': bool(self.use_colors),
-            'color_tolerance': int(self.color_tolerance),
-            'subtitle_colors': list(self.subtitle_colors or []),
-            'setting_mode': str(self.setting_mode),
-            'show_debug': bool(self.show_debug),
-            'scale_overrides': dict(self.scale_overrides or {})
-        }
-        return out
-
-    @property
-    def settings(self) -> Dict[str, Any]:
-        # Backwards helper for callers that still expect `.settings`.
-        # Returns only the per-area settings as a plain dict.
-        td = self.to_dict()
-        keys = ['text_thickening', 'subtitle_mode', 'brightness_threshold', 'contrast', 'use_colors', 'color_tolerance', 'subtitle_colors', 'setting_mode', 'show_debug', 'scale_overrides']
-        return {k: td.get(k) for k in keys}
 
 
 class ConfigManager:
@@ -354,6 +352,17 @@ class ConfigManager:
             self.save_preset(self.preset_path, data)
 
     @property
+    def contrast(self) -> float:
+        return float(self._current_preset().get('contrast', DEFAULT_PRESET_CONTENT.get('contrast', 0.0)))
+
+    @contrast.setter
+    def contrast(self, value: float):
+        data = self._current_preset()
+        data['contrast'] = float(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, data)
+
+    @property
     def text_thickening(self) -> int:
         return int(self._current_preset().get('text_thickening', DEFAULT_PRESET_CONTENT.get('text_thickening', 0)))
 
@@ -527,6 +536,7 @@ class ConfigManager:
             return path
 
     def load_preset(self, path: Optional[str] = None) -> Dict[str, Any]:
+        """Loads preset and scales rects from canonical 4K to current display resolution."""
         if path and path != self.preset_path:
             self.preset_cache = None
             self.preset_path = path
@@ -537,7 +547,7 @@ class ConfigManager:
             path = self.preset_path
         else:
             self.preset_path = path
-        if not os.path.exists(path):
+        if not path or not os.path.exists(path):
             return {}
         try:
             with open(path, 'r', encoding='utf-8') as f:
@@ -555,7 +565,15 @@ class ConfigManager:
             for key in ['audio_dir', 'text_file_path']:
                 if key in data and isinstance(data[key], str):
                     data[key] = self._to_absolute(base_dir, data[key])
-            self.preset_cache = data
+
+            # PRZELICZANIE SKALI 4K -> DISPLAY (Source of truth)
+            if self.display_resolution:
+                dw, dh = self.display_resolution
+                areas = data.get('areas', [])
+                for a in areas:
+                    if a and 'rect' in a:
+                        a['rect'] = scale_utils.scale_rect_to_physical(a['rect'], dw, dh)
+
             return data
         except Exception:
             return {}
@@ -652,53 +670,7 @@ class ConfigManager:
             return []
         return out
 
-    def get_area_setting(self, area_or_id, key: str, default=None):
-        """Return a single per-area setting value from the authoritative areas list.
-
-        `area_or_id` may be an `AreaConfig` instance, an integer id, or a dict
-        representation (as stored in presets). This always reads from
-        `self.get_areas()` so ConfigManager remains the source of truth.
-        """
-        try:
-            areas = self.get_areas() or []
-            target_id = None
-            if isinstance(area_or_id, int):
-                target_id = area_or_id
-            else:
-                try:
-                    if isinstance(area_or_id, AreaConfig):
-                        target_id = int(area_or_id.id)
-                    else:
-                        # assume mapping-like
-                        target_id = int(area_or_id.get('id'))
-                except Exception:
-                    target_id = None
-
-            for a in areas:
-                if target_id is not None and a.id == target_id:
-                    return getattr(a, key, default)
-            # Fallback: if area_or_id is an AreaConfig-like instance use it
-            if hasattr(area_or_id, key):
-                return getattr(area_or_id, key)
-        except Exception:
-            pass
-        return default
-
-    def get_area_settings(self, area_or_id) -> Dict[str, Any]:
-        """Return dict of known per-area settings read via ConfigManager.
-
-        Always reads values through `get_area_setting` so callers access
-        settings only via the manager.
-        """
-        keys = ['text_thickening', 'subtitle_mode', 'brightness_threshold', 'contrast', 'use_colors', 'color_tolerance', 'subtitle_colors', 'setting_mode', 'show_debug', 'scale_overrides']
-        out: Dict[str, Any] = {}
-        for k in keys:
-            v = self.get_area_setting(area_or_id, k, None)
-            if v is not None:
-                out[k] = v
-        return out
-
-    def get_area(self, index: int):
+    def get_area(self, index: int) -> Optional[AreaConfig]:
         """Return an `AreaConfig` by zero-based list index.
 
         This method treats the argument strictly as a list index into the
@@ -716,159 +688,78 @@ class ConfigManager:
             pass
         return None
 
-    def set_areas_from_display(self, areas: List[Dict[str, Any]], src_resolution: Optional[Tuple[int, int]] = None):
-        """Accept areas expressed in display coordinates and persist them (scaling to canonical 4K).
-
-        Requires `self.preset_path` to be set and a source resolution either provided
-        or available via `self.display_resolution`.
-        """
+    def set_areas_from_display(self, areas: List[Any], src_resolution: Optional[Tuple[int, int]] = None):
+        """Saves areas in display resolution by delegating to save_preset."""
         if not self.preset_path:
-            raise ValueError("ConfigManager has no preset_path configured")
-        if src_resolution is None:
-            if self.display_resolution is None:
-                raise ValueError("No source resolution provided and ConfigManager.display_resolution is not set")
-            src_resolution = self.display_resolution
-        # Accept either raw dicts or AreaConfig instances
-        serializable_areas = []
-        for a in areas or []:
-            if isinstance(a, AreaConfig):
-                serializable_areas.append(a.to_dict())
-            else:
-                serializable_areas.append(a)
-        data = {'areas': serializable_areas}
-        self.save_preset_from_screen(self.preset_path, data, src_resolution)
+            return
+        if src_resolution:
+            self.display_resolution = src_resolution
+        
+        base = self.load_preset() or {}
+        base['areas'] = list(areas)
+        self.save_preset(self.preset_path, base)
 
-    def set_areas(self, areas: List[Dict[str, Any]]):
-        """Persist areas provided in current display coordinates.
+    def set_areas(self, areas: List[Any]):
+        """Helper for setting areas using known display_resolution."""
+        self.set_areas_from_display(areas)
 
-        This is a thin wrapper that uses `self.display_resolution` as the
-        source resolution and delegates to `set_areas_from_display`.
-        """
-        if self.display_resolution is None:
-            raise ValueError("ConfigManager.display_resolution is not set")
-        return self.set_areas_from_display(areas, src_resolution=self.display_resolution)
 
-    def normalize_areas_to_4k(self, areas: List[Dict[str, Any]], src_resolution: Tuple[int, int]) -> List[Dict[str, Any]]:
-        """Convert a list of rect dicts given in src_resolution up to canonical 4K for storage."""
-        src_w, src_h = src_resolution
-        out = []
-        try:
-            for a in areas:
-                if not a:
-                    out.append(a)
-                    continue
-                # If `a` is an area dict containing 'rect', scale only the rect and keep other keys.
-                if isinstance(a, dict) and 'rect' in a and isinstance(a.get('rect'), dict):
-                    new_a = a.copy()
-                    try:
-                        new_a['rect'] = scale_utils.scale_rect_to_4k(a['rect'], src_w, src_h)
-                    except Exception:
-                        new_a['rect'] = a['rect']
-                    out.append(new_a)
-                else:
-                    # If it's already a plain rect dict or unknown shape, attempt best-effort scale
-                    try:
-                        out.append(scale_utils.scale_rect_to_4k(a, src_w, src_h))
-                    except Exception:
-                        out.append(a)
-            return out
-        except Exception:
-            return areas
 
-    def save_preset_from_screen(self, path: str, data: Dict[str, Any], src_resolution: Tuple[int, int]):
-        """Accept preset data where `areas` and `monitor` are in screen/physical coords
-        (src_resolution). Convert them to canonical 4K and save using `save_preset`.
-        This centralizes all scaling inside ConfigManager.
-        """
-        try:
-            sd = data.copy()
-            sw, sh = src_resolution
-            # Normalize areas list
-            if 'areas' in sd and isinstance(sd['areas'], list):
-                try:
-                    sd['areas'] = self.normalize_areas_to_4k(sd['areas'], (sw, sh))
-                except Exception:
-                    pass
-            # Normalize monitor entries if present
-            if 'monitor' in sd and isinstance(sd['monitor'], list):
-                try:
-                    sd['monitor'] = [scale_utils.scale_rect_to_4k(m, sw, sh) if m else None for m in sd['monitor']]
-                except Exception:
-                    pass
-            # Delegate actual write to existing save_preset (expects canonical 4K)
-            self.save_preset(path, sd)
-        except Exception as e:
-            print(f"Błąd save_preset_from_screen: {e}")
 
     def save_preset(self, path: Optional[str] = None, data: Dict[str, Any] = None):
-        """Save preset to `path`. If `path` is None, uses `self.preset_path`.
+        """Saves preset and scales rects from current display resolution back to canonical 4K."""
+        if data is None: return
+        if not path: path = self.preset_path
+        if not path: return
 
-        `data` is required. This function will update `self.preset_cache` on success.
-        """
         try:
-            if data is None:
-                raise ValueError("save_preset requires `data` argument")
-            if not path:
-                path = self.preset_path
-            if not path:
-                raise ValueError("No path provided to save_preset and no cached preset_path available.")
-            # Helper to recursively sanitize preventing recursion loops
-            def sanitize(obj, memo=None):
-                if memo is None:
-                    memo = set()
-                
-                obj_id = id(obj)
-                if obj_id in memo:
-                    return f"<Circular Reference {type(obj).__name__}>"
-                
-                if isinstance(obj, dict):
-                    memo.add(obj_id)
-                    res = {k: sanitize(v, memo) for k, v in obj.items() if isinstance(k, str) and not k.startswith('_')}
-                    memo.remove(obj_id)
-                    return res
-                elif isinstance(obj, list):
-                    memo.add(obj_id)
-                    res = [sanitize(x, memo) for x in obj]
-                    memo.remove(obj_id)
-                    return res
-                elif isinstance(obj, (str, int, float, bool, type(None))):
-                    return obj
+            import copy as _copy
+            write_data = _copy.deepcopy(data)
+            
+            # 1. Scaling: DISPLAY -> 4K
+            if self.display_resolution:
+                sw, sh = self.display_resolution
+                areas = write_data.get('areas', [])
+                for a in areas:
+                    r = None
+                    if isinstance(a, dict) and 'rect' in a:
+                        r = a['rect']
+                    elif hasattr(a, 'rect'):
+                        r = a.rect
+                    
+                    if r:
+                        # Scale to canonical 4K
+                        from app import scale_utils
+                        norm_r = scale_utils.scale_rect_to_4k(r, sw, sh)
+                        if isinstance(a, dict):
+                            a['rect'] = norm_r
+                        else:
+                            a.rect = norm_r
+
+            # 2. Serialization: AreaConfig -> Dict
+            raw_areas = []
+            for a in write_data.get('areas', []):
+                if hasattr(a, 'to_full_dict'):
+                    raw_areas.append(a.to_full_dict())
+                elif hasattr(a, 'to_dict'):
+                    raw_areas.append(a.to_dict())
                 else:
-                    # Try to convert custom types (int64 etc)
-                    # If object exposes `to_dict`, prefer that for serialization
-                    # Prefer `.to_dict()` for custom types (AreaSettings etc.).
-                    try:
-                        fn = obj.to_dict
-                        if callable(fn):
-                            return sanitize(fn(), memo)
-                    except Exception:
-                        pass
-                    try:
-                        return obj.item()
-                    except Exception:
-                        pass
-                    return str(obj)
+                    raw_areas.append(a)
+            write_data['areas'] = raw_areas
 
-            save_data = sanitize(data)
-
-            # (No preset-based resolution conversion — areas expected to be stored in canonical 4K)
+            # 3. Path normalization (Absolute -> Relative)
             base_dir = os.path.dirname(os.path.abspath(path))
-
             for key in ['audio_dir', 'text_file_path']:
-                if key in save_data and isinstance(save_data[key], str):
-                    save_data[key] = self._to_relative(base_dir, save_data[key])
+                if key in write_data and os.path.isabs(str(write_data[key])):
+                    write_data[key] = self._to_relative(base_dir, write_data[key])
 
+            # 4. Write to disk
             with open(path, 'w', encoding='utf-8') as f:
-                json.dump(save_data, f, indent=4)
-            # Clear cache and reload so load_preset will normalize paths (e.g., text_file_path)
-            self.preset_cache = None
-            try:
-                self.load_preset(path)
-            except Exception:
-                # If reload fails, leave preset_cache as None; caller can handle
-                self.preset_cache = None
+                json.dump(write_data, f, indent=4, ensure_ascii=False)
+            self.preset_cache = data
         except Exception as e:
-            print(f"Błąd zapisu presetu {path}: {e}")
+            print(f"Błąd zapisu presetu: {e}")
+
 
     def load_text_lines(self, path: Optional[str] = None) -> List[str]:
         """Load text lines from `path` or from the current preset's `text_file_path`.

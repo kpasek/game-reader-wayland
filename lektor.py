@@ -547,9 +547,16 @@ class LektorApp:
 
         if sel.geometry:
             disp_mons[idx] = sel.geometry
-            # Store monitor rects in screen coords; ConfigManager will normalize
+            # Store monitor rects in screen coords; persist by updating preset
             data['monitor'] = disp_mons
-            self.config_mgr.save_preset_from_screen(path, data, (sw, sh))
+            base = self.config_mgr.load_preset(path) or {}
+            base['monitor'] = disp_mons
+            old_disp = self.config_mgr.display_resolution
+            try:
+                self.config_mgr.display_resolution = (sw, sh)
+                self.config_mgr.save_preset(path, base)
+            finally:
+                self.config_mgr.display_resolution = old_disp
 
     def clear_area(self, idx):
         path = self.var_preset_full_path.get()
@@ -797,7 +804,7 @@ class LektorApp:
             selector = ColorSelector(self.root, full_img)
             self.root.wait_window(selector)
 
-            sel_color = getattr(selector, 'selected_color', None)
+            sel_color = selector.selected_color if hasattr(selector, 'selected_color') else None
             if not sel_color:
                 return
 
@@ -935,11 +942,33 @@ class LektorApp:
     def _save_areas_callback(self, new_areas):
         path = self.var_preset_full_path.get()
         if path:
-            data = self.config_mgr.load_preset(path)
-            # AreaManager provides areas in screen coordinates. Use ConfigManager to normalize when saving.
-            data['areas'] = new_areas
+            # Map `new_areas` (display coords) onto existing AreaConfig instances
             sw, sh = self._get_screen_size()
-            self.config_mgr.save_preset_from_screen(path, data, (sw, sh))
+            areas_objs = self.config_mgr.get_areas() or []
+            for i, na in enumerate(new_areas):
+                try:
+                    if i < len(areas_objs):
+                        aobj = areas_objs[i]
+                        if isinstance(na, dict) and 'rect' in na:
+                            aobj.rect = na['rect']
+                        for fld in ('enabled', 'hotkey', 'name', 'colors'):
+                            if isinstance(na, dict) and fld in na:
+                                setattr(aobj, fld, na.get(fld))
+                        areas_objs[i] = aobj
+                    else:
+                        from app.config_manager import AreaConfig
+                        areas_objs.append(AreaConfig.from_dict(na if isinstance(na, dict) else {}))
+                except Exception:
+                    pass
+
+            base = self.config_mgr.load_preset(path) or {}
+            base['areas'] = areas_objs
+            old_disp = self.config_mgr.display_resolution
+            try:
+                self.config_mgr.display_resolution = (sw, sh)
+                self.config_mgr.save_preset(path, base)
+            finally:
+                self.config_mgr.display_resolution = old_disp
             self._restart_hotkeys()
             self.refresh_color_canvas() # Update in case Area 1 colors changed in manager
             # Restart reader to apply changes (geometry, enabled state, etc.)
@@ -982,9 +1011,28 @@ class LektorApp:
                  else:
                      a1['rect'] = sel.geometry
                  
-                 data['areas'] = areas
+                 # Map changes onto AreaConfig instances and persist
                  sw, sh = self._get_screen_size()
-                 self.config_mgr.save_preset_from_screen(path, data, (sw, sh))
+                 areas_objs = self.config_mgr.get_areas() or []
+                 # find or create Area 1
+                 try:
+                     a1_obj = next((a for a in areas_objs if a.id == 1), None)
+                 except Exception:
+                     a1_obj = None
+                 if a1_obj:
+                     a1_obj.rect = sel.geometry
+                 else:
+                     from app.config_manager import AreaConfig
+                     areas_objs.insert(0, AreaConfig.from_dict({'id': 1, 'type': 'continuous', 'rect': sel.geometry, 'hotkey': '', 'colors': []}))
+
+                 base = self.config_mgr.load_preset(path) or {}
+                 base['areas'] = areas_objs
+                 old_disp = self.config_mgr.display_resolution
+                 try:
+                     self.config_mgr.display_resolution = (sw, sh)
+                     self.config_mgr.save_preset(path, base)
+                 finally:
+                     self.config_mgr.display_resolution = old_disp
                  
         except Exception as e:
             messagebox.showerror("Błąd", f"Wybór obszaru: {e}")
@@ -1219,7 +1267,33 @@ class LektorApp:
                     norm = self.config_mgr.normalize_areas_to_4k(current_areas, (sw, sh))
                 except Exception:
                     pass
-                self.config_mgr.save_preset_from_screen(preset_path, preset_data, (sw, sh))
+                # Persist optimized areas by mapping onto AreaConfig instances
+                areas_dicts = preset_data.get('areas', [])
+                areas_objs = self.config_mgr.get_areas() or []
+                for i, na in enumerate(areas_dicts):
+                    try:
+                        if i < len(areas_objs):
+                            aobj = areas_objs[i]
+                            if isinstance(na, dict) and 'rect' in na:
+                                aobj.rect = na['rect']
+                            for fld in ('enabled', 'hotkey', 'name', 'colors'):
+                                if isinstance(na, dict) and fld in na:
+                                    setattr(aobj, fld, na.get(fld))
+                            areas_objs[i] = aobj
+                        else:
+                            from app.config_manager import AreaConfig
+                            areas_objs.append(AreaConfig.from_dict(na if isinstance(na, dict) else {}))
+                    except Exception:
+                        pass
+
+                base = self.config_mgr.load_preset(preset_path) or {}
+                base['areas'] = areas_objs
+                old_disp = self.config_mgr.display_resolution
+                try:
+                    self.config_mgr.display_resolution = (sw, sh)
+                    self.config_mgr.save_preset(preset_path, base)
+                finally:
+                    self.config_mgr.display_resolution = old_disp
             except Exception as e:
                 messagebox.showerror("Błąd", f"Zapis nieudany: {e}")
             

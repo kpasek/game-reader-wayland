@@ -13,11 +13,14 @@ class OptimizerConfigManager(ConfigManager):
     zamiast ładować go z pliku.
     """
     def __init__(self, override_settings: Dict[str, Any]):
-        # Nie wołamy super().__init__, bo nie chcemy ładować plików
+        self.settings = {}
+        self.preset_path = "MOCK_PRESET"
         self.override_settings = override_settings
-        self.settings = {} # Dummy
 
     def load_preset(self, path=None) -> Dict[str, Any]:
+        return self.override_settings
+
+    def _current_preset(self) -> Dict[str, Any]:
         return self.override_settings
 
 class SettingsOptimizer:
