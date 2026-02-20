@@ -36,31 +36,31 @@ class SettingsDialog(tk.Toplevel):
 
     def _initialize_app_variables(self):
         """Inicjalizuje wymagane zmienne aplikacji (`tk.Variable`).
-
-        Ta metoda traktowana jest jak konstruktor dla zmiennych UI na obiekcie
-        `self.app`: zawsze (ponownie) ustawia potrzebne `tk.*Var` z wartościami
-        pobranymi z `config_mgr` gdy dostępny, a w przeciwnym razie z
-        `self.settings`.
+        
+        Ta metoda aktualizuje istniejące zmienne UI na obiekcie `self.app` 
+        wartościami pobranymi z `ConfigManager`.
         """
         cm = self.app.config_mgr
 
-        self.app.var_capture_interval = tk.DoubleVar(value=float(cm.capture_interval))
-        self.app.var_ocr_density = tk.DoubleVar(value=float(cm.ocr_scale_factor))
-        self.app.var_audio_speed = tk.DoubleVar(value=float(cm.audio_speed_inc))
+        # Aktualizujemy istniejące zmienne zamiast tworzyć nowe, 
+        # aby nie zerwać powiązań (bindings/traces) w głównym oknie.
+        self.app.var_capture_interval.set(float(cm.capture_interval))
+        self.app.var_ocr_scale.set(float(cm.ocr_scale_factor))
+        self.app.var_audio_speed.set(float(cm.audio_speed_inc))
 
-        self.app.var_match_score_short = tk.IntVar(value=int(cm.match_score_short))
-        self.app.var_match_score_long = tk.IntVar(value=int(cm.match_score_long))
-        self.app.var_match_len_diff = tk.DoubleVar(value=float(cm.match_len_diff_ratio))
-        self.app.var_partial_min_len = tk.IntVar(value=int(cm.partial_mode_min_len))
-        self.app.var_similarity = tk.IntVar(value=int(cm.similarity))
-        self.app.var_show_debug = tk.BooleanVar(value=bool(cm.show_debug))
-        self.app.var_text_color = tk.StringVar(value=str(cm.text_color_mode))
-        rm = self.app.regex_map or {}
-        default_regex_mode = next(iter(rm.keys())) if rm else 'Własny (Regex)'
-        self.app.var_regex_mode = tk.StringVar(value=self.settings.get('regex_mode', default_regex_mode))
-        self.app.var_custom_regex = tk.StringVar(value=cm.get('last_custom_regex', self.settings.get('last_custom_regex', '')))
-        self.app.var_auto_names = tk.BooleanVar(value=bool(cm.auto_remove_names))
-        self.app.var_save_logs = tk.BooleanVar(value=bool(cm.save_logs))
+        self.app.var_match_score_short.set(int(cm.match_score_short))
+        self.app.var_match_score_long.set(int(cm.match_score_long))
+        self.app.var_match_len_diff.set(float(cm.match_len_diff_ratio))
+        self.app.var_partial_min_len.set(int(cm.partial_mode_min_len))
+        self.app.var_similarity.set(int(cm.similarity))
+        self.app.var_show_debug.set(bool(cm.show_debug))
+        self.app.var_text_color.set(str(cm.text_color_mode))
+        
+        self.app.var_regex_mode.set(str(cm.last_regex_mode))
+        self.app.var_custom_regex.set(str(cm.last_custom_regex))
+        
+        self.app.var_auto_names.set(bool(cm.auto_remove_names))
+        self.app.var_save_logs.set(bool(cm.save_logs))
 
         return None
 
@@ -118,7 +118,7 @@ class SettingsDialog(tk.Toplevel):
                          "similarity", fmt="{:.0f}%", resolution=1)
 
         ttk.Checkbutton(grp_ocr, text="DEBUG: Pokaż obszar wykrytych napisów", variable=self.app.var_show_debug,
-                        command=lambda: self.app._save_preset_val("show_debug", self.app.var_show_debug.get())).pack(
+                        command=lambda: setattr(self.app.config_mgr, "show_debug", self.app.var_show_debug.get())).pack(
             anchor=tk.W, pady=2)
 
         # 3. Optymalizacja
@@ -143,7 +143,7 @@ class SettingsDialog(tk.Toplevel):
                                 state="readonly", width=15)
         cb_color.pack(side=tk.LEFT, padx=5)
         cb_color.bind("<<ComboboxSelected>>",
-                      lambda e: self.app._save_preset_val("text_color_mode", self.app.var_text_color.get()))
+                      lambda e: setattr(self.app.config_mgr, "text_color_mode", self.app.var_text_color.get()))
         ttk.Label(f_color, text="(Light = Jasne napisy)", font=("Arial", 8, "italic"), foreground="gray").pack(
             side=tk.LEFT, padx=5)
 
@@ -173,11 +173,12 @@ class SettingsDialog(tk.Toplevel):
 
         ent_regex.bind("<FocusOut>", _save_last_custom_regex)
         ttk.Checkbutton(grp_flt, text="Usuwaj imiona (Smart)", variable=self.app.var_auto_names,
-                        command=lambda: self.app._save_preset_val("auto_remove_names",
-                                                                  self.app.var_auto_names.get())).pack(anchor=tk.W,
-                                                                                                       pady=2)
+                        command=lambda: setattr(self.app.config_mgr, "auto_remove_names",
+                                               self.app.var_auto_names.get())).pack(anchor=tk.W,
+                                                                                    pady=2)
         ttk.Checkbutton(grp_flt, text="Zapisuj logi do pliku", variable=self.app.var_save_logs,
-                        command=lambda: self.app._save_preset_val("save_logs", self.app.var_save_logs.get())).pack(
+                        command=lambda: setattr(self.app.config_mgr, "save_logs",
+                                               self.app.var_save_logs.get())).pack(
             anchor=tk.W, pady=2)
 
     def _fill_dialogs_tab(self, pnl):
@@ -209,11 +210,12 @@ class SettingsDialog(tk.Toplevel):
         ent_regex.bind("<FocusOut>", _save_last_custom_regex)
 
         ttk.Checkbutton(grp_flt, text="Usuwaj imiona (Smart)", variable=self.app.var_auto_names,
-                        command=lambda: self.app._save_preset_val("auto_remove_names",
-                                                                  self.app.var_auto_names.get())).pack(anchor=tk.W,
-                                                                                                       pady=2)
+                        command=lambda: setattr(self.app.config_mgr, "auto_remove_names",
+                                               self.app.var_auto_names.get())).pack(anchor=tk.W,
+                                                                                    pady=2)
         ttk.Checkbutton(grp_flt, text="Zapisuj logi do pliku", variable=self.app.var_save_logs,
-                        command=lambda: self.app._save_preset_val("save_logs", self.app.var_save_logs.get())).pack(
+                        command=lambda: setattr(self.app.config_mgr, "save_logs",
+                                               self.app.var_save_logs.get())).pack(
             anchor=tk.W, pady=2)
 
     def _fill_hk_tab(self, pnl):
@@ -249,7 +251,7 @@ class SettingsDialog(tk.Toplevel):
 
             variable.set(val)
             val_lbl.config(text=fmt.format(val))
-            self.app._save_preset_val(config_key, val)
+            setattr(self.app.config_mgr, config_key, val)
 
         scale.bind("<ButtonRelease-1>", on_release)
 
@@ -260,4 +262,5 @@ class SettingsDialog(tk.Toplevel):
         # Zapisz ustawienia globalne
         self.settings['hotkey_start_stop'] = self.var_hk_start.get()
         self.settings['hotkey_area3'] = self.var_hk_area3.get()
+        self.app.config_mgr.save_app_config()
         self.destroy()

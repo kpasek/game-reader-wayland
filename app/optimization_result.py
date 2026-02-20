@@ -27,20 +27,12 @@ class OptimizationResultWindow(tk.Toplevel):
             ox, oy, ow, oh = optimized_area
             add_row("Wykryty obszar:", f"X:{ox}, Y:{oy}, {ow}x{oh}")
 
-        # Check if settings is a dict or a PresetConfig object
-        def get_val(s, key, default='-'):
-            if hasattr(s, key):
-                return getattr(s, key)
-            if hasattr(s, 'get'):
-                return s.get(key, default)
-            return default
-
-        add_row("Jasność (Threshold):", get_val(settings, 'brightness_threshold'))
-        add_row("Kontrast:", get_val(settings, 'contrast'))
-        add_row("Skala OCR:", get_val(settings, 'ocr_scale_factor'))
+        add_row("Jasność (Threshold):", settings.brightness_threshold)
+        add_row("Kontrast:", settings.contrast)
+        add_row("Skala OCR:", settings.ocr_scale_factor)
         
         # Colors
-        cols = get_val(settings, 'subtitle_colors', [])
+        cols = getattr(settings, 'subtitle_colors', [])
         f_cols = ttk.Frame(content)
         f_cols.pack(fill="x", pady=3)
         ttk.Label(f_cols, text="Kolory:", width=22, anchor="w").pack(side="left")
@@ -54,7 +46,7 @@ class OptimizationResultWindow(tk.Toplevel):
                 swatch.pack(side="left", padx=2)
                 ttk.Label(cframe, text=c).pack(side="left", padx=(0, 5))
 
-        add_row("Tolerancja:", get_val(settings, 'color_tolerance'))
+        add_row("Tolerancja:", settings.color_tolerance)
 
         # Area Selection
         ttk.Separator(content, orient="horizontal").pack(fill="x", pady=15)

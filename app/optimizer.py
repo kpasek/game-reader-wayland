@@ -152,7 +152,6 @@ class SettingsOptimizer:
                 # Attach metadata for sorting/reporting
                 s._setting_mode = "color" 
                 s.auto_remove_names = True
-                s.text_alignment = "None"
                 s.subtitle_colors = [color]
                 s.color_tolerance = tol
                 s.text_thickening = thick
@@ -168,7 +167,6 @@ class SettingsOptimizer:
                 s = copy.deepcopy(self.base_preset)
                 s._setting_mode = "brightness"
                 s.auto_remove_names = True
-                s.text_alignment = "None"
                 s.subtitle_colors = []
                 s.text_color_mode = mode
                 s.text_thickening = 0

@@ -107,11 +107,18 @@ def find_best_match(ocr_text: str,
 
     # 1. Szukanie lokalne
     match = _scan_list(ocr_clean, ocr_len, candidates_in_window, effective_mode, matcher_config)
+    
+    if match:
+        print(f"Matcher: Found local match at index {match[0]} with score {match[1]}%")
+
     if match and match[1] >= 100:
         return match
 
     # 2. Szukanie globalne
     global_match = _scan_list(ocr_clean, ocr_len, candidates_outside, effective_mode, matcher_config)
+
+    if global_match:
+        print(f"Matcher: Found global match at id {global_match[0] + 1} with score {global_match[1]}%")
 
     # Jeśli znaleziono dopasowanie lokalne i globalne, preferuj lokalne
     if match:

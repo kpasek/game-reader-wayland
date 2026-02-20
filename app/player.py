@@ -78,6 +78,7 @@ class PlayerThread(threading.Thread):
 
             try:
                 # Uruchomienie procesu z ukrytym oknem
+                pass # Player log removed
                 self.current_process = subprocess.Popen(
                     cmd,
                     startupinfo=self._get_startup_info(),

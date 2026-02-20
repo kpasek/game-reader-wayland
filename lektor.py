@@ -55,7 +55,7 @@ audio_queue = queue.Queue()
 log_queue = queue.Queue()
 debug_queue = queue.Queue()
 
-APP_VERSION = "v1.5.1"
+APP_VERSION = "v1.5.4"
 
 
 class LektorApp:
@@ -163,8 +163,7 @@ class LektorApp:
         """Handler for resolution combobox selection: persist and update ConfigManager."""
         res_str = self.var_resolution.get()
         # Persist user choice
-        self.config_mgr.settings['last_resolution_key'] = res_str
-        self.config_mgr.save_app_config()
+        self.config_mgr.last_resolution_key = res_str
         # Update scale and ConfigManager display resolution
         if "x" in res_str:
             w, h = map(int, res_str.split('x'))
@@ -179,7 +178,7 @@ class LektorApp:
     # -----------------------
 
     def _start_hotkey_listener(self):
-        hk_start = self.config_mgr.get('hotkey_start_stop', '<ctrl>+<f5>')
+        hk_start = self.config_mgr.hotkey_start_stop
         
         if hasattr(self, 'hotkey_listener') and self.hotkey_listener:
             try:
@@ -302,7 +301,7 @@ class LektorApp:
         s_spd = ttk.Scale(grp_aud, from_=0.9, to=1.5, variable=self.var_speed,
                   command=lambda v: self.lbl_spd.config(text=f"{float(v):.2f}x"))
         s_spd.grid(row=0, column=1, sticky="ew", padx=10)
-        s_spd.bind("<ButtonRelease-1>", lambda e: self._save_preset_val("audio_speed", round(self.var_speed.get(), 2)))
+        s_spd.bind("<ButtonRelease-1>", lambda e: setattr(self.config_mgr, "audio_speed", round(self.var_speed.get(), 2)))
         self.lbl_spd = ttk.Label(grp_aud, text="1.00x", width=5)
         self.lbl_spd.grid(row=0, column=2)
 
@@ -311,7 +310,7 @@ class LektorApp:
                   command=lambda v: self.lbl_vol.config(text=f"{float(v):.2f}"))
         s_vol.grid(row=1, column=1, sticky="ew", padx=10)
         s_vol.bind("<ButtonRelease-1>",
-               lambda e: self._save_preset_val("audio_volume", round(self.var_volume.get(), 2)))
+               lambda e: setattr(self.config_mgr, "audio_volume", round(self.var_volume.get(), 2)))
         self.lbl_vol = ttk.Label(grp_aud, text="1.00", width=5)
         self.lbl_vol.grid(row=1, column=2)
 
@@ -330,7 +329,7 @@ class LektorApp:
         self.lbl_ocr_scale.grid(row=3, column=2)
 
         # --- STEROWANIE ---
-        hk_start = self.config_mgr.get('hotkey_start_stop', 'F2')
+        hk_start = self.config_mgr.hotkey_start_stop
         frm_btn = ttk.Frame(panel)
         frm_btn.pack(side=tk.BOTTOM, fill=tk.X, pady=10)
 
@@ -357,8 +356,7 @@ class LektorApp:
         res_str = f"{w}x{h}"
         self.var_resolution.set(res_str)
         # Persist and inform ConfigManager about current UI resolution
-        self.config_mgr.settings['last_resolution_key'] = res_str
-        self.config_mgr.save_app_config()
+        self.config_mgr.last_resolution_key = res_str
         self.config_mgr.display_resolution = (w, h)
         self._update_scale_for_resolution(res_str)
 
@@ -375,13 +373,13 @@ class LektorApp:
             self.on_preset_loaded()
             if autostart_path: self.root.after(500, self.start_reading)
 
-        self.var_regex_mode.set(self.config_mgr.get('last_regex_mode', "Standard (Imię: Dialog)"))
-        self.var_custom_regex.set(self.config_mgr.get('last_custom_regex', ""))
+        self.var_regex_mode.set(self.config_mgr.last_regex_mode)
+        self.var_custom_regex.set(self.config_mgr.last_custom_regex)
         self.auto_detect_resolution()
         self.on_regex_changed()
 
     def _update_preset_list(self):
-        recents = [p for p in self.config_mgr.get('recent_presets', []) if os.path.exists(p)]
+        recents = self.config_mgr.recent_presets_list
         self.full_preset_paths = recents
         self.cb_preset['values'] = [os.path.basename(os.path.dirname(p)) or p for p in recents]
 
@@ -438,7 +436,6 @@ class LektorApp:
         self.var_capture_interval.set(self.config_mgr.capture_interval)
         self.var_min_line_len.set(self.config_mgr.min_line_length)
         self.var_text_color.set(self.config_mgr.text_color_mode)
-        self.var_text_alignment.set(self.config_mgr.text_alignment)
         self.var_save_logs.set(self.config_mgr.save_logs)
         self.var_show_debug.set(self.config_mgr.show_debug)
         self.var_brightness_threshold.set(self.config_mgr.brightness_threshold)
@@ -470,18 +467,10 @@ class LektorApp:
             except Exception:
                 self.ent_regex = None
 
-        self.config_mgr.settings['last_regex_mode'] = mode
-        self.config_mgr.save_app_config()
+        self.config_mgr.last_regex_mode = mode
         if mode != "Własny (Regex)":
             self.config_mgr.regex_pattern = self.regex_map.get(mode, "")
             self.config_mgr.regex_mode_name = mode
-
-    def _save_preset_val(self, key, val):
-        """Authoritative save via ConfigManager properties."""
-        if hasattr(self.config_mgr, key):
-            setattr(self.config_mgr, key, val)
-        else:
-            print(f"Ostrzeżenie: Próba zapisu nieznanego klucza: {key} = {val}")
 
     def browse_lector_folder(self):
         d = filedialog.askdirectory(title="Wybierz katalog z lektorem")
@@ -501,7 +490,7 @@ class LektorApp:
         else:
             new = filedialog.askopenfilename(initialdir=base, filetypes=[("Text", "*.txt")])
         if new:
-            self._save_preset_val(key, new)
+            setattr(self.config_mgr, key, new)
 
     def _scale_rect(self, rect, sx, sy):
         return {'left': int(rect['left'] * sx), 'top': int(rect['top'] * sy), 'width': int(rect['width'] * sx),
@@ -565,7 +554,7 @@ class LektorApp:
         SettingsDialog(self.root, self.config_mgr.settings, self)
         self.config_mgr.save_app_config()
         self._restart_hotkeys()
-        hk = self.config_mgr.get('hotkey_start_stop', '<ctrl>+<f5>')
+        hk = self.config_mgr.hotkey_start_stop
         self.btn_start.config(text=f"START ({hk})")
         self.btn_stop.config(text=f"STOP ({hk})")
 
@@ -594,6 +583,8 @@ class LektorApp:
 
         res_str = self.var_resolution.get()
         target_res = tuple(map(int, res_str.split('x'))) if "x" in res_str else None
+        if target_res:
+            self.config_mgr.display_resolution = target_res
 
         stop_event.clear()
         with audio_queue.mutex:
@@ -1115,19 +1106,14 @@ class LektorApp:
                 if new_rect:
                     target_area.rect = new_rect
                 
-                # Apply settings from best_settings (object or dict)
-                if hasattr(best_settings, 'text_thickening'):
-                    target_area.text_thickening = int(best_settings.text_thickening)
-                    target_area.brightness_threshold = int(best_settings.brightness_threshold)
-                    target_area.contrast = float(best_settings.contrast)
-                    target_area.color_tolerance = int(best_settings.color_tolerance)
-                    target_area.subtitle_colors = list(best_settings.subtitle_colors or [])
-                elif isinstance(best_settings, dict):
-                    target_area.text_thickening = int(best_settings.get('text_thickening', target_area.text_thickening or 0))
-                    target_area.brightness_threshold = int(best_settings.get('brightness_threshold', target_area.brightness_threshold or 200))
-                    target_area.contrast = float(best_settings.get('contrast', target_area.contrast or 0.0))
-                    target_area.color_tolerance = int(best_settings.get('color_tolerance', target_area.color_tolerance or 10))
-                    target_area.subtitle_colors = list(best_settings.get('subtitle_colors', target_area.subtitle_colors or []))
+                # Apply settings from best_settings (must be PresetConfig object)
+                target_area.text_thickening = int(best_settings.text_thickening)
+                target_area.brightness_threshold = int(best_settings.brightness_threshold)
+                target_area.contrast = float(best_settings.contrast)
+                target_area.color_tolerance = int(best_settings.color_tolerance)
+                
+                # AreaConfig uses 'colors', while PresetConfig/Optimizer uses 'subtitle_colors'
+                target_area.colors = list(best_settings.subtitle_colors or [])
 
             # Save via ConfigManager
             old_res = self.config_mgr.display_resolution

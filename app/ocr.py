@@ -224,9 +224,12 @@ def recognize_text(image: Image.Image, config_manager: ConfigManager) -> str:
         else:
             text = pytesseract.image_to_string(image, lang=OCR_LANGUAGE, config='--psm 6')
 
-        if not text: return ""
+        if not text:
+            print(f"OCR: No text recognized.")
+            return ""
 
         text = text.strip().replace('\n', ' ')
+        print(f"OCR: Recognized text: '{text}'")
         if config_manager.auto_remove_names:
             text = smart_remove_name(text)
         return text

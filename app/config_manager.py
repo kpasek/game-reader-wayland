@@ -153,7 +153,6 @@ class PresetConfig:
     similarity: float = 5.0
     regex_mode_name: str = ""
     regex_pattern: str = ""
-    text_alignment: str = "None"
     
     # Global defaults for new areas
     text_thickening: int = 0
@@ -224,6 +223,39 @@ class ConfigManager:
         self.save_app_config()
 
     @property
+    def last_resolution_key(self) -> str:
+        return self.settings.get('last_resolution_key', DEFAULT_CONFIG.get('last_resolution_key', '1920x1080'))
+
+    @last_resolution_key.setter
+    def last_resolution_key(self, value: str):
+        self.settings['last_resolution_key'] = value
+        self.save_app_config()
+
+    @property
+    def last_regex_mode(self) -> str:
+        return self.settings.get('last_regex_mode', "Standard (Imię: Dialog)")
+
+    @last_regex_mode.setter
+    def last_regex_mode(self, value: str):
+        self.settings['last_regex_mode'] = value
+        self.save_app_config()
+
+    @property
+    def last_custom_regex(self) -> str:
+        return self.settings.get('last_custom_regex', "")
+
+    @last_custom_regex.setter
+    def last_custom_regex(self, value: str):
+        self.settings['last_custom_regex'] = value
+        self.save_app_config()
+
+    @property
+    def recent_presets_list(self) -> List[str]:
+        """Returns valid paths from recent_presets."""
+        import os
+        return [p for p in self.settings.get('recent_presets', []) if os.path.exists(p)]
+
+    @property
     def capture_interval(self) -> float:
         return self._get_preset_obj().capture_interval
 
@@ -286,6 +318,39 @@ class ConfigManager:
     def audio_speed_inc(self, value: float):
         obj = self._get_preset_obj()
         obj.audio_speed_inc = float(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, obj)
+
+    @property
+    def audio_speed(self) -> float:
+        return self._get_preset_obj().audio_speed
+
+    @audio_speed.setter
+    def audio_speed(self, value: float):
+        obj = self._get_preset_obj()
+        obj.audio_speed = float(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, obj)
+
+    @property
+    def audio_volume(self) -> float:
+        return self._get_preset_obj().audio_volume
+
+    @audio_volume.setter
+    def audio_volume(self, value: float):
+        obj = self._get_preset_obj()
+        obj.audio_volume = float(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, obj)
+
+    @property
+    def similarity(self) -> float:
+        return self._get_preset_obj().similarity
+
+    @similarity.setter
+    def similarity(self, value: float):
+        obj = self._get_preset_obj()
+        obj.similarity = float(value)
         if self.preset_path:
             self.save_preset(self.preset_path, obj)
 
@@ -356,6 +421,115 @@ class ConfigManager:
             self.save_preset(self.preset_path, obj)
 
     @property
+    def areas(self) -> List[AreaConfig]:
+        """Returns areas scaled to physical resolution."""
+        return self.get_areas()
+
+    @areas.setter
+    def areas(self, value: List[AreaConfig]):
+        """Accepts areas in physical coordinates, scales them to 4K and saves."""
+        obj = self._get_preset_obj()
+        import copy as _copy
+        new_areas = _copy.deepcopy(value)
+        
+        if self.display_resolution:
+            dw, dh = self.display_resolution
+            for area in new_areas:
+                area.rect = scale_utils.scale_rect_to_4k(area.rect, dw, dh)
+        
+        obj.areas = new_areas
+        if self.preset_path:
+            self.save_preset(self.preset_path, obj)
+
+    @property
+    def auto_remove_names(self) -> bool:
+        return self._get_preset_obj().auto_remove_names
+
+    @auto_remove_names.setter
+    def auto_remove_names(self, value: bool):
+        obj = self._get_preset_obj()
+        obj.auto_remove_names = bool(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, obj)
+
+    @property
+    def show_debug(self) -> bool:
+        return self._get_preset_obj().show_debug
+
+    @show_debug.setter
+    def show_debug(self, value: bool):
+        obj = self._get_preset_obj()
+        obj.show_debug = bool(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, obj)
+
+    @property
+    def text_color_mode(self) -> str:
+        return self._get_preset_obj().text_color_mode
+
+    @text_color_mode.setter
+    def text_color_mode(self, value: str):
+        obj = self._get_preset_obj()
+        obj.text_color_mode = str(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, obj)
+
+    @property
+    def subtitle_mode(self) -> str:
+        return self._get_preset_obj().subtitle_mode
+
+    @subtitle_mode.setter
+    def subtitle_mode(self, value: str):
+        obj = self._get_preset_obj()
+        obj.subtitle_mode = str(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, obj)
+
+    @property
+    def brightness_threshold(self) -> int:
+        return self._get_preset_obj().brightness_threshold
+
+    @brightness_threshold.setter
+    def brightness_threshold(self, value: int):
+        obj = self._get_preset_obj()
+        obj.brightness_threshold = int(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, obj)
+
+    @property
+    def contrast(self) -> float:
+        return self._get_preset_obj().contrast
+
+    @contrast.setter
+    def contrast(self, value: float):
+        obj = self._get_preset_obj()
+        obj.contrast = float(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, obj)
+
+    @property
+    def color_tolerance(self) -> int:
+        return self._get_preset_obj().color_tolerance
+
+    @color_tolerance.setter
+    def color_tolerance(self, value: int):
+        obj = self._get_preset_obj()
+        obj.color_tolerance = int(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, obj)
+
+    @property
+    def text_thickening(self) -> int:
+        return self._get_preset_obj().text_thickening
+
+    @text_thickening.setter
+    def text_thickening(self, value: int):
+        obj = self._get_preset_obj()
+        obj.text_thickening = int(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, obj)
+
+    @property
     def text_color_mode(self) -> str:
         return self._get_preset_obj().text_color_mode
 
@@ -377,39 +551,6 @@ class ConfigManager:
         if self.preset_path:
             self.save_preset(self.preset_path, obj)
             
-    @property
-    def audio_speed(self) -> float:
-        return self._get_preset_obj().audio_speed
-
-    @audio_speed.setter
-    def audio_speed(self, value: float):
-        obj = self._get_preset_obj()
-        obj.audio_speed = float(value)
-        if self.preset_path:
-            self.save_preset(self.preset_path, obj)
-
-    @property
-    def audio_volume(self) -> float:
-        return self._get_preset_obj().audio_volume
-
-    @audio_volume.setter
-    def audio_volume(self, value: float):
-        obj = self._get_preset_obj()
-        obj.audio_volume = float(value)
-        if self.preset_path:
-            self.save_preset(self.preset_path, obj)
-
-    @property
-    def similarity(self) -> float:
-        return self._get_preset_obj().similarity
-
-    @similarity.setter
-    def similarity(self, value: float):
-        obj = self._get_preset_obj()
-        obj.similarity = float(value)
-        if self.preset_path:
-            self.save_preset(self.preset_path, obj)
-
     @property
     def regex_mode_name(self) -> str:
         return self._get_preset_obj().regex_mode_name
@@ -473,17 +614,6 @@ class ConfigManager:
     def color_tolerance(self, value: int):
         obj = self._get_preset_obj()
         obj.color_tolerance = int(value)
-        if self.preset_path:
-            self.save_preset(self.preset_path, obj)
-
-    @property
-    def text_alignment(self) -> str:
-        return self._get_preset_obj().text_alignment
-
-    @text_alignment.setter
-    def text_alignment(self, value: str):
-        obj = self._get_preset_obj()
-        obj.text_alignment = str(value)
         if self.preset_path:
             self.save_preset(self.preset_path, obj)
 

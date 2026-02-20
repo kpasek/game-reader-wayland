@@ -33,7 +33,6 @@ class CaptureWorker(threading.Thread):
             loop_start = time.monotonic()
             
             self.capture()
-
             elapsed = time.monotonic() - loop_start
             time.sleep(max(0.01, self.interval - elapsed))
 
@@ -60,6 +59,7 @@ class CaptureWorker(threading.Thread):
             except queue.Full:
                 pass
         else:
+            print(f"CaptureWorker: Capture failed (returned None)!")
             if not self._logged_fail:
                 self._logged_fail = True
                 msg = "CaptureWorker: Failed to grab screen (returned None/Empty)!"
@@ -123,12 +123,14 @@ class ReaderThread(threading.Thread):
             if self.log_queue:
                 self.log_queue.put({"time": "INFO", "line_text": f"Area #{area_id} activated."})
 
-    def _is_main_area(self, area_id: Any) -> bool:
-        """Checks if the ID refers to the canonical 'Main' area (1, 'area_0' or 'area_1'?).
+    def _is_main_area(self, area_id: Any, index: int = -1) -> bool:
+        """Checks if the ID refers to the canonical 'Main' area (0, 1, 'area_0' or 'area_1'?).
         Note: Migration uses 'area_0' for monitor[0], 'area_1' for monitor[1].
         Technically monitor[0] (slot 1 in UI) is the 'primary' one.
         """
-        return area_id == 1 or area_id == "area_0" or str(area_id).lower() == "area_1"
+        if index == 0:
+            return True
+        return area_id == 0 or area_id == 1 or str(area_id).lower() in ["area_0", "area_1"]
 
 
     # (Area-specific overrides handled explicitly during processing;
@@ -143,6 +145,9 @@ class ReaderThread(threading.Thread):
         return sum(stat.mean) < similarity
 
     def run(self):
+        if self.target_resolution:
+            self.config_manager.display_resolution = self.target_resolution
+
         preset = self.config_manager.load_preset()
         if not preset: return
 
@@ -159,6 +164,7 @@ class ReaderThread(threading.Thread):
         # Get areas already scaled to the manager's display resolution
         areas_config = copy.deepcopy(self.config_manager.get_areas() or [])
         valid_areas = areas_config
+
 
         if not valid_areas:
             if self.log_queue:
@@ -208,11 +214,10 @@ class ReaderThread(threading.Thread):
                 f.write(f"\n=== SESSION START {datetime.now()} ===\n")
                 f.write("Time | Monitor | Capture(ms) | Pre(ms) | OCR(ms) | Match(ms) | Text | MatchResult\n")
 
-        print(f"ReaderThread started.")
 
         while not self.stop_event.is_set():
             try:
-                full_img, t_cap = self.img_queue.get(timeout=0.2)
+                full_img, t_cap = self.img_queue.get(timeout=2.0)
             except queue.Empty:
                 continue
 
@@ -228,7 +233,6 @@ class ReaderThread(threading.Thread):
                 area_id = area_obj.id
                 area_rect = area_obj.rect
                 area_type = area_obj.type
-
                 # Logika włączania/wyłączania obszarów
                 if area_type == 'manual':
                     if area_id not in self.triggered_area_ids:
@@ -237,7 +241,7 @@ class ReaderThread(threading.Thread):
                     self.last_monitor_crops.pop(idx, None)
                 elif area_type == 'continuous':
                     # First slot (Area 0 or 1 depending on slot naming) is always active.
-                    if not self._is_main_area(area_id) and area_id not in self.enabled_continuous_areas:
+                    if not self._is_main_area(area_id, index=idx) and area_id not in self.enabled_continuous_areas:
                         continue
 
                 rel_x, rel_y = area_rect['left'] - min_l, area_rect['top'] - min_t
@@ -246,6 +250,7 @@ class ReaderThread(threading.Thread):
                 last_crop = self.last_monitor_crops.get(idx)
                 if self._images_are_similar(crop, last_crop, similarity):
                     continue
+                
                 self.last_monitor_crops[idx] = crop.copy()
 
                 t_pre_start = time.perf_counter()
@@ -329,7 +334,7 @@ class ReaderThread(threading.Thread):
                     idx_match, score = match
                     self.last_matched_idx = idx_match
                     if idx_match not in self.recent_match_indices:
-                        print(f"Match: {score}% -> Line {idx_match}")
+                        pass # Match log removed
                         self.recent_match_indices.append(idx_match)
 
                         audio_path = os.path.join(audio_dir, f"output1 ({idx_match + 1}){audio_ext}")
