@@ -1133,41 +1133,57 @@ class LektorApp:
                 if target_id is None:
                     existing_ids = [a.get('id', 0) for a in current_areas]
                     new_id = (max(existing_ids) if existing_ids else 0) + 1
-                    current_areas.append({
+                    # Create flat area dict and merge sanitized per-area settings at top-level
+                    new_area = {
                         "id": new_id,
                         "type": "continuous",
                         "rect": new_rect,
                         "hotkey": "",
-                        "settings": self.config_mgr.make_area_settings(sanitized_best)
-                    })
+                    }
+                    if isinstance(sanitized_best, dict):
+                        # Only merge known per-area keys
+                        keys = ['text_thickening', 'subtitle_mode', 'brightness_threshold', 'contrast', 'use_colors', 'color_tolerance', 'subtitle_colors', 'setting_mode', 'show_debug', 'scale_overrides']
+                        new_area.update({k: sanitized_best.get(k) for k in keys if k in sanitized_best})
+                    current_areas.append(new_area)
                 else:
                     for area in current_areas:
                         if area.get('id') == target_id:
                             area['rect'] = new_rect
-                            if 'settings' not in area:
-                                area['settings'] = self.config_mgr.make_area_settings({})
-                            # Update only allowed keys
-                            if isinstance(area['settings'], dict) and isinstance(sanitized_best, dict):
-                                area['settings'].update(sanitized_best)
+                            # Read current per-area settings (from nested 'settings' or flat keys)
+                            keys = ['text_thickening', 'subtitle_mode', 'brightness_threshold', 'contrast', 'use_colors', 'color_tolerance', 'subtitle_colors', 'setting_mode', 'show_debug', 'scale_overrides']
+                            current_settings = {}
+                            if 'settings' in area and isinstance(area['settings'], dict):
+                                current_settings = {k: area['settings'].get(k) for k in keys if k in area['settings']}
                             else:
-                                # AreaSettings: set attributes individually
+                                current_settings = {k: area.get(k) for k in keys if k in area}
+                            # Merge updates
+                            if isinstance(sanitized_best, dict):
+                                current_settings.update({k: sanitized_best.get(k) for k in keys if k in sanitized_best})
+                            # Write back flattened settings into area
+                            for k, v in current_settings.items():
+                                area[k] = v
+                            # Remove any leftover nested settings key
+                            if 'settings' in area:
                                 try:
-                                    for k, v in (sanitized_best or {}).items():
-                                        area['settings'][k] = v
+                                    del area['settings']
                                 except Exception:
                                     pass
                             break
             elif target_id is not None:
                 for area in current_areas:
                     if area.get('id') == target_id:
-                        if 'settings' not in area:
-                            area['settings'] = self.config_mgr.make_area_settings({})
-                        if isinstance(area['settings'], dict) and isinstance(best_settings, dict):
-                            area['settings'].update(best_settings)
+                        keys = ['text_thickening', 'subtitle_mode', 'brightness_threshold', 'contrast', 'use_colors', 'color_tolerance', 'subtitle_colors', 'setting_mode', 'show_debug', 'scale_overrides']
+                        if 'settings' in area and isinstance(area['settings'], dict):
+                            current_settings = {k: area['settings'].get(k) for k in keys if k in area['settings']}
                         else:
+                            current_settings = {k: area.get(k) for k in keys if k in area}
+                        if isinstance(best_settings, dict):
+                            current_settings.update({k: best_settings.get(k) for k in keys if k in best_settings})
+                        for k, v in current_settings.items():
+                            area[k] = v
+                        if 'settings' in area:
                             try:
-                                for k, v in (best_settings or {}).items():
-                                    area['settings'][k] = v
+                                del area['settings']
                             except Exception:
                                 pass
                         break
@@ -1178,14 +1194,23 @@ class LektorApp:
             safe_areas = _copy.deepcopy(current_areas)
             try:
                 for a in safe_areas:
-                    if isinstance(a, dict) and 'settings' in a:
-                        # If AreaSettings instance, convert to sanitized dict
-                        s = a['settings']
-                        if hasattr(s, 'to_dict') and callable(getattr(s, 'to_dict')):
-                            sd = s.to_dict()
-                            a['settings'] = {k: v for k, v in sd.items() if k not in ('areas', 'monitor')}
-                        elif isinstance(s, dict):
-                            a['settings'] = {k: v for k, v in s.items() if k not in ('areas', 'monitor')}
+                    if isinstance(a, dict):
+                        # Flatten nested 'settings' (if present) into top-level keys and strip large keys
+                        keys = ['text_thickening', 'subtitle_mode', 'brightness_threshold', 'contrast', 'use_colors', 'color_tolerance', 'subtitle_colors', 'setting_mode', 'show_debug', 'scale_overrides']
+                        if 'settings' in a and isinstance(a['settings'], dict):
+                            sdict = {k: a['settings'].get(k) for k in keys if k in a['settings']}
+                        else:
+                            sdict = {k: a.get(k) for k in keys if k in a}
+                        if isinstance(sdict, dict):
+                            for k, v in sdict.items():
+                                if k not in ('areas', 'monitor'):
+                                    a[k] = v
+                        # Ensure no nested 'settings' remains
+                        if 'settings' in a:
+                            try:
+                                del a['settings']
+                            except Exception:
+                                pass
             except Exception:
                 pass
             preset_data['areas'] = safe_areas

@@ -12,7 +12,7 @@ from PIL import Image, ImageChops, ImageStat
 from app.capture import capture_region
 from app.ocr import preprocess_image, recognize_text
 from app.matcher import find_best_match, precompute_subtitles
-from app.config_manager import ConfigManager
+from app.config_manager import ConfigManager, AreaConfig
 
 
 class CaptureWorker(threading.Thread):
@@ -169,13 +169,14 @@ class ReaderThread(threading.Thread):
         # Initialize enabled continuous areas from config
         self.enabled_continuous_areas = set()
         for area in valid_areas:
-            if area.get('type') == 'continuous' and area.get('enabled', False):
-                self.enabled_continuous_areas.add(area.get('id'))
+            # area is AreaConfig
+            if area.type == 'continuous' and area.enabled:
+                self.enabled_continuous_areas.add(area.id)
 
         # Areas returned by `get_preset_for_display` are already scaled to the
         # manager's `display_resolution` (if set). No further scaling required.
 
-        monitors = [a['rect'] for a in valid_areas] # For Unified Calculation
+        monitors = [a.rect for a in valid_areas] # For Unified Calculation
 
         min_l = min(m['left'] for m in monitors)
         min_t = min(m['top'] for m in monitors)
@@ -224,32 +225,20 @@ class ReaderThread(threading.Thread):
 
             for idx, area_obj in enumerate(valid_areas):
                 t_start_proc = time.perf_counter()
-                
-                area_id = area_obj.get('id', idx)
-                area_rect = area_obj.get('rect')
-                area_type = area_obj.get('type', 'manual')
+                area_id = area_obj.id
+                area_rect = area_obj.rect
+                area_type = area_obj.type
 
                 # Logika włączania/wyłączania obszarów
                 if area_type == 'manual':
-                     if area_id not in self.triggered_area_ids:
-                         continue
-                     self.triggered_area_ids.remove(area_id)
-                     # Clear last crop logic for manual might needed?
-                     self.last_monitor_crops.pop(idx, None)
+                    if area_id not in self.triggered_area_ids:
+                        continue
+                    self.triggered_area_ids.remove(area_id)
+                    self.last_monitor_crops.pop(idx, None)
                 elif area_type == 'continuous':
                     # Obszar 1 zawsze aktywny, inne muszą być włączone
                     if area_id != 1 and area_id not in self.enabled_continuous_areas:
                         continue
-
-                rel_x, rel_y = area_rect['left'] - min_l, area_rect['top'] - min_t
-                area_rect = area_obj.get('rect')
-                
-                if area_obj.get('type') == 'manual':
-                     if area_id not in self.triggered_area_ids:
-                         continue
-                     self.triggered_area_ids.remove(area_id)
-                     # Clear last crop logic for manual might needed?
-                     self.last_monitor_crops.pop(idx, None)
 
                 rel_x, rel_y = area_rect['left'] - min_l, area_rect['top'] - min_t
                 crop = full_img.crop((rel_x, rel_y, rel_x + area_rect['width'], rel_y + area_rect['height']))
@@ -260,31 +249,29 @@ class ReaderThread(threading.Thread):
                 self.last_monitor_crops[idx] = crop.copy()
 
                 # --- Prepare Context for Area ---
-                # Support typed AreaSettings (from ConfigManager) or plain dicts
-                aset = area_obj.get('settings', {})
-                try:
-                    # Prefer to_dict() when available; allow AttributeError to surface if misconfigured
-                    area_settings = aset.to_dict().copy()
-                except Exception:
-                    area_settings = aset.copy()
-                # Legacy fallback for colors
-                if 'subtitle_colors' not in area_settings and 'colors' in area_obj:
-                     area_settings['subtitle_colors'] = area_obj['colors']
-                
+                # Build a plain settings dict from flattened AreaConfig attributes
+                area_settings = {
+                    'text_thickening': area_obj.text_thickening,
+                    'subtitle_mode': area_obj.subtitle_mode,
+                    'brightness_threshold': area_obj.brightness_threshold,
+                    'contrast': area_obj.contrast,
+                    'use_colors': area_obj.use_colors,
+                    'color_tolerance': area_obj.color_tolerance,
+                    'subtitle_colors': area_obj.subtitle_colors or area_obj.colors or [],
+                    'setting_mode': area_obj.setting_mode,
+                    'show_debug': area_obj.show_debug,
+                    'scale_overrides': area_obj.scale_overrides or {}
+                }
+
                 merged_preset = preset.copy()
                 merged_preset.update(area_settings)
-
-                # Prepare typed area settings and pass them explicitly to
-                # processing functions — do NOT modify `config_manager`.
-                # NOTE: use `area_obj` (not `area`) which is the local variable here
-                area_settings_obj = self.config_manager.make_area_settings(area_obj.get('settings', None))
                 from app.matcher import MATCH_MODE_FULL
                 current_subtitle_mode = merged_preset.get('subtitle_mode', MATCH_MODE_FULL)
 
                 t_pre_start = time.perf_counter()
 
                 # Use explicit area settings for preprocessing (no mutation of config)
-                processed, has_content, crop_bbox = preprocess_image(crop, self.config_manager, area_settings=area_settings_obj)
+                processed, has_content, crop_bbox = preprocess_image(crop, self.config_manager, area_settings=area_settings)
 
                 if not has_content:
                     continue

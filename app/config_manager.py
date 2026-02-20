@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Tuple
 from dataclasses import dataclass, field
 from app import scale_utils
-import copy
 
 APP_CONFIG_FILE = Path.home() / '.config' / 'app_config.json'
 
@@ -46,12 +45,24 @@ import datetime
 
 
 @dataclass
-class AreaSettings:
-    """Typed container for per-area settings.
+class AreaConfig:
+    """Single flattened dataclass representing an Area including per-area settings.
 
-    Behaves like a minimal dict (supports `get`, `__getitem__`, `__setitem__`)
-    and can be converted to/from plain dicts for serialization.
+    This replaces the previous split between `AreaSettings` and `AreaConfig`.
+    Attributes that used to live in `AreaSettings` are now top-level fields
+    on the area object. For persistence we still produce/consume the familiar
+    dict structure (with a nested `settings` key) but runtime code should
+    prefer direct attribute access (e.g. `area.text_thickening`).
     """
+    id: int = 0
+    type: str = "manual"
+    rect: Dict[str, int] = field(default_factory=lambda: {"left": 0, "top": 0, "width": 0, "height": 0})
+    hotkey: str = ""
+    name: str = ""
+    enabled: bool = False
+    colors: List[str] = field(default_factory=list)
+
+    # Flattened per-area settings (previously in AreaSettings)
     text_thickening: int = 0
     subtitle_mode: str = "Full Lines"
     brightness_threshold: int = 200
@@ -59,8 +70,6 @@ class AreaSettings:
     use_colors: bool = True
     color_tolerance: int = 10
     subtitle_colors: List[str] = field(default_factory=list)
-    # Removed shared/preset-level fields (they are not per-area).
-    # Area-level settings kept below.
     setting_mode: str = ''
     show_debug: bool = False
     scale_overrides: Dict[str, float] = field(default_factory=dict)
@@ -69,31 +78,71 @@ class AreaSettings:
     def from_dict(cls, d: Optional[Dict[str, Any]]):
         if not d:
             return cls()
-        # Merge provided dict with defaults
-        kw = {}
-        for f in cls.__dataclass_fields__.keys():
-            if f in d:
-                kw[f] = d.get(f)
-        # Ensure types where necessary
-        if 'subtitle_colors' in kw and kw['subtitle_colors'] is None:
-            kw['subtitle_colors'] = []
+        kw: Dict[str, Any] = {}
+        kw['id'] = int(d.get('id', 0))
+        kw['type'] = str(d.get('type', 'manual'))
+        kw['rect'] = dict(d.get('rect', {'left': 0, 'top': 0, 'width': 0, 'height': 0}))
+        kw['hotkey'] = str(d.get('hotkey', '')) if d.get('hotkey') is not None else ''
+        kw['name'] = str(d.get('name', '')) if d.get('name') is not None else ''
+        kw['enabled'] = bool(d.get('enabled', False))
+        # colors historically stored under 'colors' or 'subtitle_colors'
+        kw['colors'] = list(d.get('colors', d.get('subtitle_colors', [])) or [])
+
+        # Per-area settings may be nested under 'settings' or present at top-level
+        s = d.get('settings', {}) if isinstance(d, dict) else {}
+        # If some callers saved settings at top-level for convenience, prefer them
+        def _pick(name, default):
+            if name in d and d.get(name) is not None:
+                return d.get(name)
+            if isinstance(s, dict) and name in s:
+                return s.get(name)
+            return default
+
+        kw['text_thickening'] = int(_pick('text_thickening', 0))
+        kw['subtitle_mode'] = str(_pick('subtitle_mode', 'Full Lines'))
+        kw['brightness_threshold'] = int(_pick('brightness_threshold', 200))
+        kw['contrast'] = float(_pick('contrast', 0.0) or 0.0)
+        kw['use_colors'] = bool(_pick('use_colors', True))
+        kw['color_tolerance'] = int(_pick('color_tolerance', 10))
+        subcols = _pick('subtitle_colors', d.get('subtitle_colors', []) or [])
+        kw['subtitle_colors'] = list(subcols or [])
+        kw['setting_mode'] = str(_pick('setting_mode', ''))
+        kw['show_debug'] = bool(_pick('show_debug', False))
+        kw['scale_overrides'] = dict(_pick('scale_overrides', {})) if isinstance(_pick('scale_overrides', {}), dict) else {}
+
         return cls(**kw)
 
     def to_dict(self) -> Dict[str, Any]:
-        out = {}
-        for k in self.__dataclass_fields__.keys():
-            val = object.__getattribute__(self, k)
-            out[k] = val
+        # Persist area as a flat dict: per-area settings live at the same
+        # level as other area keys (no nested 'settings' key).
+        out = {
+            'id': self.id,
+            'type': self.type,
+            'rect': dict(self.rect) if isinstance(self.rect, dict) else self.rect,
+            'hotkey': self.hotkey,
+            'name': self.name,
+            'enabled': self.enabled,
+            'colors': list(self.colors or []),
+            'text_thickening': int(self.text_thickening),
+            'subtitle_mode': str(self.subtitle_mode),
+            'brightness_threshold': int(self.brightness_threshold),
+            'contrast': float(self.contrast or 0.0),
+            'use_colors': bool(self.use_colors),
+            'color_tolerance': int(self.color_tolerance),
+            'subtitle_colors': list(self.subtitle_colors or []),
+            'setting_mode': str(self.setting_mode),
+            'show_debug': bool(self.show_debug),
+            'scale_overrides': dict(self.scale_overrides or {})
+        }
         return out
 
-    # Dict-like helpers used by UI code
-    # Direct attribute access is preferred; `get` removed per design.
-
-    def __getitem__(self, key: str):
-        return object.__getattribute__(self, key)
-
-    def __setitem__(self, key: str, value):
-        setattr(self, key, value)
+    @property
+    def settings(self) -> Dict[str, Any]:
+        # Backwards helper for callers that still expect `.settings`.
+        # Returns only the per-area settings as a plain dict.
+        td = self.to_dict()
+        keys = ['text_thickening', 'subtitle_mode', 'brightness_threshold', 'contrast', 'use_colors', 'color_tolerance', 'subtitle_colors', 'setting_mode', 'show_debug', 'scale_overrides']
+        return {k: td.get(k) for k in keys}
 
 
 class ConfigManager:
@@ -348,10 +397,6 @@ class ConfigManager:
         if self.preset_path:
             self.save_preset(self.preset_path, data)
 
-    def make_area_settings(self, settings: Optional[Dict[str, Any]]) -> AreaSettings:
-        """Create an AreaSettings instance from a plain dict (or None)."""
-        return AreaSettings.from_dict(settings if isinstance(settings, dict) else {})
-
 
     def backup_preset(self, path: str) -> Optional[str]:
         """Tworzy kopię zapasową pliku preset z timestampem."""
@@ -584,15 +629,92 @@ class ConfigManager:
         return out
 
     # High-level helpers for area-level access
-    def get_areas(self) -> List[Dict[str, Any]]:
-        """Return the list of areas scaled to the manager's `display_resolution`.
+    def get_areas(self) -> List['AreaConfig']:
+        """Return the list of areas (as `AreaConfig`) scaled to the manager's `display_resolution`.
 
-        This centralizes scaling so callers don't implement scaling logic.
+        This centralizes scaling so callers don't implement scaling logic. The
+        returned objects are typed `AreaConfig` instances and safe to use in
+        processing and UI code.
         """
         p = self.get_preset_for_display()
         if not p:
             return []
-        return p.get('areas', [])
+        raw = p.get('areas', []) or []
+        out: List[AreaConfig] = []
+        try:
+            for a in raw:
+                try:
+                    out.append(AreaConfig.from_dict(a if isinstance(a, dict) else {}))
+                except Exception:
+                    # fallback: create empty AreaConfig for malformed entries
+                    out.append(AreaConfig())
+        except Exception:
+            return []
+        return out
+
+    def get_area_setting(self, area_or_id, key: str, default=None):
+        """Return a single per-area setting value from the authoritative areas list.
+
+        `area_or_id` may be an `AreaConfig` instance, an integer id, or a dict
+        representation (as stored in presets). This always reads from
+        `self.get_areas()` so ConfigManager remains the source of truth.
+        """
+        try:
+            areas = self.get_areas() or []
+            target_id = None
+            if isinstance(area_or_id, int):
+                target_id = area_or_id
+            else:
+                try:
+                    if isinstance(area_or_id, AreaConfig):
+                        target_id = int(area_or_id.id)
+                    else:
+                        # assume mapping-like
+                        target_id = int(area_or_id.get('id'))
+                except Exception:
+                    target_id = None
+
+            for a in areas:
+                if target_id is not None and a.id == target_id:
+                    return getattr(a, key, default)
+            # Fallback: if area_or_id is an AreaConfig-like instance use it
+            if hasattr(area_or_id, key):
+                return getattr(area_or_id, key)
+        except Exception:
+            pass
+        return default
+
+    def get_area_settings(self, area_or_id) -> Dict[str, Any]:
+        """Return dict of known per-area settings read via ConfigManager.
+
+        Always reads values through `get_area_setting` so callers access
+        settings only via the manager.
+        """
+        keys = ['text_thickening', 'subtitle_mode', 'brightness_threshold', 'contrast', 'use_colors', 'color_tolerance', 'subtitle_colors', 'setting_mode', 'show_debug', 'scale_overrides']
+        out: Dict[str, Any] = {}
+        for k in keys:
+            v = self.get_area_setting(area_or_id, k, None)
+            if v is not None:
+                out[k] = v
+        return out
+
+    def get_area(self, index: int):
+        """Return an `AreaConfig` by zero-based list index.
+
+        This method treats the argument strictly as a list index into the
+        array returned by `get_areas()`. If the index is out of range or the
+        argument is not an int, `None` is returned. Callers that already
+        have an `AreaConfig` instance should pass the index of that area.
+        """
+        try:
+            areas = self.get_areas() or []
+            if not isinstance(index, int):
+                return None
+            if 0 <= index < len(areas):
+                return areas[index]
+        except Exception:
+            pass
+        return None
 
     def set_areas_from_display(self, areas: List[Dict[str, Any]], src_resolution: Optional[Tuple[int, int]] = None):
         """Accept areas expressed in display coordinates and persist them (scaling to canonical 4K).
@@ -606,7 +728,14 @@ class ConfigManager:
             if self.display_resolution is None:
                 raise ValueError("No source resolution provided and ConfigManager.display_resolution is not set")
             src_resolution = self.display_resolution
-        data = {'areas': areas}
+        # Accept either raw dicts or AreaConfig instances
+        serializable_areas = []
+        for a in areas or []:
+            if isinstance(a, AreaConfig):
+                serializable_areas.append(a.to_dict())
+            else:
+                serializable_areas.append(a)
+        data = {'areas': serializable_areas}
         self.save_preset_from_screen(self.preset_path, data, src_resolution)
 
     def set_areas(self, areas: List[Dict[str, Any]]):
@@ -741,24 +870,19 @@ class ConfigManager:
         except Exception as e:
             print(f"Błąd zapisu presetu {path}: {e}")
 
-    @staticmethod
-    def load_text_lines(path: str) -> List[str]:
-        if not path or not os.path.exists(path):
-            return []
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                return [line.strip() for line in f]
-        except Exception:
-            return []
+    def load_text_lines(self, path: Optional[str] = None) -> List[str]:
+        """Load text lines from `path` or from the current preset's `text_file_path`.
 
-    def load_text_lines(self) -> List[str]:
-        """Instance wrapper: load text lines using the current preset's `text_file_path`.
-
-        Provides the convenience so callers can do `self.config_manager.load_text_lines()`
-        instead of passing the path explicitly.
+        Usage:
+        - `load_text_lines(path)` reads the provided file path.
+        - `load_text_lines()` reads the preset's `text_file_path`.
         """
         try:
-            path = self.text_file_path
-            return ConfigManager.load_text_lines(path)
+            if path is None:
+                path = self.text_file_path
+            if not path or not os.path.exists(path):
+                return []
+            with open(path, 'r', encoding='utf-8') as f:
+                return [line.strip() for line in f]
         except Exception:
             return []

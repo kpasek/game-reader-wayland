@@ -3,7 +3,7 @@ from tkinter import ttk, messagebox
 import os
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 
-from app.config_manager import ConfigManager, AreaSettings
+from app.config_manager import ConfigManager, AreaConfig
 
 if TYPE_CHECKING:
     from lektor import LektorApp
@@ -59,21 +59,21 @@ class AreaManagerWindow(tk.Toplevel):
         self.lb_areas.delete(0, tk.END)
         areas = self.config_mgr.get_areas() or []
         for i, area in enumerate(areas):
-            typ_raw = area.get('type', TYPE_MANUAL)
+            typ_raw = area.type
             t = TYPE_SHORT_MAP.get(typ_raw, typ_raw)
-            display = f"#{area.get('id', i+1)}"
-            if area.get('name'):
-                display += f" {area.get('name')}"
+            display = f"#{area.id if area.id is not None else i+1}"
+            if area.name:
+                display += f" {area.name}"
             display += f" [{t}]"
-            if typ_raw == TYPE_CONTINUOUS and area.get('id') != 1:
-                state = STATE_ON if area.get('enabled', False) else STATE_OFF
+            if typ_raw == TYPE_CONTINUOUS and area.id != 1:
+                state = STATE_ON if area.enabled else STATE_OFF
                 display += f" [{state}]"
             self.lb_areas.insert(tk.END, display)
         if self.current_selection_idx >= 0 and self.current_selection_idx < len(areas):
             self.lb_areas.selection_set(self.current_selection_idx)
             self._load_details(self.current_selection_idx)
-            area = areas[self.current_selection_idx]
-            if area.get('id') == 1:
+            area = self.config_mgr.get_area(self.current_selection_idx)
+            if area.id == 1:
                 self.btn_remove.config(state=tk.DISABLED)
             else:
                 self.btn_remove.config(state=tk.NORMAL)
@@ -295,20 +295,22 @@ class AreaManagerWindow(tk.Toplevel):
     def _load_details(self, idx):
         areas = self.config_mgr.get_areas() or []
         area = areas[idx]
-        # Ensure we have a typed AreaSettings instance (ConfigManager is authoritative)
-        settings = self.config_mgr.make_area_settings(area.get('settings', None))
+        # AreaConfig is flattened; authoritative settings must be read via
+        # `ConfigManager` so callers can't bypass central source-of-truth.
+        settings = area
+        settings_obj = self.config_mgr.get_area_settings(area) if self.config_mgr else {}
 
         # Tab General
-        typ = area.get('type', TYPE_MANUAL)
+        typ = area.type
         self.var_type.set(self.type_mapping.get(typ, typ))
 
-        self.var_enabled.set(area.get('enabled', False))
-        if typ == TYPE_CONTINUOUS and area.get('id') != 1:
+        self.var_enabled.set(area.enabled)
+        if typ == TYPE_CONTINUOUS and area.id != 1:
             self.chk_enabled.config(state=tk.NORMAL)
         else:
             self.chk_enabled.config(state=tk.DISABLED)
 
-        r = area.get('rect')
+        r = area.rect
         if r:
             # area['rect'] is expected to be in screen coordinates
             try:
@@ -321,16 +323,15 @@ class AreaManagerWindow(tk.Toplevel):
         else:
             self.lbl_rect.config(text="Brak (Kliknij 'Wybierz Obszar')")
 
-        self.var_hotkey.set(area.get('hotkey', ''))
+        self.var_hotkey.set(area.hotkey or '')
 
-        # Tab OCR - AreaSettings is typed, set values directly
+        # Tab OCR - AreaConfig is flattened, read attrs directly
         self.var_thickening.set(settings.text_thickening)
 
         from app.matcher import MATCH_MODE_FULL
-        mode_val = settings.subtitle_mode or MATCH_MODE_FULL
+        mode_val = settings.subtitle_mode if settings.subtitle_mode is not None else MATCH_MODE_FULL
         self.var_mode.set(self.mode_mapping.get(mode_val, mode_val))
 
-        # Removed var_cmode logic
         self.var_brightness.set(settings.brightness_threshold)
         self.var_contrast.set(settings.contrast)
 
@@ -339,7 +340,8 @@ class AreaManagerWindow(tk.Toplevel):
         self.var_tolerance.set(settings.color_tolerance)
 
         self.lb_colors.delete(0, tk.END)
-        for c in (settings.subtitle_colors or []):
+        colors_list = settings.subtitle_colors or settings.colors or []
+        for c in colors_list:
             self.lb_colors.insert(tk.END, c)
 
         # Note: we intentionally do not block _on_field_change here —
@@ -356,43 +358,39 @@ class AreaManagerWindow(tk.Toplevel):
         if self.current_selection_idx < 0:
             return
         areas = self.config_mgr.get_areas() or []
-        area = areas[self.current_selection_idx]
-        if 'settings' not in area:
-            area['settings'] = self.config_mgr.make_area_settings({})
-        s = area['settings']
-
-        # Map back to area/settings struct
+        area = self.config_mgr.get_area(self.current_selection_idx)
+        # Map UI fields back to flattened area attributes
         disp_type = self.var_type.get()
         real_type = self.rev_type_mapping.get(disp_type, disp_type)
-        area['type'] = real_type
+        area.type = real_type
 
-        area['enabled'] = self.var_enabled.get()
-        area['hotkey'] = self.var_hotkey.get()
+        area.enabled = self.var_enabled.get()
+        area.hotkey = self.var_hotkey.get()
 
-        s['text_thickening'] = self.var_thickening.get()
+        area.text_thickening = self.var_thickening.get()
 
         disp_mode = self.var_mode.get()
-        s['subtitle_mode'] = self.rev_mode_mapping.get(disp_mode, disp_mode)
+        area.subtitle_mode = self.rev_mode_mapping.get(disp_mode, disp_mode)
 
         # s['text_color_mode'] removed
-        s['brightness_threshold'] = self.var_brightness.get()
-        s['contrast'] = self.var_contrast.get()
-        s['use_colors'] = self.var_use_colors.get()
-        s['color_tolerance'] = self.var_tolerance.get()
-        # Zapisz tryb dopasowania do settings
+        area.brightness_threshold = self.var_brightness.get()
+        area.contrast = self.var_contrast.get()
+        area.use_colors = self.var_use_colors.get()
+        area.color_tolerance = self.var_tolerance.get()
+        # Zapisz tryb dopasowania do settings (ensure normalized)
         if self.var_mode.get() in self.rev_mode_mapping:
-            s['subtitle_mode'] = self.rev_mode_mapping[self.var_mode.get()]
+            area.subtitle_mode = self.rev_mode_mapping[self.var_mode.get()]
 
         # Refresh list name if type changed
         self.lb_areas.delete(self.current_selection_idx)
-        typ_raw = area.get('type')
+        typ_raw = area.type
         t = TYPE_SHORT_MAP.get(typ_raw, typ_raw)
-        display = f"#{area.get('id')}"
-        if area.get('name'):
-            display += f" {area.get('name')}"
+        display = f"#{area.id}"
+        if area.name:
+            display += f" {area.name}"
         display += f" [{t}]"
-        if typ_raw == TYPE_CONTINUOUS and area.get('id') != 1:
-            state = STATE_ON if area.get('enabled') else STATE_OFF
+        if typ_raw == TYPE_CONTINUOUS and area.id != 1:
+            state = STATE_ON if area.enabled else STATE_OFF
             display += f" [{state}]"
         self.lb_areas.insert(self.current_selection_idx, display)
         self.lb_areas.selection_set(self.current_selection_idx)
@@ -514,18 +512,12 @@ class AreaManagerWindow(tk.Toplevel):
                 self.area_manager.deiconify()
 
         areas = self.config_mgr.get_areas() or []
-        existing_ids = {a.get('id', 0) for a in areas}
+        existing_ids = {a.id for a in areas}
         next_id = 1
         while next_id in existing_ids:
             next_id += 1
 
-        areas.append({
-            "id": next_id,
-            "type": TYPE_MANUAL,
-            "rect": None,
-            "hotkey": "",
-            "settings": self.config_mgr.make_area_settings({})
-        })
+        areas.append(AreaConfig(id=next_id, type=TYPE_MANUAL, rect=None, hotkey=""))
         self.config_mgr.set_areas(areas)
         self.current_selection_idx = len(areas) - 1
         self._refresh_list()
@@ -534,8 +526,8 @@ class AreaManagerWindow(tk.Toplevel):
         if self.current_selection_idx < 0:
             return
         areas = self.config_mgr.get_areas() or []
-        area = areas[self.current_selection_idx]
-        if area.get('id') == 1:
+        area = self.config_mgr.get_area(self.current_selection_idx)
+        if area.id == 1:
             messagebox.showwarning(
                 "Błąd", "Nie można usunąć głównego obszaru.")
             return
@@ -555,12 +547,12 @@ class AreaManagerWindow(tk.Toplevel):
         if self.current_selection_idx < 0 or self.current_selection_idx >= len(areas):
             return
 
-        area = areas[self.current_selection_idx]
+        area = self.config_mgr.get_area(self.current_selection_idx)
         from tkinter import simpledialog
         name = simpledialog.askstring(
-            "Nazwa obszaru", f"Podaj nazwę dla obszaru #{area.get('id')}:", initialvalue=area.get('name', ''), parent=self)
+            "Nazwa obszaru", f"Podaj nazwę dla obszaru #{area.id}:", initialvalue=area.name, parent=self)
         if name is not None:
-            area['name'] = name.strip()
+            area.name = name.strip()
             self.config_mgr.set_areas(areas)
             self._refresh_list()
 
@@ -573,28 +565,16 @@ class AreaManagerWindow(tk.Toplevel):
 
     def _add_default_area(self):
         areas = self.config_mgr.get_areas() or []
-        areas.append({
-            "id": 1,
-            "type": TYPE_CONTINUOUS,
-            "rect": None,
-            "hotkey": "",
-            "settings": self.config_mgr.make_area_settings({}) if self.config_mgr else AreaSettings()
-        })
+        areas.append(AreaConfig(id=1, type=TYPE_CONTINUOUS, rect=None, hotkey=""))
         self.config_mgr.set_areas(areas)
         self._refresh_list()
 
     def _add_area(self):
         # Create and select a new manual area
         areas = self.config_mgr.get_areas() or []
-        existing_ids = [a.get('id', 0) for a in areas]
+        existing_ids = [a.id for a in areas]
         new_id = (max(existing_ids) if existing_ids else 0) + 1
-        new_area = {
-            "id": new_id,
-            "type": TYPE_MANUAL,
-            "rect": None,
-            "hotkey": "",
-            "settings": self.config_mgr.make_area_settings({}) if self.config_mgr else AreaSettings()
-        }
+        new_area = AreaConfig(id=new_id, type=TYPE_MANUAL, rect=None, hotkey="")
         areas.append(new_area)
         self.config_mgr.set_areas(areas)
         self.current_selection_idx = len(areas) - 1
@@ -616,7 +596,7 @@ class AreaManagerWindow(tk.Toplevel):
             regions_screen = []
             areas = self.config_mgr.get_areas() or []
             for idx, area in enumerate(areas):
-                r = area.get('rect')
+                r = area.rect
                 if not r:
                     continue
                 # assume r is already screen coordinates
@@ -629,12 +609,14 @@ class AreaManagerWindow(tk.Toplevel):
             # AreaSelector is blocking in init, so no need to wait here.
             if sel.geometry:
                 # Store geometry as screen coordinates and persist immediately
-                areas[self.current_selection_idx]['rect'] = {'left': int(sel.geometry['left']), 'top': int(
-                    sel.geometry['top']), 'width': int(sel.geometry['width']), 'height': int(sel.geometry['height'])}
+                area = self.config_mgr.get_area(self.current_selection_idx)
+                if area:
+                    area.rect = {'left': int(sel.geometry['left']), 'top': int(
+                        sel.geometry['top']), 'width': int(sel.geometry['width']), 'height': int(sel.geometry['height'])}
                 self.config_mgr.set_areas(areas)
                 self._load_details(self.current_selection_idx)
                 # Auto update bounds label (screen coords)
-                r = areas[self.current_selection_idx]['rect']
+                r = areas[self.current_selection_idx].rect or {}
                 self.lbl_rect.config(
                     text=f"X:{r.get('left')} Y:{r.get('top')} {r.get('width')}x{r.get('height')}")
         except Exception as e:
@@ -652,37 +634,17 @@ class AreaManagerWindow(tk.Toplevel):
         if self.current_selection_idx < 0:
             return
         areas = self.config_mgr.get_areas() or []
-        area = areas[self.current_selection_idx]
-        # Ensure we have an AreaSettings instance
-        if 'settings' not in area:
-            area['settings'] = self.config_mgr.make_area_settings({}) if self.config_mgr else AreaSettings()
-
-        s = area['settings']
-        try:
-            colors = s.subtitle_colors
-            if colors is None:
-                colors = []
-                s.subtitle_colors = colors
-        except Exception:
-            # Fallback for dict-style
-            if isinstance(s, dict):
-                colors = s.setdefault('subtitle_colors', [])
-            else:
-                colors = []
-                try:
-                    s.subtitle_colors = colors
-                except Exception:
-                    pass
+        area = self.config_mgr.get_area(self.current_selection_idx)
+        # Ensure area has subtitle_colors list
+        if area.subtitle_colors is None:
+            area.subtitle_colors = list(area.colors or [])
+        colors = area.subtitle_colors
 
         if color not in colors:
             colors.append(color)
             # Keep insertion order unique
             uniq = list(dict.fromkeys(colors))
-            try:
-                s.subtitle_colors = uniq
-            except Exception:
-                if isinstance(s, dict):
-                    s['subtitle_colors'] = uniq
+            area.subtitle_colors = uniq
         # Persist change and refresh details
         self.config_mgr.set_areas(areas)
         self._load_details(self.current_selection_idx)
@@ -696,20 +658,12 @@ class AreaManagerWindow(tk.Toplevel):
 
         idx = sel_idx[0]
         areas = self.config_mgr.get_areas() or []
-        area = areas[self.current_selection_idx]
-        s = area.get('settings')
-        try:
-            colors = s.subtitle_colors
-        except Exception:
-            colors = s.get('subtitle_colors', []) if isinstance(s, dict) else []
+        area = self.config_mgr.get_area(self.current_selection_idx)
+        colors = area.subtitle_colors or []
 
         if 0 <= idx < len(colors):
             del colors[idx]
-            try:
-                s.subtitle_colors = colors
-            except Exception:
-                if isinstance(s, dict):
-                    s['subtitle_colors'] = colors
+            area.subtitle_colors = colors
             self.config_mgr.set_areas(areas)
             self._load_details(self.current_selection_idx)
 
@@ -762,7 +716,9 @@ class AreaManagerWindow(tk.Toplevel):
     def _set_hotkey(self, key_str):
         if self.current_selection_idx >= 0:
             areas = self.config_mgr.get_areas() or []
-            areas[self.current_selection_idx]['hotkey'] = key_str
+            area = self.config_mgr.get_area(self.current_selection_idx)
+            if area:
+                area.hotkey = key_str
             self.config_mgr.set_areas(areas)
             self.var_hotkey.set(key_str)
         self.btn_record.config(text="Nagraj", state=tk.NORMAL)
@@ -770,7 +726,9 @@ class AreaManagerWindow(tk.Toplevel):
     def _clear_hotkey(self):
         if self.current_selection_idx >= 0:
             areas = self.config_mgr.get_areas() or []
-            areas[self.current_selection_idx]['hotkey'] = ""
+            area = self.config_mgr.get_area(self.current_selection_idx)
+            if area:
+                area.hotkey = ""
             self.config_mgr.set_areas(areas)
             self.var_hotkey.set("")
 
@@ -778,24 +736,24 @@ class AreaManagerWindow(tk.Toplevel):
         if self.current_selection_idx < 0:
             return
         areas = self.config_mgr.get_areas() or []
-        area_copy = areas[self.current_selection_idx].copy()
+        orig = self.config_mgr.get_area(self.current_selection_idx)
+        area_copy = copy.deepcopy(orig)
 
-        # New Unique Name
-        max_id = max((a.get('id', 0) for a in areas), default=0)
-        area_copy['id'] = max_id + 1
+        # New Unique ID
+        max_id = max((a.id for a in areas), default=0)
+        area_copy.id = max_id + 1
 
-        if 'settings' in area_copy:
-            # Convert to a standalone AreaSettings instance copy
-            if isinstance(area_copy['settings'], dict):
-                area_copy['settings'] = self.config_mgr.make_area_settings(area_copy['settings']) if self.config_mgr else AreaSettings.from_dict(area_copy['settings'])
-            elif isinstance(area_copy['settings'], AreaSettings):
-                area_copy['settings'] = AreaSettings.from_dict(area_copy['settings'].to_dict())
+        # Normalize subtitle colors on the copy (flattened area attributes)
+        try:
+            area_copy.subtitle_colors = list(area_copy.subtitle_colors or area_copy.colors or [])
+        except Exception:
+            area_copy.subtitle_colors = list(area_copy.colors or [])
+        # Copy rect object if present
+        if area_copy.rect:
             try:
-                area_copy['settings'].subtitle_colors = list(area_copy['settings'].subtitle_colors or [])
+                area_copy.rect = dict(area_copy.rect)
             except Exception:
                 pass
-        if 'rect' in area_copy:
-            area_copy['rect'] = area_copy['rect'].copy()
 
         areas.append(area_copy)
         self.config_mgr.set_areas(areas)
@@ -814,8 +772,8 @@ class AreaManagerWindow(tk.Toplevel):
             return
 
         areas = self.config_mgr.get_areas() or []
-        area = areas[self.current_selection_idx]
-        rect = area.get('rect')
+        area = self.config_mgr.get_area(self.current_selection_idx)
+        rect = area.rect
         if not rect:
             messagebox.showerror(
                 "Błąd", "Obszar nie ma zdefiniowanych współrzędnych.")
@@ -861,8 +819,8 @@ class AreaManagerWindow(tk.Toplevel):
             normal_crop = full_img.crop((ox, oy, ox+ow, oy+oh))
             expanded_crop = full_img.crop((ex, ey, ex+ew, ey+eh))
 
-            # Evaluate original
-            settings = area.get('settings', {})
+            # Evaluate original: use flattened area attrs; produce a dict for optimizer
+            settings = area
             pre_db = precompute_subtitles(self.subtitle_lines)
             optimizer = SettingsOptimizer()
             from app.matcher import MATCH_MODE_FULL
@@ -870,8 +828,10 @@ class AreaManagerWindow(tk.Toplevel):
                 mode = settings.subtitle_mode
             except Exception:
                 mode = MATCH_MODE_FULL
-
-            settings_dict = settings.to_dict() if isinstance(settings, AreaSettings) else (settings if isinstance(settings, dict) else {})
+            # Build a plain settings dict for the optimizer by reading authoritative
+            # properties from the AreaConfig instance returned by ConfigManager.
+            # Ask ConfigManager for authoritative per-area settings
+            settings_dict = self.config_mgr.get_area_settings(settings) if self.config_mgr else {}
 
             score_original, _ = optimizer._evaluate_settings(
                 normal_crop, settings_dict, pre_db, mode)
@@ -926,15 +886,20 @@ class AreaManagerWindow(tk.Toplevel):
             abs_y = offset_y + by
 
             # Ask user
+            r_old = area.rect
+            old_w = r_old.get('width') if r_old else None
+            old_h = r_old.get('height') if r_old else None
             if messagebox.askyesno("Korekta Obszaru",
                                    f"Wykryto tekst w szerszym obszarze.\n"
-                                   f"Nowy wymiar: {bw}x{bh} (stary: {area['rect']['width']}x{area['rect']['height']})\n"
+                                   f"Nowy wymiar: {bw}x{bh} (stary: {old_w}x{old_h})\n"
                                    "Czy zaktualizować granice obszaru?"):
                 # Store proposed rect as screen coordinates
-                area['rect']['left'] = int(abs_x)
-                area['rect']['top'] = int(abs_y)
-                area['rect']['width'] = int(bw)
-                area['rect']['height'] = int(bh)
+                r = area.rect or {}
+                r['left'] = int(abs_x)
+                r['top'] = int(abs_y)
+                r['width'] = int(bw)
+                r['height'] = int(bh)
+                area.rect = r
                 # Persist change
                 areas = self.config_mgr.get_areas() or []
                 areas[self.current_selection_idx] = area
