@@ -9,25 +9,44 @@ from app.config_manager import ConfigManager
 
 class OptimizerConfigManager(ConfigManager):
     """
-    Specjalna wersja ConfigManager, która zwraca wymuszony zestaw ustawień (preset),
-    zamiast ładować go z pliku.
+    Specjalna wersja ConfigManager używana podczas optymalizacji.
+    Używa obiektu PresetConfig w pamięci zamiast ładować z pliku.
     """
-    def __init__(self, override_settings: Dict[str, Any]):
-        self.settings = {}
-        self.preset_path = "MOCK_PRESET"
-        self.override_settings = override_settings
+    def __init__(self, settings_dict: Dict[str, Any]):
+        # Inicjalizujemy bez ładowania konfigu aplikacji
+        self.settings = {} 
+        self.preset_path = None
+        self.display_resolution = None
+        
+        from app.config_manager import PresetConfig
+        # Tworzymy mockowany preset z przekazanych ustawień
+        self.preset_cache = PresetConfig._from_dict(settings_dict)
 
-    def load_preset(self, path=None) -> Dict[str, Any]:
-        return self.override_settings
+    def _get_preset_obj(self):
+        return self.preset_cache
 
-    def _current_preset(self) -> Dict[str, Any]:
-        return self.override_settings
+    def load_preset(self, path=None):
+        return self.preset_cache
+
+    def save_preset(self, path, obj):
+        pass # Nie zapisujemy podczas optymalizacji
 
 class SettingsOptimizer:
     def __init__(self, original_config_manager: ConfigManager = None):
-        # We can use the original to get some defaults if needed, 
-        # but mostly we will be generating variations.
-        self.base_preset = original_config_manager.load_preset() if original_config_manager else {}
+        # Use the original to get some defaults. Store as dict for variations.
+        self.base_settings = {}
+        if original_config_manager:
+            preset = original_config_manager.load_preset()
+            # We only need area-level candidate settings
+            self.base_settings = {
+                "text_thickening": preset.text_thickening,
+                "brightness_threshold": preset.brightness_threshold,
+                "contrast": preset.contrast,
+                "color_tolerance": preset.color_tolerance,
+                "colors": list(preset.subtitle_colors or []),
+                "show_debug": preset.show_debug,
+                "setting_mode": ""
+            }
 
     def _extract_dominant_colors(self, image: Image.Image, num_colors: int = 3) -> List[str]:
         """
@@ -137,12 +156,13 @@ class SettingsOptimizer:
         # Branch A: Color-based
         for color in candidate_colors_list:
             for tol, thick, contrast in itertools.product(params["color_tolerances"], params["thickenings"], params["contrasts"]):
-                s = self.base_preset.copy()
+                s = self.base_settings.copy()
                 s.update({
                     "setting_mode": "color",
                     "auto_remove_names": True,
                     "text_alignment": "None",
-                    "subtitle_colors": [color],
+                    "subtitle_colors": [color], # Still useful for internal OptimizerConfigManager
+                    "colors": [color],
                     "color_tolerance": tol,
                     "text_thickening": thick,
                     "ocr_scale_factor": 1.0,
@@ -155,12 +175,13 @@ class SettingsOptimizer:
         # Branch B: Brightness Mode (Light/Dark/Mixed)
         for mode in ["Light", "Dark"]:
             for contrast, brightness in itertools.product(params["contrasts"], params["brightness_threshold"]):
-                s = self.base_preset.copy()
+                s = self.base_settings.copy()
                 s.update({
                     "setting_mode": "brightness",
                     "auto_remove_names": True,
                     "text_alignment": "None",
                     "subtitle_colors": [],
+                    "colors": [],
                     "text_color_mode": mode,
                     "text_thickening": 0,
                     "ocr_scale_factor": 1.0,

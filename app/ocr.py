@@ -104,8 +104,8 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager, area_con
             thick = int(area_config.text_thickening)
             thresh = int(area_config.brightness_threshold)
             contr = float(area_config.contrast or 0.0)
-            # Priorytet: override_colors > area subtitle_colors > area colors
-            cols_source = override_colors if override_colors is not None else (area_config.subtitle_colors or area_config.colors)
+            # Priorytet: override_colors > area colors
+            cols_source = override_colors if override_colors is not None else area_config.colors
             color_tol = int(area_config.color_tolerance)
             show_debug = bool(area_config.show_debug)
         else:

@@ -37,7 +37,7 @@ except ImportError:
 STANDARD_WIDTH = 3840
 STANDARD_HEIGHT = 2160
 
-from app.config_manager import ConfigManager
+from app.config_manager import ConfigManager, AreaConfig
 from app.reader import ReaderThread
 from app.player import PlayerThread
 from app.log import LogWindow
@@ -152,18 +152,12 @@ class LektorApp:
         except:
             return
 
-        path = self.var_preset_full_path.get()
-        overrides = {}
-        if path and os.path.exists(path):
-            data = self.config_mgr.load_preset(path)
-            overrides = data.get('scale_overrides', {})
-
-        if not force_auto and res_str in overrides:
-            new_scale = overrides[res_str]
-        else:
-            new_scale = self._calc_auto_scale(w, h)
-
+        # We no longer use scale_overrides. 
+        # The ConfigManager is authoritative for the canonical ocr_scale_factor.
+        # However, for a new preset or resolution, we suggest a scale that maps to 1080p height.
+        new_scale = self._calc_auto_scale(w, h)
         self.var_ocr_scale.set(new_scale)
+        self.config_mgr.display_resolution = (w, h)
 
     def _on_resolution_selected(self, event=None):
         """Handler for resolution combobox selection: persist and update ConfigManager."""
@@ -172,22 +166,15 @@ class LektorApp:
         self.config_mgr.settings['last_resolution_key'] = res_str
         self.config_mgr.save_app_config()
         # Update scale and ConfigManager display resolution
-        self._update_scale_for_resolution(res_str)
         if "x" in res_str:
             w, h = map(int, res_str.split('x'))
             self.config_mgr.display_resolution = (w, h)
+            self._update_scale_for_resolution(res_str)
 
     def on_manual_scale_change(self, event=None):
         val = round(self.var_ocr_scale.get(), 2)
-        path = self.var_preset_full_path.get()
-        res_str = self.var_resolution.get()
-        if path and os.path.exists(path) and "x" in res_str:
-            data = self.config_mgr.load_preset(path)
-            overrides = data.get('scale_overrides', {})
-            overrides[res_str] = val
-            data['scale_overrides'] = overrides
-            data['ocr_scale_factor'] = val
-            self.config_mgr.save_preset(path, data)
+        # Save to current preset
+        self.config_mgr.ocr_scale_factor = val
 
     # -----------------------
 
@@ -207,11 +194,11 @@ class LektorApp:
         path = self.var_preset_full_path.get()
         if path and os.path.exists(path):
              data = self.config_mgr.load_preset(path)
-             if data and 'areas' in data:
-                 for area in data['areas']:
-                     hk = area.get('hotkey')
-                     aid = area.get('id')
-                     atype = area.get('type', 'manual')
+             if data and data.areas:
+                 for area in data.areas:
+                     hk = area.hotkey
+                     aid = area.id
+                     atype = area.type
                      if hk:
                          # Capture aid in lambda default arg
                          hotkeys[hk] = lambda aid=aid, t=atype: self._on_hotkey_area_action(aid, t)
@@ -358,8 +345,15 @@ class LektorApp:
         self.root.after(200, self.refresh_color_canvas)
 
     def auto_detect_resolution(self):
-        w = self.root.winfo_screenwidth()
-        h = self.root.winfo_screenheight()
+        # We prefer capture_fullscreen dimensions because it matches the 
+        # physical pixel grid used by the reader and coordinate mapping.
+        img = capture_fullscreen()
+        if img:
+            w, h = img.size
+        else:
+            w = self.root.winfo_screenwidth()
+            h = self.root.winfo_screenheight()
+            
         res_str = f"{w}x{h}"
         self.var_resolution.set(res_str)
         # Persist and inform ConfigManager about current UI resolution
@@ -400,77 +394,79 @@ class LektorApp:
     def on_preset_loaded(self):
         path = self.var_preset_full_path.get()
         if not path or not os.path.exists(path): return
-        data = self.config_mgr.load_preset(path)
+        
+        # Mark as current in manager
+        self.config_mgr.preset_path = path
+        preset = self.config_mgr.load_preset(path)
 
         base_dir = os.path.dirname(path)
         modified = False
 
-        if not data.get("text_file_path"):
+        if not preset.text_file_path:
             try:
                 for f in sorted(os.listdir(base_dir)):
                     if f.lower().endswith(".txt"):
-                        data["text_file_path"] = os.path.join(base_dir, f)
+                        preset.text_file_path = os.path.join(base_dir, f)
                         modified = True
                         break
             except Exception:
                 pass
 
-        if not data.get("audio_dir"):
+        if not preset.audio_dir:
             try:
                 for f in sorted(os.listdir(base_dir)):
                     full_p = os.path.join(base_dir, f)
                     if os.path.isdir(full_p):
-                        data["audio_dir"] = full_p
+                        preset.audio_dir = full_p
                         modified = True
                         break
             except Exception:
                 pass
 
         if modified:
-            self.config_mgr.save_preset(path, data)
+            self.config_mgr.save_preset(path, preset)
 
-        self.var_speed.set(data.get("audio_speed", 1.0))
+        # Sync UI state from canonical Preset object
+        self.var_speed.set(preset.audio_speed)
         self.lbl_spd.config(text=f"{self.var_speed.get():.2f}x")
 
-        self.var_volume.set(data.get("audio_volume", 1.0))
+        self.var_volume.set(preset.audio_volume)
         self.lbl_vol.config(text=f"{self.var_volume.get():.2f}")
 
         # Automatyczna detekcja formatu audio
-        detected_ext = self._detect_audio_format(data.get("audio_dir", ""))
-        current_ext = data.get("audio_ext", ".ogg")
+        detected_ext = self._detect_audio_format(preset.audio_dir or "")
+        current_ext = preset.audio_ext
 
         if detected_ext and detected_ext != current_ext:
-            data['audio_ext'] = detected_ext
-            self.config_mgr.save_preset(path, data)
+            preset.audio_ext = detected_ext
+            self.config_mgr.save_preset(path, preset)
             current_ext = detected_ext
 
         self.var_audio_ext.set(current_ext)
+        self.var_auto_names.set(preset.auto_remove_names)
+        self.var_ocr_scale.set(preset.ocr_scale_factor)
+        self.var_capture_interval.set(preset.capture_interval)
+        self.var_min_line_len.set(preset.min_line_length)
+        self.var_text_color.set(preset.text_color_mode)
+        self.var_text_alignment.set(preset.text_alignment)
+        self.var_save_logs.set(preset.save_logs)
+        self.var_show_debug.set(preset.show_debug)
+        self.var_brightness_threshold.set(preset.brightness_threshold)
+        self.var_similarity.set(preset.similarity)
+        self.var_contrast.set(preset.contrast)
+        self.var_tolerance.set(preset.color_tolerance)
+        self.var_text_thickening.set(preset.text_thickening)
 
-        self.var_auto_names.set(data.get("auto_remove_names", True))
+        self.var_match_score_short.set(preset.match_score_short)
+        self.var_match_score_long.set(preset.match_score_long)
+        self.var_match_len_diff.set(preset.match_len_diff_ratio)
+        self.var_partial_min_len.set(preset.partial_mode_min_len)
+        self.var_audio_speed.set(preset.audio_speed_inc)
 
-        self.var_ocr_scale.set(data.get("ocr_scale_factor", 1.0))
-        self.var_capture_interval.set(data.get("capture_interval", 0.5))
-        self.var_min_line_len.set(data.get("min_line_length", 0))
-
-        self.var_text_color.set(data.get("text_color_mode", "Light"))
-        self.var_text_alignment.set(data.get("text_alignment", "None"))
-        self.var_save_logs.set(data.get("save_logs", False))
-        self.var_show_debug.set(data.get("show_debug", False))
-        self.var_brightness_threshold.set(data.get("brightness_threshold", 200))
-        self.var_similarity.set(data.get("similarity", 5.0))
-        self.var_contrast.set(data.get("contrast", 0))
-        self.var_tolerance.set(data.get("color_tolerance", 10))
-        self.var_text_thickening.set(data.get("text_thickening", 10))
-
-        self.var_match_score_short.set(data.get("match_score_short", 90))
-        self.var_match_score_long.set(data.get("match_score_long", 75))
-        self.var_match_len_diff.set(data.get("match_len_diff_ratio", 0.25))
-        self.var_partial_min_len.set(data.get("partial_mode_min_len", 25))
-        self.var_audio_speed.set(data.get("audio_speed_inc", 1.20))
-
-        if "regex_mode_name" in data:
-            self.var_regex_mode.set(data["regex_mode_name"])
-            if data["regex_mode_name"] == "Własny (Regex)": self.var_custom_regex.set(data.get("regex_pattern", ""))
+        if preset.regex_mode_name:
+            self.var_regex_mode.set(preset.regex_mode_name)
+            if preset.regex_mode_name == "Własny (Regex)":
+                self.var_custom_regex.set(preset.regex_pattern or "")
             self.on_regex_changed()
 
         self.refresh_color_canvas()
@@ -482,21 +478,39 @@ class LektorApp:
             try:
                 self.ent_regex.config(state="normal" if mode == "Własny (Regex)" else "disabled")
             except Exception:
-                # Widget mógł zostać zniszczony po zamknięciu okna ustawień
                 self.ent_regex = None
 
         self.config_mgr.settings['last_regex_mode'] = mode
         self.config_mgr.save_app_config()
         if mode != "Własny (Regex)":
-            self._save_preset_val("regex_pattern", self.regex_map.get(mode, ""))
-            self._save_preset_val("regex_mode_name", mode)
+            self.config_mgr.regex_pattern = self.regex_map.get(mode, "")
+            self.config_mgr.regex_mode_name = mode
 
     def _save_preset_val(self, key, val):
-        path = self.var_preset_full_path.get()
-        if path and os.path.exists(path):
-            data = self.config_mgr.load_preset(path)
-            data[key] = val
-            self.config_mgr.save_preset(path, data)
+        """Authoritative save via ConfigManager properties."""
+        if key == 'audio_dir': self.config_mgr.audio_dir = val
+        elif key == 'text_file_path': self.config_mgr.text_file_path = val
+        elif key == 'regex_pattern': self.config_mgr.regex_pattern = val
+        elif key == 'regex_mode_name': self.config_mgr.regex_mode_name = val
+        elif key == 'audio_ext': self.config_mgr.audio_ext = val
+        elif key == 'ocr_scale_factor': self.config_mgr.ocr_scale_factor = val
+        elif key == 'capture_interval': self.config_mgr.capture_interval = val
+        elif key == 'auto_remove_names': self.config_mgr.auto_remove_names = val
+        elif key == 'save_logs': self.config_mgr.save_logs = val
+        elif key == 'min_line_length': self.config_mgr.min_line_length = val
+        elif key == 'text_color_mode': self.config_mgr.text_color_mode = val
+        elif key == 'brightness_threshold': self.config_mgr.brightness_threshold = val
+        elif key == 'contrast': self.config_mgr.contrast = val
+        elif key == 'color_tolerance': self.config_mgr.color_tolerance = val
+        elif key == 'text_thickening': self.config_mgr.text_thickening = val
+        elif key == 'match_score_short': self.config_mgr.match_score_short = val
+        elif key == 'match_score_long': self.config_mgr.match_score_long = val
+        elif key == 'match_len_diff_ratio': self.config_mgr.match_len_diff_ratio = val
+        elif key == 'partial_mode_min_len': self.config_mgr.partial_mode_min_len = val
+        elif key == 'audio_speed_inc': self.config_mgr.audio_speed_inc = val
+        elif key == 'similarity': self.config_mgr.similarity = val
+        elif key == 'audio_speed': self.config_mgr.audio_speed = val
+        elif key == 'audio_volume': self.config_mgr.audio_volume = val
 
     def browse_lector_folder(self):
         d = filedialog.askdirectory(title="Wybierz katalog z lektorem")
@@ -532,42 +546,49 @@ class LektorApp:
             self.root.deiconify()
             return
         sw, sh = img.size
-        data = self.config_mgr.load_preset(path)
-        mons = data.get('monitor', [])
-        if isinstance(mons, dict): mons = [mons]
-        while len(mons) < 3: mons.append(None)
-
-        # Ask ConfigManager for preset scaled to current screen size
-        preset_display = self.config_mgr.get_preset_for_resolution(path, (sw, sh))
-        disp_mons = preset_display.get('monitor', []) if preset_display else []
-        if isinstance(disp_mons, dict): disp_mons = [disp_mons]
-        while len(disp_mons) < 3: disp_mons.append(None)
-        sel = AreaSelector(self.root, img, existing_regions=disp_mons)
-        self.root.deiconify()
-
-        if sel.geometry:
-            disp_mons[idx] = sel.geometry
-            # Store monitor rects in screen coords; persist by updating preset
-            data['monitor'] = disp_mons
-            base = self.config_mgr.load_preset(path) or {}
-            base['monitor'] = disp_mons
-            old_disp = self.config_mgr.display_resolution
-            try:
-                self.config_mgr.display_resolution = (sw, sh)
-                self.config_mgr.save_preset(path, base)
-            finally:
-                self.config_mgr.display_resolution = old_disp
+        
+        old_disp = self.config_mgr.display_resolution
+        try:
+            self.config_mgr.display_resolution = (sw, sh)
+            areas = self.config_mgr.areas # Scaled to screen resolution
+            
+            # Map index to IDs
+            id_to_find = f"area_{idx}"
+            
+            # Extract rects for AreaSelector [slot 0, slot 1, slot 2]
+            disp_mons = [None, None, None]
+            for area in areas:
+                 if area.id == "area_0": disp_mons[0] = area.rect
+                 elif area.id == "area_1": disp_mons[1] = area.rect
+                 elif area.id == "area_2": disp_mons[2] = area.rect
+            
+            sel = AreaSelector(self.root, img, existing_regions=disp_mons)
+            self.root.deiconify()
+            
+            if sel.geometry:
+                rect = sel.geometry
+                found = False
+                for area in areas:
+                    if area.id == id_to_find:
+                        area.rect = rect
+                        found = True
+                        break
+                if not found:
+                    areas.append(AreaConfig(rect=rect, id=id_to_find, type="subtitle"))
+                
+                # Persist via authoritative ConfigManager property
+                self.config_mgr.areas = areas
+        finally:
+            self.config_mgr.display_resolution = old_disp
 
     def clear_area(self, idx):
         path = self.var_preset_full_path.get()
         if not path: return
-        data = self.config_mgr.load_preset(path)
-        mons = data.get('monitor', [])
-        if isinstance(mons, dict): mons = [mons]
-        if idx < len(mons):
-            mons[idx] = None
-            data['monitor'] = [m for m in mons if m]
-            self.config_mgr.save_preset(path, data)
+        
+        id_to_clear = f"area_{idx}"
+        areas = self.config_mgr.areas
+        new_areas = [a for a in areas if a.id != id_to_clear]
+        self.config_mgr.areas = new_areas
 
     def open_settings(self):
         SettingsDialog(self.root, self.config_mgr.settings, self)
@@ -749,27 +770,23 @@ class LektorApp:
         else:
             messagebox.showerror("Błąd", "Nie udało się zaimportować ustawień. Sprawdź plik.")
 
+    def _is_main_area(self, area_id):
+        return area_id == 1 or str(area_id).lower() == "area_0" or str(area_id).lower() == "area_1"
+
     def refresh_color_canvas(self):
         """Rysuje listę kolorów na nowym Canvasie."""
         if not hasattr(self, 'color_canvas'): return
 
         self.color_canvas.delete("all")
 
-        path = self.var_preset_full_path.get()
-        if not path or not os.path.exists(path):
-            return
-
-        data = self.config_mgr.load_preset(path)
-        areas = data.get("areas", [])
-        # Fallback to old colors if areas not migrated yet? Migration happens on load.
-        # But let's be safe and check areas[0]
+        # Use authoritative ConfigManager to get areas
+        areas = self.config_mgr.get_areas()
         colors = []
         if areas:
-            # Find Area 1
-            a1 = next((a for a in areas if a.get('id') == 1), None)
-            if a1: colors = a1.get('colors', [])
+            a1 = next((a for a in areas if self._is_main_area(a.id)), None)
+            if a1: colors = a1.colors
         else:
-            colors = data.get("subtitle_colors", [])
+            colors = self.config_mgr.subtitle_colors
 
         x_offset = 2
         y_pos = 2
@@ -786,14 +803,12 @@ class LektorApp:
                     fill=color, outline="#555555", tags=(tag_name, "clickable")
                 )
             except Exception:
-                # pomijamy nieprawidłowe wartości kolorów
                 pass
             x_offset += size + 5
 
     def add_subtitle_color(self):
         """Obsługa wyboru koloru pipetą (tylko dla Obszaru 1)."""
         self.root.withdraw()
-        # Daj czas na zniknięcie
         self.root.update()
         time.sleep(0.3)
         try:
@@ -808,77 +823,44 @@ class LektorApp:
             if not sel_color:
                 return
 
-            path = self.var_preset_full_path.get()
-            if not path or not os.path.exists(path):
-                return
-
-            data = self.config_mgr.load_preset(path)
-            if 'areas' not in data:
-                self.config_mgr._migrate_legacy_areas(data)
-
-            areas = data.get('areas', [])
-            a1 = next((a for a in areas if a.get('id') == 1), None)
+            areas = self.config_mgr.get_areas()
+            a1 = next((a for a in areas if a.id == 1), None)
 
             if not a1:
-                a1 = {"id": 1, "type": "continuous", "rect": None, "hotkey": "", "colors": [sel_color]}
+                from app.config_manager import AreaConfig
+                a1 = AreaConfig(id=1, type="continuous", colors=[sel_color])
                 areas.insert(0, a1)
             else:
-                colors = a1.get('colors', [])
-                if sel_color not in colors:
-                    colors.append(sel_color)
-                    a1['colors'] = colors
+                if sel_color not in a1.colors:
+                    a1.colors.append(sel_color)
 
-            data['areas'] = areas
-            self.config_mgr.save_preset(path, data)
+            self.config_mgr.set_areas(areas)
             self.refresh_color_canvas()
         except Exception as e:
             messagebox.showerror("Błąd", str(e))
         finally:
             self.root.deiconify()
 
-    def on_color_click(self, event):
-        item_id = self.color_canvas.find_closest(event.x, event.y)
-        tags = self.color_canvas.gettags(item_id)
-        for tag in tags:
-            if tag.startswith("color_"):
-                try:
-                    idx = int(tag.split("_")[1])
-                    self.delete_subtitle_color(idx)
-                    return
-                except ValueError:
-                    pass
-
     def add_white_subtitle_color(self):
-        path = self.var_preset_full_path.get()
-        if not path or not os.path.exists(path): return 
-        
-        data = self.config_mgr.load_preset(path)
-        if 'areas' not in data: self.config_mgr._migrate_legacy_areas(data)
-        
-        areas = data.get('areas', [])
-        a1 = next((a for a in areas if a.get('id') == 1), None)
+        areas = self.config_mgr.get_areas()
+        a1 = next((a for a in areas if a.id == 1), None)
         
         if a1:
-            if '#ffffff' not in a1['colors']:
-                a1['colors'].append('#ffffff')
-                self.config_mgr.save_preset(path, data)
+            if '#ffffff' not in a1.colors:
+                a1.colors.append('#ffffff')
+                self.config_mgr.set_areas(areas)
                 self.refresh_color_canvas()
 
     def delete_subtitle_color(self, idx):
-        path = self.var_preset_full_path.get()
-        if not path or not os.path.exists(path): return
-
-        data = self.config_mgr.load_preset(path)
-        areas = data.get("areas", [])
-        a1 = next((a for a in areas if a.get('id') == 1), None)
+        areas = self.config_mgr.get_areas()
+        a1 = next((a for a in areas if a.id == 1), None)
 
         if a1:
-            colors = a1.get("colors", [])
-            if idx < len(colors):
-                color_to_remove = colors[idx]
+            if idx < len(a1.colors):
+                color_to_remove = a1.colors[idx]
                 if messagebox.askyesno("Usuwanie koloru", f"Czy usunąć kolor {color_to_remove} z Obszaru 1?"):
-                    del colors[idx]
-                    self.config_mgr.save_preset(path, data)
+                    del a1.colors[idx]
+                    self.config_mgr.set_areas(areas)
                     self.refresh_color_canvas()
 
     # --- ZARZĄDZANIE OBSZARAMI ---
@@ -889,16 +871,15 @@ class LektorApp:
              messagebox.showerror("Błąd", "Brak aktywnego profilu.")
              return
              
-        data = self.config_mgr.load_preset(path)
-        if 'areas' not in data: self.config_mgr._migrate_legacy_areas(data)
+        preset = self.config_mgr.load_preset(path)
         
         # Load subtitles for testing inside manager
-        txt_path = data.get('text_file_path')
+        txt_path = preset.text_file_path
         subs = []
         if txt_path and os.path.exists(txt_path):
              subs = self.config_mgr.load_text_lines(txt_path)
         
-        # Open Manager: pass the LektorApp instance so AreaManager can access config and resolution
+        # Open Manager: pass the LektorApp instance
         AreaManagerWindow(self.root, self, subs)
 
     def _normalize_area_to_4k(self, rect, img_w, img_h):
@@ -942,36 +923,25 @@ class LektorApp:
     def _save_areas_callback(self, new_areas):
         path = self.var_preset_full_path.get()
         if path:
-            # Map `new_areas` (display coords) onto existing AreaConfig instances
+            # new_areas is expected to be a list of dicts from AreaSelector or similar
             sw, sh = self._get_screen_size()
-            areas_objs = self.config_mgr.get_areas() or []
-            for i, na in enumerate(new_areas):
-                try:
-                    if i < len(areas_objs):
-                        aobj = areas_objs[i]
-                        if isinstance(na, dict) and 'rect' in na:
-                            aobj.rect = na['rect']
-                        for fld in ('enabled', 'hotkey', 'name', 'colors'):
-                            if isinstance(na, dict) and fld in na:
-                                setattr(aobj, fld, na.get(fld))
-                        areas_objs[i] = aobj
-                    else:
-                        from app.config_manager import AreaConfig
-                        areas_objs.append(AreaConfig.from_dict(na if isinstance(na, dict) else {}))
-                except Exception:
-                    pass
-
-            base = self.config_mgr.load_preset(path) or {}
-            base['areas'] = areas_objs
+            areas_objs = []
+            from app.config_manager import AreaConfig
+            for na in new_areas:
+                if isinstance(na, AreaConfig):
+                    areas_objs.append(na)
+                else:
+                    areas_objs.append(AreaConfig._from_dict(na if isinstance(na, dict) else {}))
+            
             old_disp = self.config_mgr.display_resolution
             try:
                 self.config_mgr.display_resolution = (sw, sh)
-                self.config_mgr.save_preset(path, base)
+                self.config_mgr.set_areas(areas_objs)
             finally:
                 self.config_mgr.display_resolution = old_disp
             self._restart_hotkeys()
-            self.refresh_color_canvas() # Update in case Area 1 colors changed in manager
-            # Restart reader to apply changes (geometry, enabled state, etc.)
+            self.refresh_color_canvas()
+            # Restart reader
             if self.is_running:
                 self.stop_reading()
                 self.root.after(200, self.start_reading)
@@ -992,47 +962,40 @@ class LektorApp:
             path = self.var_preset_full_path.get()
             existing = []
             if path:
-                data = self.config_mgr.load_preset(path)
-                if 'areas' not in data: self.config_mgr._migrate_legacy_areas(data)
-                existing = data.get('areas', [])
+                # config_mgr.get_areas() handles scaling 4K -> Display
+                # AreaSelector expects screen coordinates
+                sw, sh = self._get_screen_size()
+                old_res = self.config_mgr.display_resolution
+                try:
+                    self.config_mgr.display_resolution = (sw, sh)
+                    areas_to_show = self.config_mgr.get_areas()
+                    # AreaSelector currently expects a list of dicts with 'rect' key
+                    existing = [a._to_dict() for a in areas_to_show]
+                finally:
+                    self.config_mgr.display_resolution = old_res
 
             sel = AreaSelector(self.root, img, existing_regions=existing)
-            # AreaSelector is modal and waits inside its __init__, so no external wait needed.
             
             if sel.geometry and path:
-                 data = self.config_mgr.load_preset(path)
-                 areas = data.get('areas', [])
-                 a1 = next((a for a in areas if a.get('id') == 1), None)
-                 
-                 if not a1:
-                     # Create if missing (rect is in screen coordinates)
-                     a1 = {"id": 1, "type": "continuous", "rect": sel.geometry, "hotkey": "", "colors": []}
-                     areas.insert(0, a1)
-                 else:
-                     a1['rect'] = sel.geometry
-                 
-                 # Map changes onto AreaConfig instances and persist
                  sw, sh = self._get_screen_size()
-                 areas_objs = self.config_mgr.get_areas() or []
-                 # find or create Area 1
+                 areas_objs = []
+                 old_res = self.config_mgr.display_resolution
                  try:
-                     a1_obj = next((a for a in areas_objs if a.id == 1), None)
-                 except Exception:
-                     a1_obj = None
+                     self.config_mgr.display_resolution = (sw, sh)
+                     areas_objs = self.config_mgr.get_areas()
+                 finally:
+                     self.config_mgr.display_resolution = old_res
+
+                 a1_obj = next((a for a in areas_objs if a.id == 1), None)
                  if a1_obj:
                      a1_obj.rect = sel.geometry
                  else:
                      from app.config_manager import AreaConfig
-                     areas_objs.insert(0, AreaConfig.from_dict({'id': 1, 'type': 'continuous', 'rect': sel.geometry, 'hotkey': '', 'colors': []}))
+                     a1_obj = AreaConfig(id=1, type='continuous', rect=sel.geometry)
+                     areas_objs.insert(0, a1_obj)
 
-                 base = self.config_mgr.load_preset(path) or {}
-                 base['areas'] = areas_objs
-                 old_disp = self.config_mgr.display_resolution
-                 try:
-                     self.config_mgr.display_resolution = (sw, sh)
-                     self.config_mgr.save_preset(path, base)
-                 finally:
-                     self.config_mgr.display_resolution = old_disp
+                 # Persist via ConfigManager
+                 self.config_mgr.set_areas_from_display(areas_objs, src_resolution=(sw, sh))
                  
         except Exception as e:
             messagebox.showerror("Błąd", f"Wybór obszaru: {e}")
@@ -1049,11 +1012,9 @@ class LektorApp:
             return
 
         # Check subtitles first
-        data = self.config_mgr.load_preset(path)
-        if 'areas' not in data:
-            self.config_mgr._migrate_legacy_areas(data)
+        preset = self.config_mgr.load_preset(path)
 
-        txt_path = data.get('text_file_path')
+        txt_path = preset.text_file_path
         if not txt_path or not os.path.exists(txt_path):
             messagebox.showerror("Błąd", "Nie znaleziono pliku napisów w ustawieniach presetu.")
             return
@@ -1141,161 +1102,72 @@ class LektorApp:
             if not dialog_res or not dialog_res.get("confirmed"):
                 return
 
-            # Kopia zapasowa
             self.config_mgr.backup_preset(preset_path)
 
             target_id = dialog_res.get("target_id")
             sw, sh = self._get_screen_size()
-            screen_preset = self.config_mgr.get_preset_for_resolution(preset_path, (sw, sh))
-            current_areas = screen_preset.get('areas', [])
+            
+            # Get current areas as objects, scaled to screen
+            old_res = self.config_mgr.display_resolution
+            try:
+                self.config_mgr.display_resolution = (sw, sh)
+                current_areas = self.config_mgr.get_areas()
+            finally:
+                self.config_mgr.display_resolution = old_res
 
+            # Rect calculation
+            new_rect = None
             if optimized_area:
                 ox, oy, ow, oh = optimized_area
-                
-                # FIX: Przelicz koordynaty z rodzielczości obrazu (img_size) na rozdzielczość "ekranu" (sw, sh)
-                # Jeśli Lektor "myśli", że jest w 4K (sw=3840), a obraz był w 2K, musimy przeskalować rect w górę.
                 if img_size:
                     iw, ih = img_size
                     if iw > 0 and ih > 0:
                         sx = sw / iw
                         sy = sh / ih
-                        if abs(sx - 1.0) > 0.001 or abs(sy - 1.0) > 0.001:
-                             ox = float(ox * sx)
-                             oy = float(oy * sy)
-                             ow = float(ow * sx)
-                             oh = float(oh * sy)
-
+                        ox, oy, ow, oh = ox * sx, oy * sy, ow * sx, oh * sy
                 new_rect = {'left': int(round(ox)), 'top': int(round(oy)), 'width': int(round(ow)), 'height': int(round(oh))}
 
-                # Sanitize best_settings to avoid embedding 'areas'/'monitor' or
-                # other large structures into area['settings'] which would
-                # later cause nested/circular data during normalization.
-                try:
-                    sanitized_best = {k: v for k, v in (best_settings or {}).items() if k not in ('areas', 'monitor')}
-                except Exception:
-                    sanitized_best = best_settings or {}
+            # Find or create target area
+            target_area = None
+            if target_id is not None:
+                target_area = next((a for a in current_areas if a.id == target_id), None)
+            
+            if not target_area and new_rect:
+                from app.config_manager import AreaConfig
+                new_id = (max(a.id for a in current_areas) if current_areas else 0) + 1
+                target_area = AreaConfig(id=new_id, type="continuous")
+                current_areas.append(target_area)
 
-                sanitized_best['subtitle_mode'] = context.get('match_mode')
-                        
+            if target_area:
+                if new_rect:
+                    target_area.rect = new_rect
+                
+                # Apply settings from best_settings (dict)
+                if isinstance(best_settings, dict):
+                    target_area.text_thickening = int(best_settings.get('text_thickening', target_area.text_thickening))
+                    target_area.brightness_threshold = int(best_settings.get('brightness_threshold', target_area.brightness_threshold))
+                    target_area.contrast = float(best_settings.get('contrast', target_area.contrast))
+                    target_area.color_tolerance = int(best_settings.get('color_tolerance', target_area.color_tolerance))
+                    target_area.use_colors = bool(best_settings.get('use_colors', target_area.use_colors))
+                    target_area.subtitle_colors = list(best_settings.get('subtitle_colors', target_area.subtitle_colors))
+                    target_area.setting_mode = str(best_settings.get('setting_mode', target_area.setting_mode))
+                    target_area.show_debug = bool(best_settings.get('show_debug', target_area.show_debug))
+                
+                target_area.subtitle_mode = context.get('match_mode', target_area.subtitle_mode)
 
-                if target_id is None:
-                    existing_ids = [a.get('id', 0) for a in current_areas]
-                    new_id = (max(existing_ids) if existing_ids else 0) + 1
-                    # Create flat area dict and merge sanitized per-area settings at top-level
-                    new_area = {
-                        "id": new_id,
-                        "type": "continuous",
-                        "rect": new_rect,
-                        "hotkey": "",
-                    }
-                    if isinstance(sanitized_best, dict):
-                        # Only merge known per-area keys
-                        keys = ['text_thickening', 'subtitle_mode', 'brightness_threshold', 'contrast', 'use_colors', 'color_tolerance', 'subtitle_colors', 'setting_mode', 'show_debug', 'scale_overrides']
-                        new_area.update({k: sanitized_best.get(k) for k in keys if k in sanitized_best})
-                    current_areas.append(new_area)
-                else:
-                    for area in current_areas:
-                        if area.get('id') == target_id:
-                            area['rect'] = new_rect
-                            # Read current per-area settings (from nested 'settings' or flat keys)
-                            keys = ['text_thickening', 'subtitle_mode', 'brightness_threshold', 'contrast', 'use_colors', 'color_tolerance', 'subtitle_colors', 'setting_mode', 'show_debug', 'scale_overrides']
-                            current_settings = {}
-                            if 'settings' in area and isinstance(area['settings'], dict):
-                                current_settings = {k: area['settings'].get(k) for k in keys if k in area['settings']}
-                            else:
-                                current_settings = {k: area.get(k) for k in keys if k in area}
-                            # Merge updates
-                            if isinstance(sanitized_best, dict):
-                                current_settings.update({k: sanitized_best.get(k) for k in keys if k in sanitized_best})
-                            # Write back flattened settings into area
-                            for k, v in current_settings.items():
-                                area[k] = v
-                            # Remove any leftover nested settings key
-                            if 'settings' in area:
-                                try:
-                                    del area['settings']
-                                except Exception:
-                                    pass
-                            break
-            elif target_id is not None:
-                for area in current_areas:
-                    if area.get('id') == target_id:
-                        keys = ['text_thickening', 'subtitle_mode', 'brightness_threshold', 'contrast', 'use_colors', 'color_tolerance', 'subtitle_colors', 'setting_mode', 'show_debug', 'scale_overrides']
-                        if 'settings' in area and isinstance(area['settings'], dict):
-                            current_settings = {k: area['settings'].get(k) for k in keys if k in area['settings']}
-                        else:
-                            current_settings = {k: area.get(k) for k in keys if k in area}
-                        if isinstance(best_settings, dict):
-                            current_settings.update({k: best_settings.get(k) for k in keys if k in best_settings})
-                        for k, v in current_settings.items():
-                            area[k] = v
-                        if 'settings' in area:
-                            try:
-                                del area['settings']
-                            except Exception:
-                                pass
-                        break
-
-            # Work on a deep copy and sanitize nested settings to remove any
-            # accidental 'areas'/'monitor' keys before handing to ConfigManager.
-            import copy as _copy
-            safe_areas = _copy.deepcopy(current_areas)
+            # Save via ConfigManager
+            old_res = self.config_mgr.display_resolution
             try:
-                for a in safe_areas:
-                    if isinstance(a, dict):
-                        # Flatten nested 'settings' (if present) into top-level keys and strip large keys
-                        keys = ['text_thickening', 'subtitle_mode', 'brightness_threshold', 'contrast', 'use_colors', 'color_tolerance', 'subtitle_colors', 'setting_mode', 'show_debug', 'scale_overrides']
-                        if 'settings' in a and isinstance(a['settings'], dict):
-                            sdict = {k: a['settings'].get(k) for k in keys if k in a['settings']}
-                        else:
-                            sdict = {k: a.get(k) for k in keys if k in a}
-                        if isinstance(sdict, dict):
-                            for k, v in sdict.items():
-                                if k not in ('areas', 'monitor'):
-                                    a[k] = v
-                        # Ensure no nested 'settings' remains
-                        if 'settings' in a:
-                            try:
-                                del a['settings']
-                            except Exception:
-                                pass
-            except Exception:
-                pass
-            preset_data['areas'] = safe_areas
-            try:
-                try:
-                    norm = self.config_mgr.normalize_areas_to_4k(current_areas, (sw, sh))
-                except Exception:
-                    pass
-                # Persist optimized areas by mapping onto AreaConfig instances
-                areas_dicts = preset_data.get('areas', [])
-                areas_objs = self.config_mgr.get_areas() or []
-                for i, na in enumerate(areas_dicts):
-                    try:
-                        if i < len(areas_objs):
-                            aobj = areas_objs[i]
-                            if isinstance(na, dict) and 'rect' in na:
-                                aobj.rect = na['rect']
-                            for fld in ('enabled', 'hotkey', 'name', 'colors'):
-                                if isinstance(na, dict) and fld in na:
-                                    setattr(aobj, fld, na.get(fld))
-                            areas_objs[i] = aobj
-                        else:
-                            from app.config_manager import AreaConfig
-                            areas_objs.append(AreaConfig.from_dict(na if isinstance(na, dict) else {}))
-                    except Exception:
-                        pass
+                self.config_mgr.display_resolution = (sw, sh)
+                self.config_mgr.set_areas(current_areas)
+            finally:
+                self.config_mgr.display_resolution = old_res
 
-                base = self.config_mgr.load_preset(preset_path) or {}
-                base['areas'] = areas_objs
-                old_disp = self.config_mgr.display_resolution
-                try:
-                    self.config_mgr.display_resolution = (sw, sh)
-                    self.config_mgr.save_preset(preset_path, base)
-                finally:
-                    self.config_mgr.display_resolution = old_disp
-            except Exception as e:
-                messagebox.showerror("Błąd", f"Zapis nieudany: {e}")
+            self._restart_hotkeys()
+            self.refresh_color_canvas()
+            if self.is_running:
+                self.stop_reading()
+                self.root.after(200, self.start_reading)
             
             self.on_preset_selected_from_combo(None)
 

@@ -57,8 +57,6 @@ class AreaSelector(tk.Toplevel):
         self.cv.create_image(0, 0, image=self.bg_img, anchor=tk.NW)
 
         if existing_regions:
-            import traceback
-            traceback.print_stack(limit=4)
             for i, area_data in enumerate(existing_regions):
                 r = None
                 if isinstance(area_data, dict):
@@ -85,11 +83,11 @@ class AreaSelector(tk.Toplevel):
                     continue
                 if w <= 0 or h <= 0:
                     continue
-                # NIE przeliczamy do 4K! Rysujemy to co dostajemy (ekran)
-                x_log = int(x)
-                y_log = int(y)
-                w_log = int(w)
-                h_log = int(h)
+                # PRZELICZAMY współrzędne fizyczne na logiczne (ekranu)
+                x_log = int(x / self.scale_x)
+                y_log = int(y / self.scale_y)
+                w_log = int(w / self.scale_x)
+                h_log = int(h / self.scale_y)
                 color = 'blue'
                 colors = area_data.get('colors', []) if isinstance(area_data, dict) else []
                 if colors and isinstance(colors, list) and len(colors) > 0:

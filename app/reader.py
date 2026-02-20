@@ -105,14 +105,14 @@ class ReaderThread(threading.Thread):
 
         self.current_unified_area = {'left': 0, 'top': 0, 'width': 0, 'height': 0}
 
-    def trigger_area(self, area_id: int):
+    def trigger_area(self, area_id: Any):
         """Aktywuje jednorazowe pobranie i przetworzenie Obszaru o danym ID (manual/triggered)."""
         self.triggered_area_ids.add(area_id)
 
-    def toggle_continuous_area(self, area_id: int):
+    def toggle_continuous_area(self, area_id: Any):
         """Włącza lub wyłącza przetwarzanie stałego obszaru (continuous)."""
-        if area_id == 1:
-            return  # Obszar 1 jest zawsze włączony
+        if self._is_main_area(area_id):
+            return  # Obszar główny jest zawsze włączony
 
         if area_id in self.enabled_continuous_areas:
             self.enabled_continuous_areas.remove(area_id)
@@ -122,13 +122,13 @@ class ReaderThread(threading.Thread):
             self.enabled_continuous_areas.add(area_id)
             if self.log_queue:
                 self.log_queue.put({"time": "INFO", "line_text": f"Area #{area_id} activated."})
-        
-        if self.log_queue:
-            self.log_queue.put({
-                "time": datetime.now().strftime('%H:%M:%S'),
-                "ocr": "SYSTEM", "match": None,
-                "line_text": f"Wyzwołano jednorazowy odczyt Obszaru {area_id}", "stats": {}
-            })
+
+    def _is_main_area(self, area_id: Any) -> bool:
+        """Checks if the ID refers to the canonical 'Main' area (1, 'area_0' or 'area_1'?).
+        Note: Migration uses 'area_0' for monitor[0], 'area_1' for monitor[1].
+        Technically monitor[0] (slot 1 in UI) is the 'primary' one.
+        """
+        return area_id == 1 or area_id == "area_0" or str(area_id).lower() == "area_1"
 
 
     # (Area-specific overrides handled explicitly during processing;
@@ -236,8 +236,8 @@ class ReaderThread(threading.Thread):
                     self.triggered_area_ids.remove(area_id)
                     self.last_monitor_crops.pop(idx, None)
                 elif area_type == 'continuous':
-                    # Obszar 1 zawsze aktywny, inne muszą być włączone
-                    if area_id != 1 and area_id not in self.enabled_continuous_areas:
+                    # First slot (Area 0 or 1 depending on slot naming) is always active.
+                    if not self._is_main_area(area_id) and area_id not in self.enabled_continuous_areas:
                         continue
 
                 rel_x, rel_y = area_rect['left'] - min_l, area_rect['top'] - min_t
@@ -247,26 +247,6 @@ class ReaderThread(threading.Thread):
                 if self._images_are_similar(crop, last_crop, similarity):
                     continue
                 self.last_monitor_crops[idx] = crop.copy()
-
-                # --- Prepare Context for Area ---
-                # Build a plain settings dict from flattened AreaConfig attributes
-                area_settings = {
-                    'text_thickening': area_obj.text_thickening,
-                    'subtitle_mode': area_obj.subtitle_mode,
-                    'brightness_threshold': area_obj.brightness_threshold,
-                    'contrast': area_obj.contrast,
-                    'use_colors': area_obj.use_colors,
-                    'color_tolerance': area_obj.color_tolerance,
-                    'subtitle_colors': area_obj.subtitle_colors or area_obj.colors or [],
-                    'setting_mode': area_obj.setting_mode,
-                    'show_debug': area_obj.show_debug,
-                    'scale_overrides': area_obj.scale_overrides or {}
-                }
-
-                merged_preset = preset.copy()
-                merged_preset.update(area_settings)
-                from app.matcher import MATCH_MODE_FULL
-                current_subtitle_mode = merged_preset.get('subtitle_mode', MATCH_MODE_FULL)
 
                 t_pre_start = time.perf_counter()
 
@@ -284,6 +264,7 @@ class ReaderThread(threading.Thread):
                 t_ocr = (time.perf_counter() - t_ocr_start) * 1000
 
                 # Matching: log debug info, then use global ConfigManager and area-specific subtitle mode
+                current_subtitle_mode = area_obj.subtitle_mode
                 try:
                     pre_lines_count = len(precomputed_data[0]) if precomputed_data and isinstance(precomputed_data, tuple) else 0
                 except Exception:

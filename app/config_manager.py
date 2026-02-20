@@ -13,7 +13,6 @@ DEFAULT_CONFIG = {
     'last_regex': r"",
     'last_resolution_key': '1920x1080',
     'hotkey_start_stop': '<f2>',
-    'hotkey_area3': '<f3>',
 }
 
 DEFAULT_PRESET_CONTENT = {
@@ -46,14 +45,7 @@ import datetime
 
 @dataclass
 class AreaConfig:
-    """Single flattened dataclass representing an Area including per-area settings.
-
-    This replaces the previous split between `AreaSettings` and `AreaConfig`.
-    Attributes that used to live in `AreaSettings` are now top-level fields
-    on the area object. For persistence we still produce/consume the familiar
-    dict structure (with a nested `settings` key) but runtime code should
-    prefer direct attribute access (e.g. `area.text_thickening`).
-    """
+    """Single flattened dataclass representing an Area including per-area settings."""
     id: int = 0
     type: str = "manual"
     rect: Dict[str, int] = field(default_factory=lambda: {"left": 0, "top": 0, "width": 0, "height": 0})
@@ -62,51 +54,46 @@ class AreaConfig:
     enabled: bool = False
     colors: List[str] = field(default_factory=list)
 
-    # Flattened per-area settings (previously in AreaSettings)
+    # Flattened per-area settings
     text_thickening: int = 0
     subtitle_mode: str = "Full Lines"
     brightness_threshold: int = 200
     contrast: float = 0.0
     use_colors: bool = True
     color_tolerance: int = 10
-    subtitle_colors: List[str] = field(default_factory=list)
     setting_mode: str = ''
     show_debug: bool = False
-    scale_overrides: Dict[str, float] = field(default_factory=dict)
 
-    def to_settings_dict(self) -> Dict[str, Any]:
-        """Returns a dictionary of per-area settings for legacy/optimizer compatibility."""
+    def _to_dict(self) -> Dict[str, Any]:
+        """Returns a full dictionary representation of the AreaConfig for persistence."""
         return {
+            "id": int(self.id),
+            "type": str(self.type),
+            "rect": dict(self.rect),
+            "hotkey": str(self.hotkey or ''),
+            "name": str(self.name or ''),
+            "enabled": bool(self.enabled),
+            "colors": list(self.colors or []),
             "text_thickening": int(self.text_thickening),
             "subtitle_mode": str(self.subtitle_mode),
             "brightness_threshold": int(self.brightness_threshold),
             "contrast": float(self.contrast or 0.0),
             "use_colors": bool(self.use_colors),
             "color_tolerance": int(self.color_tolerance),
-            "subtitle_colors": list(self.subtitle_colors or []),
             "setting_mode": str(self.setting_mode or ''),
-            "show_debug": bool(self.show_debug),
-            "scale_overrides": dict(self.scale_overrides or {})
+            "show_debug": bool(self.show_debug)
         }
-
-    def to_full_dict(self) -> Dict[str, Any]:
-        """Returns a full dictionary representation of the AreaConfig for persistence."""
-        base = {
-            "id": int(self.id),
-            "type": str(self.type),
-            "rect": dict(self.rect) if isinstance(self.rect, dict) else self.rect,
-            "hotkey": str(self.hotkey or ''),
-            "name": str(self.name or ''),
-            "enabled": bool(self.enabled),
-            "colors": list(self.colors or []),
-        }
-        base.update(self.to_settings_dict())
-        return base
 
     @classmethod
-    def from_dict(cls, d: Optional[Dict[str, Any]]):
-        if not d:
+    def _from_dict(cls, d: Any):
+        if d is None:
             return cls()
+        if isinstance(d, cls):
+            return d
+            
+        if not isinstance(d, dict):
+            return cls()
+
         kw: Dict[str, Any] = {}
         kw['id'] = int(d.get('id', 0))
         kw['type'] = str(d.get('type', 'manual'))
@@ -114,14 +101,14 @@ class AreaConfig:
         kw['hotkey'] = str(d.get('hotkey', '')) if d.get('hotkey') is not None else ''
         kw['name'] = str(d.get('name', '')) if d.get('name') is not None else ''
         kw['enabled'] = bool(d.get('enabled', False))
-        # colors historically stored under 'colors' or 'subtitle_colors'
+        
+        # Unify colors/subtitle_colors into 'colors'
         kw['colors'] = list(d.get('colors', d.get('subtitle_colors', [])) or [])
 
         # Per-area settings may be nested under 'settings' or present at top-level
         s = d.get('settings', {}) if isinstance(d, dict) else {}
-        # If some callers saved settings at top-level for convenience, prefer them
         def _pick(name, default):
-            if name in d and d.get(name) is not None:
+            if isinstance(d, dict) and name in d and d.get(name) is not None:
                 return d.get(name)
             if isinstance(s, dict) and name in s:
                 return s.get(name)
@@ -133,13 +120,76 @@ class AreaConfig:
         kw['contrast'] = float(_pick('contrast', 0.0) or 0.0)
         kw['use_colors'] = bool(_pick('use_colors', True))
         kw['color_tolerance'] = int(_pick('color_tolerance', 10))
-        subcols = _pick('subtitle_colors', d.get('subtitle_colors', []) or [])
-        kw['subtitle_colors'] = list(subcols or [])
+        
+        # If 'colors' still empty, check 'subtitle_colors' in settings
+        if not kw['colors']:
+            kw['colors'] = list(_pick('subtitle_colors', []) or [])
+            
         kw['setting_mode'] = str(_pick('setting_mode', ''))
         kw['show_debug'] = bool(_pick('show_debug', False))
-        kw['scale_overrides'] = dict(_pick('scale_overrides', {})) if isinstance(_pick('scale_overrides', {}), dict) else {}
 
         return cls(**kw)
+
+
+@dataclass
+class PresetConfig:
+    audio_speed: float = 1.15
+    audio_volume: float = 1.0
+    audio_dir: str = "audio"
+    text_file_path: str = "subtitles.txt"
+    subtitle_mode: str = "Full Lines"
+    text_color_mode: str = "Light"
+    ocr_scale_factor: float = 0.5
+    capture_interval: float = 0.5
+    audio_ext: str = ".mp3"
+    auto_remove_names: bool = True
+    save_logs: bool = False
+    min_line_length: int = 2
+    match_score_short: int = 90
+    match_score_long: int = 75
+    match_len_diff_ratio: float = 0.30
+    partial_mode_min_len: int = 20
+    audio_speed_inc: float = 1.20
+    similarity: float = 5.0
+    regex_mode_name: str = ""
+    regex_pattern: str = ""
+    text_alignment: str = "None"
+    
+    # Global defaults for new areas
+    text_thickening: int = 0
+    brightness_threshold: int = 200
+    contrast: float = 0.0
+    use_colors: bool = True
+    color_tolerance: int = 10
+    subtitle_colors: List[str] = field(default_factory=list)
+    show_debug: bool = False
+    
+    areas: List[AreaConfig] = field(default_factory=list)
+
+    @classmethod
+    def _from_dict(cls, d: Dict[str, Any]) -> 'PresetConfig':
+        kw = {}
+        for f in cls.__dataclass_fields__:
+            if f == 'areas':
+                # Convert list of dicts to list of AreaConfig
+                raw = d.get('areas', d.get('monitor', []))
+                kw['areas'] = [AreaConfig._from_dict(a) if isinstance(a, dict) else a for a in raw if a]
+            elif f == 'subtitle_colors':
+                # Handle both naming conventions
+                kw['subtitle_colors'] = list(d.get('subtitle_colors', d.get('colors', [])) or [])
+            elif f in d:
+                kw[f] = d[f]
+        return cls(**kw)
+
+    def _to_dict(self) -> Dict[str, Any]:
+        res = {}
+        for f in self.__dataclass_fields__:
+            val = getattr(self, f)
+            if f == 'areas':
+                res['areas'] = [a._to_dict() if hasattr(a, '_to_dict') else a for a in val]
+            else:
+                res[f] = val
+        return res
 
 
 
@@ -148,7 +198,7 @@ class ConfigManager:
 
     def __init__(self, preset_path: Optional[str] = None):
         # Minimal constructor: store preset path and optionally display resolution
-        self.preset_cache = None
+        self.preset_cache: Optional[PresetConfig] = None
         self.preset_path = preset_path
         self.display_resolution: Optional[Tuple[int, int]] = None
         self.settings = DEFAULT_CONFIG.copy()
@@ -156,11 +206,11 @@ class ConfigManager:
 
     # --------------------- Typed accessors (properties) ---------------------
     # These provide attribute-style access instead of using raw dict keys.
-    def _current_preset(self) -> Dict[str, Any]:
-        """Helper returning the currently loaded preset dict (may be empty)."""
+    def _get_preset_obj(self) -> PresetConfig:
+        """Helper returning the currently loaded preset object."""
+        if self.preset_cache is not None:
+            return self.preset_cache
         p = self.load_preset(self.preset_path) if self.preset_path else self.load_preset()
-        if p is None:
-            return {}
         return p
 
     # App-level settings
@@ -175,236 +225,303 @@ class ConfigManager:
 
     @property
     def capture_interval(self) -> float:
-        return float(self._current_preset().get('capture_interval', DEFAULT_PRESET_CONTENT.get('capture_interval', 0.5)))
+        return self._get_preset_obj().capture_interval
 
     @capture_interval.setter
     def capture_interval(self, value: float):
-        data = self._current_preset()
-        data['capture_interval'] = float(value)
+        obj = self._get_preset_obj()
+        obj.capture_interval = float(value)
         if self.preset_path:
-            self.save_preset(self.preset_path, data)
-
-    @property
-    def similarity(self) -> float:
-        # similarity historically used as percent (e.g. 5)
-        return float(self._current_preset().get('similarity', self.settings.get('similarity', 5)))
-
-    @similarity.setter
-    def similarity(self, value: float):
-        data = self._current_preset()
-        data['similarity'] = float(value)
-        if self.preset_path:
-            self.save_preset(self.preset_path, data)
+            self.save_preset(self.preset_path, obj)
 
     @property
     def partial_mode_min_len(self) -> int:
-        return int(self._current_preset().get('partial_mode_min_len', DEFAULT_PRESET_CONTENT.get('partial_mode_min_len', 25)))
+        return self._get_preset_obj().partial_mode_min_len
 
     @partial_mode_min_len.setter
     def partial_mode_min_len(self, value: int):
-        data = self._current_preset()
-        data['partial_mode_min_len'] = int(value)
+        obj = self._get_preset_obj()
+        obj.partial_mode_min_len = int(value)
         if self.preset_path:
-            self.save_preset(self.preset_path, data)
+            self.save_preset(self.preset_path, obj)
 
     @property
     def match_len_diff_ratio(self) -> float:
-        return float(self._current_preset().get('match_len_diff_ratio', DEFAULT_PRESET_CONTENT.get('match_len_diff_ratio', 0.25)))
+        return self._get_preset_obj().match_len_diff_ratio
 
     @match_len_diff_ratio.setter
     def match_len_diff_ratio(self, value: float):
-        data = self._current_preset()
-        data['match_len_diff_ratio'] = float(value)
+        obj = self._get_preset_obj()
+        obj.match_len_diff_ratio = float(value)
         if self.preset_path:
-            self.save_preset(self.preset_path, data)
+            self.save_preset(self.preset_path, obj)
 
     @property
     def match_score_short(self) -> int:
-        return int(self._current_preset().get('match_score_short', DEFAULT_PRESET_CONTENT.get('match_score_short', 90)))
+        return self._get_preset_obj().match_score_short
 
     @match_score_short.setter
     def match_score_short(self, value: int):
-        data = self._current_preset()
-        data['match_score_short'] = int(value)
+        obj = self._get_preset_obj()
+        obj.match_score_short = int(value)
         if self.preset_path:
-            self.save_preset(self.preset_path, data)
+            self.save_preset(self.preset_path, obj)
 
     @property
     def match_score_long(self) -> int:
-        return int(self._current_preset().get('match_score_long', DEFAULT_PRESET_CONTENT.get('match_score_long', 75)))
+        return self._get_preset_obj().match_score_long
 
     @match_score_long.setter
     def match_score_long(self, value: int):
-        data = self._current_preset()
-        data['match_score_long'] = int(value)
+        obj = self._get_preset_obj()
+        obj.match_score_long = int(value)
         if self.preset_path:
-            self.save_preset(self.preset_path, data)
+            self.save_preset(self.preset_path, obj)
 
     @property
     def audio_speed_inc(self) -> float:
-        return float(self._current_preset().get('audio_speed_inc', DEFAULT_PRESET_CONTENT.get('audio_speed_inc', 1.2)))
+        return self._get_preset_obj().audio_speed_inc
 
     @audio_speed_inc.setter
     def audio_speed_inc(self, value: float):
-        data = self._current_preset()
-        data['audio_speed_inc'] = float(value)
+        obj = self._get_preset_obj()
+        obj.audio_speed_inc = float(value)
         if self.preset_path:
-            self.save_preset(self.preset_path, data)
+            self.save_preset(self.preset_path, obj)
 
-    # Additional preset properties used across the app
     @property
     def ocr_scale_factor(self) -> float:
-        return float(self._current_preset().get('ocr_scale_factor', DEFAULT_PRESET_CONTENT.get('ocr_scale_factor', 0.5)))
+        return self._get_preset_obj().ocr_scale_factor
 
     @ocr_scale_factor.setter
     def ocr_scale_factor(self, value: float):
-        data = self._current_preset()
-        data['ocr_scale_factor'] = float(value)
+        obj = self._get_preset_obj()
+        obj.ocr_scale_factor = float(value)
         if self.preset_path:
-            self.save_preset(self.preset_path, data)
+            self.save_preset(self.preset_path, obj)
 
     @property
     def save_logs(self) -> bool:
-        return bool(self._current_preset().get('save_logs', DEFAULT_PRESET_CONTENT.get('save_logs', False)))
+        return self._get_preset_obj().save_logs
 
     @save_logs.setter
     def save_logs(self, value: bool):
-        data = self._current_preset()
-        data['save_logs'] = bool(value)
+        obj = self._get_preset_obj()
+        obj.save_logs = bool(value)
         if self.preset_path:
-            self.save_preset(self.preset_path, data)
+            self.save_preset(self.preset_path, obj)
 
     @property
     def min_line_length(self) -> int:
-        return int(self._current_preset().get('min_line_length', DEFAULT_PRESET_CONTENT.get('min_line_length', 3)))
+        return self._get_preset_obj().min_line_length
 
     @min_line_length.setter
     def min_line_length(self, value: int):
-        data = self._current_preset()
-        data['min_line_length'] = int(value)
+        obj = self._get_preset_obj()
+        obj.min_line_length = int(value)
         if self.preset_path:
-            self.save_preset(self.preset_path, data)
+            self.save_preset(self.preset_path, obj)
 
     @property
     def text_file_path(self) -> str:
-        return str(self._current_preset().get('text_file_path', DEFAULT_PRESET_CONTENT.get('text_file_path', 'subtitles.txt')))
+        return self._get_preset_obj().text_file_path
 
     @text_file_path.setter
     def text_file_path(self, value: str):
-        data = self._current_preset()
-        data['text_file_path'] = str(value)
+        obj = self._get_preset_obj()
+        obj.text_file_path = str(value)
         if self.preset_path:
-            self.save_preset(self.preset_path, data)
+            self.save_preset(self.preset_path, obj)
 
     @property
     def audio_dir(self) -> str:
-        return str(self._current_preset().get('audio_dir', DEFAULT_PRESET_CONTENT.get('audio_dir', 'audio')))
+        return self._get_preset_obj().audio_dir
 
     @audio_dir.setter
     def audio_dir(self, value: str):
-        data = self._current_preset()
-        data['audio_dir'] = str(value)
+        obj = self._get_preset_obj()
+        obj.audio_dir = str(value)
         if self.preset_path:
-            self.save_preset(self.preset_path, data)
+            self.save_preset(self.preset_path, obj)
 
     @property
     def audio_ext(self) -> str:
-        return str(self._current_preset().get('audio_ext', DEFAULT_PRESET_CONTENT.get('audio_ext', '.mp3')))
+        return self._get_preset_obj().audio_ext
 
     @audio_ext.setter
     def audio_ext(self, value: str):
-        data = self._current_preset()
-        data['audio_ext'] = str(value)
+        obj = self._get_preset_obj()
+        obj.audio_ext = str(value)
         if self.preset_path:
-            self.save_preset(self.preset_path, data)
+            self.save_preset(self.preset_path, obj)
 
     @property
     def text_color_mode(self) -> str:
-        return str(self._current_preset().get('text_color_mode', DEFAULT_PRESET_CONTENT.get('text_color_mode', 'Light')))
+        return self._get_preset_obj().text_color_mode
 
     @text_color_mode.setter
     def text_color_mode(self, value: str):
-        data = self._current_preset()
-        data['text_color_mode'] = str(value)
+        obj = self._get_preset_obj()
+        obj.text_color_mode = str(value)
         if self.preset_path:
-            self.save_preset(self.preset_path, data)
-
-    @property
-    def brightness_threshold(self) -> int:
-        return int(self._current_preset().get('brightness_threshold', self.settings.get('brightness_threshold', 200)))
-
-    @brightness_threshold.setter
-    def brightness_threshold(self, value: int):
-        data = self._current_preset()
-        data['brightness_threshold'] = int(value)
-        if self.preset_path:
-            self.save_preset(self.preset_path, data)
-
-    @property
-    def color_tolerance(self) -> int:
-        return int(self._current_preset().get('color_tolerance', DEFAULT_PRESET_CONTENT.get('color_tolerance', 10)))
-
-    @color_tolerance.setter
-    def color_tolerance(self, value: int):
-        data = self._current_preset()
-        data['color_tolerance'] = int(value)
-        if self.preset_path:
-            self.save_preset(self.preset_path, data)
-
-    @property
-    def contrast(self) -> float:
-        return float(self._current_preset().get('contrast', DEFAULT_PRESET_CONTENT.get('contrast', 0.0)))
-
-    @contrast.setter
-    def contrast(self, value: float):
-        data = self._current_preset()
-        data['contrast'] = float(value)
-        if self.preset_path:
-            self.save_preset(self.preset_path, data)
-
-    @property
-    def text_thickening(self) -> int:
-        return int(self._current_preset().get('text_thickening', DEFAULT_PRESET_CONTENT.get('text_thickening', 0)))
-
-    @text_thickening.setter
-    def text_thickening(self, value: int):
-        data = self._current_preset()
-        data['text_thickening'] = int(value)
-        if self.preset_path:
-            self.save_preset(self.preset_path, data)
-
-    @property
-    def subtitle_colors(self) -> List[str]:
-        return list(self._current_preset().get('subtitle_colors', DEFAULT_PRESET_CONTENT.get('subtitle_colors', [])))
-
-    @subtitle_colors.setter
-    def subtitle_colors(self, value: List[str]):
-        data = self._current_preset()
-        data['subtitle_colors'] = list(value) if value is not None else []
-        if self.preset_path:
-            self.save_preset(self.preset_path, data)
+            self.save_preset(self.preset_path, obj)
 
     @property
     def auto_remove_names(self) -> bool:
-        return bool(self._current_preset().get('auto_remove_names', DEFAULT_PRESET_CONTENT.get('auto_remove_names', True)))
+        return self._get_preset_obj().auto_remove_names
 
     @auto_remove_names.setter
     def auto_remove_names(self, value: bool):
-        data = self._current_preset()
-        data['auto_remove_names'] = bool(value)
+        obj = self._get_preset_obj()
+        obj.auto_remove_names = bool(value)
         if self.preset_path:
-            self.save_preset(self.preset_path, data)
+            self.save_preset(self.preset_path, obj)
             
     @property
+    def audio_speed(self) -> float:
+        return self._get_preset_obj().audio_speed
+
+    @audio_speed.setter
+    def audio_speed(self, value: float):
+        obj = self._get_preset_obj()
+        obj.audio_speed = float(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, obj)
+
+    @property
+    def audio_volume(self) -> float:
+        return self._get_preset_obj().audio_volume
+
+    @audio_volume.setter
+    def audio_volume(self, value: float):
+        obj = self._get_preset_obj()
+        obj.audio_volume = float(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, obj)
+
+    @property
+    def similarity(self) -> float:
+        return self._get_preset_obj().similarity
+
+    @similarity.setter
+    def similarity(self, value: float):
+        obj = self._get_preset_obj()
+        obj.similarity = float(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, obj)
+
+    @property
+    def regex_mode_name(self) -> str:
+        return self._get_preset_obj().regex_mode_name
+
+    @regex_mode_name.setter
+    def regex_mode_name(self, value: str):
+        obj = self._get_preset_obj()
+        obj.regex_mode_name = str(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, obj)
+
+    @property
+    def regex_pattern(self) -> str:
+        return self._get_preset_obj().regex_pattern
+
+    @regex_pattern.setter
+    def regex_pattern(self, value: str):
+        obj = self._get_preset_obj()
+        obj.regex_pattern = str(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, obj)
+
+    @property
+    def text_thickening(self) -> int:
+        return self._get_preset_obj().text_thickening
+
+    @text_thickening.setter
+    def text_thickening(self, value: int):
+        obj = self._get_preset_obj()
+        obj.text_thickening = int(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, obj)
+
+    @property
+    def brightness_threshold(self) -> int:
+        return self._get_preset_obj().brightness_threshold
+
+    @brightness_threshold.setter
+    def brightness_threshold(self, value: int):
+        obj = self._get_preset_obj()
+        obj.brightness_threshold = int(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, obj)
+
+    @property
+    def contrast(self) -> float:
+        return self._get_preset_obj().contrast
+
+    @contrast.setter
+    def contrast(self, value: float):
+        obj = self._get_preset_obj()
+        obj.contrast = float(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, obj)
+
+    @property
+    def color_tolerance(self) -> int:
+        return self._get_preset_obj().color_tolerance
+
+    @color_tolerance.setter
+    def color_tolerance(self, value: int):
+        obj = self._get_preset_obj()
+        obj.color_tolerance = int(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, obj)
+
+    @property
     def show_debug(self) -> bool:
-        return bool(self._current_preset().get('show_debug', DEFAULT_PRESET_CONTENT.get('show_debug', False)))
+        return self._get_preset_obj().show_debug
 
     @show_debug.setter
     def show_debug(self, value: bool):
-        data = self._current_preset()
-        data['show_debug'] = bool(value)
+        obj = self._get_preset_obj()
+        obj.show_debug = bool(value)
         if self.preset_path:
-            self.save_preset(self.preset_path, data)
+            self.save_preset(self.preset_path, obj)
+
+    @property
+    def subtitle_colors(self) -> List[str]:
+        return self._get_preset_obj().subtitle_colors
+
+    @subtitle_colors.setter
+    def subtitle_colors(self, value: List[str]):
+        obj = self._get_preset_obj()
+        obj.subtitle_colors = list(value)
+        if self.preset_path:
+            self.save_preset(self.preset_path, obj)
+
+
+    @property
+    def areas(self) -> List[AreaConfig]:
+        """Return the list of areas (as `AreaConfig`) scaled to the manager's `display_resolution`."""
+        return self.get_areas()
+
+    @areas.setter
+    def areas(self, value: List[AreaConfig]):
+        """Sets areas and saves the preset.
+        Scales the provided area rects FROM display resolution TO 4K canonical.
+        """
+        obj = self._get_preset_obj()
+        import copy as _copy
+        canonical_areas = _copy.deepcopy(list(value))
+        
+        # Scale back to 4K before storing in the canonical memory cache
+        if self.display_resolution:
+            sw, sh = self.display_resolution
+            for area in canonical_areas:
+                area.rect = scale_utils.scale_rect_to_4k(area.rect, sw, sh)
+        
+        obj.areas = canonical_areas
+        if self.preset_path:
+            self.save_preset(self.preset_path, obj)
 
 
     def backup_preset(self, path: str) -> Optional[str]:
@@ -461,17 +578,22 @@ class ConfigManager:
             }
 
             # 4. Aktualizuj obecny preset
-            current_data = self.load_preset(target_preset_path)
+            current_obj = self.load_preset(target_preset_path)
 
             # Nadpisz obszary - ustawiamy jako pierwszy i jedyny obszar
-            current_data["monitor"] = [new_monitor]
+            current_obj.areas = [AreaConfig(
+                id=1,
+                type="continuous",
+                rect=new_monitor,
+                hotkey="",
+                colors=[]
+            )]
 
             # Opcjonalnie: Importuj inne ustawienia jeśli pasują, np. minimalna długość linii
             if "min_line_len" in win_data:
-                current_data["min_line_length"] = win_data.get(
-                    "min_line_len")  # Różnica w nazwie klucza (length vs len)
+                current_obj.min_line_length = win_data.get("min_line_len")
 
-            self.save_preset(target_preset_path, current_data)
+            self.save_preset(target_preset_path, current_obj)
             return True
 
         except Exception as e:
@@ -535,24 +657,28 @@ class ConfigManager:
         except ValueError:
             return path
 
-    def load_preset(self, path: Optional[str] = None) -> Dict[str, Any]:
-        """Loads preset and scales rects from canonical 4K to current display resolution."""
+    def load_preset(self, path: Optional[str] = None) -> PresetConfig:
+        """Loads preset and returns a PresetConfig object. Rects are left in canonical 4K."""
         if path and path != self.preset_path:
             self.preset_cache = None
             self.preset_path = path
 
         if self.preset_cache is not None:
             return self.preset_cache
+            
         if not path:
             path = self.preset_path
         else:
             self.preset_path = path
+            
         if not path or not os.path.exists(path):
-            return {}
+            return PresetConfig()
+            
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
 
+            # Fill missing keys from defaults
             for k, v in DEFAULT_PRESET_CONTENT.items():
                 if k not in data:
                     data[k] = v
@@ -561,22 +687,18 @@ class ConfigManager:
             if not data.get('areas') and data.get('monitor'):
                 self._migrate_legacy_areas(data)
 
+            # Absolute paths for runtime
             base_dir = os.path.dirname(os.path.abspath(path))
             for key in ['audio_dir', 'text_file_path']:
                 if key in data and isinstance(data[key], str):
                     data[key] = self._to_absolute(base_dir, data[key])
 
-            # PRZELICZANIE SKALI 4K -> DISPLAY (Source of truth)
-            if self.display_resolution:
-                dw, dh = self.display_resolution
-                areas = data.get('areas', [])
-                for a in areas:
-                    if a and 'rect' in a:
-                        a['rect'] = scale_utils.scale_rect_to_physical(a['rect'], dw, dh)
-
-            return data
-        except Exception:
-            return {}
+            obj = PresetConfig._from_dict(data)
+            self.preset_cache = obj
+            return obj
+        except Exception as e:
+            print(f"Error loading preset: {e}")
+            return PresetConfig()
 
     def _migrate_legacy_areas(self, data: Dict[str, Any]):
         """Konwertuje stare ustawienia 'monitor' i 'subtitle_colors' na nową strukturę 'areas'."""
@@ -592,17 +714,16 @@ class ConfigManager:
                 "type": "continuous",
                 "rect": monitors[0],
                 "hotkey": "",
-                "colors": colors  # Przypisz globalne kolory do obszaru 1
+                "colors": colors
             })
         
         # Area 3 (W starym kodzie index 2 był "Area 3" - manualny)
-        # Zakładamy, że jeśli istniał, to był manualny (bo tak działał ReaderThread)
         if len(monitors) > 2 and monitors[2]:
             new_areas.append({
-                "id": 2, # Zmieniamy ID na kolejne wolne
+                "id": 2,
                 "type": "manual",
                 "rect": monitors[2],
-                "hotkey": self.settings.get('hotkey_area3', '<f3>'), # Próbujemy pobrać stary hotkey
+                "hotkey": self.settings.get('hotkey_area3', '<f3>'),
                 "colors": []
             })
             
@@ -610,155 +731,87 @@ class ConfigManager:
 
     # --- New helpers for scaling areas ---
     def get_preset_for_resolution(self, path: Optional[str], dest_resolution: Tuple[int, int]) -> Dict[str, Any]:
-        # Deprecated compatibility wrapper — prefer using `get_preset_for_display`
         return self.get_preset_for_display(path, dest_resolution)
 
     def get_preset_for_display(self, path: Optional[str] = None, dest_resolution: Optional[Tuple[int, int]] = None) -> Dict[str, Any]:
         """Return a preset dict where `areas` rects are scaled from canonical 4K to
         the provided `dest_resolution` or the manager's `display_resolution`.
-
-        This does NOT modify the stored preset on disk; it returns a deep copy with
-        scaled rects suitable for immediate use by UI and processing code.
         """
-        data = self.load_preset(path)
-        if not data:
-            return {}
+        obj = self.load_preset(path)
         import copy as _copy
-        out = _copy.deepcopy(data)
-        try:
-            if dest_resolution is None:
-                dest_resolution = self.display_resolution
-            if dest_resolution is None:
-                # No scaling requested — return raw copy
-                return out
-            dest_w, dest_h = dest_resolution
-            areas = out.get('areas', [])
-            for a in areas:
-                if not a or 'rect' not in a:
-                    continue
-                try:
-                    a['rect'] = scale_utils.scale_rect_to_physical(a['rect'], dest_w, dest_h)
-                except Exception:
-                    # keep original rect on failure
-                    pass
-            out['areas'] = areas
-        except Exception:
-            pass
-        return out
+        res_obj = _copy.deepcopy(obj)
+        
+        target_res = dest_resolution or self.display_resolution
+        if target_res:
+            dw, dh = target_res
+            for area in res_obj.areas:
+                area.rect = scale_utils.scale_rect_to_physical(area.rect, dw, dh)
+        
+        return res_obj._to_dict()
 
     # High-level helpers for area-level access
-    def get_areas(self) -> List['AreaConfig']:
-        """Return the list of areas (as `AreaConfig`) scaled to the manager's `display_resolution`.
-
-        This centralizes scaling so callers don't implement scaling logic. The
-        returned objects are typed `AreaConfig` instances and safe to use in
-        processing and UI code.
-        """
-        p = self.get_preset_for_display()
-        if not p:
-            return []
-        raw = p.get('areas', []) or []
-        out: List[AreaConfig] = []
-        try:
-            for a in raw:
-                try:
-                    out.append(AreaConfig.from_dict(a if isinstance(a, dict) else {}))
-                except Exception:
-                    # fallback: create empty AreaConfig for malformed entries
-                    out.append(AreaConfig())
-        except Exception:
-            return []
-        return out
+    def get_areas(self) -> List[AreaConfig]:
+        """Return a copy of areas scaled to current display_resolution."""
+        obj = self._get_preset_obj()
+        import copy as _copy
+        areas_copy = _copy.deepcopy(obj.areas)
+        
+        if self.display_resolution:
+            dw, dh = self.display_resolution
+            for area in areas_copy:
+                area.rect = scale_utils.scale_rect_to_physical(area.rect, dw, dh)
+        
+        return areas_copy
 
     def get_area(self, index: int) -> Optional[AreaConfig]:
-        """Return an `AreaConfig` by zero-based list index.
-
-        This method treats the argument strictly as a list index into the
-        array returned by `get_areas()`. If the index is out of range or the
-        argument is not an int, `None` is returned. Callers that already
-        have an `AreaConfig` instance should pass the index of that area.
-        """
-        try:
-            areas = self.get_areas() or []
-            if not isinstance(index, int):
-                return None
-            if 0 <= index < len(areas):
-                return areas[index]
-        except Exception:
-            pass
+        areas = self.get_areas()
+        if 0 <= index < len(areas):
+            return areas[index]
         return None
 
     def set_areas_from_display(self, areas: List[Any], src_resolution: Optional[Tuple[int, int]] = None):
-        """Saves areas in display resolution by delegating to save_preset."""
-        if not self.preset_path:
-            return
         if src_resolution:
             self.display_resolution = src_resolution
-        
-        base = self.load_preset() or {}
-        base['areas'] = list(areas)
-        self.save_preset(self.preset_path, base)
+        self.areas = areas
 
-    def set_areas(self, areas: List[Any]):
-        """Helper for setting areas using known display_resolution."""
-        self.set_areas_from_display(areas)
-
+    def set_areas(self, areas: List[AreaConfig]):
+        """Update areas in current preset and save.
+        Using the property setter ensures correct 4K canonical scaling.
+        """
+        self.areas = areas
 
 
-
-    def save_preset(self, path: Optional[str] = None, data: Dict[str, Any] = None):
-        """Saves preset and scales rects from current display resolution back to canonical 4K."""
-        if data is None: return
-        if not path: path = self.preset_path
-        if not path: return
+    def save_preset(self, path: Optional[str] = None, obj: Optional[PresetConfig] = None):
+        """Saves PresetConfig to disk. Coordinate scaling (4K) is handled by property getters/setters."""
+        if obj is None:
+            obj = self._get_preset_obj()
+        if not path:
+            path = self.preset_path
+        if not path:
+            return
 
         try:
             import copy as _copy
-            write_data = _copy.deepcopy(data)
+            # Work on a copy for path normalization
+            save_obj = _copy.deepcopy(obj)
             
-            # 1. Scaling: DISPLAY -> 4K
-            if self.display_resolution:
-                sw, sh = self.display_resolution
-                areas = write_data.get('areas', [])
-                for a in areas:
-                    r = None
-                    if isinstance(a, dict) and 'rect' in a:
-                        r = a['rect']
-                    elif hasattr(a, 'rect'):
-                        r = a.rect
-                    
-                    if r:
-                        # Scale to canonical 4K
-                        from app import scale_utils
-                        norm_r = scale_utils.scale_rect_to_4k(r, sw, sh)
-                        if isinstance(a, dict):
-                            a['rect'] = norm_r
-                        else:
-                            a.rect = norm_r
-
-            # 2. Serialization: AreaConfig -> Dict
-            raw_areas = []
-            for a in write_data.get('areas', []):
-                if hasattr(a, 'to_full_dict'):
-                    raw_areas.append(a.to_full_dict())
-                elif hasattr(a, 'to_dict'):
-                    raw_areas.append(a.to_dict())
-                else:
-                    raw_areas.append(a)
-            write_data['areas'] = raw_areas
-
-            # 3. Path normalization (Absolute -> Relative)
+            # 1. Path normalization (Absolute -> Relative)
             base_dir = os.path.dirname(os.path.abspath(path))
-            for key in ['audio_dir', 'text_file_path']:
-                if key in write_data and os.path.isabs(str(write_data[key])):
-                    write_data[key] = self._to_relative(base_dir, write_data[key])
+            if os.path.isabs(str(save_obj.audio_dir)):
+                save_obj.audio_dir = self._to_relative(base_dir, save_obj.audio_dir)
+            if os.path.isabs(str(save_obj.text_file_path)):
+                save_obj.text_file_path = self._to_relative(base_dir, save_obj.text_file_path)
 
-            # 4. Write to disk
+            # 2. Serialization
+            write_data = save_obj._to_dict()
+
+            # 3. Write to disk
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(write_data, f, indent=4, ensure_ascii=False)
-            self.preset_cache = data
+            
+            self.preset_cache = obj
         except Exception as e:
-            print(f"Błąd zapisu presetu: {e}")
+            print(f"Error saving preset: {e}")
 
 
     def load_text_lines(self, path: Optional[str] = None) -> List[str]:
