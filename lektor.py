@@ -83,6 +83,9 @@ class LektorApp:
         # Opcje Lektora
         self.var_text_color = tk.StringVar(value="Light")
         self.var_ocr_scale = tk.DoubleVar(value=1.0)
+        def _on_scale_var_change(*args):
+            self.lbl_ocr_scale.config(text=f"{self.var_ocr_scale.get():.2f}")
+        self.var_ocr_scale.trace_add("write", _on_scale_var_change)
         self.var_brightness_threshold = tk.IntVar(value=200)
         self.var_similarity = tk.DoubleVar(value=5.0)
         self.var_contrast = tk.DoubleVar(value=5.0)
@@ -863,7 +866,7 @@ class LektorApp:
         """
         return [dict(a, rect=self._normalize_area_to_4k(a['rect'], img_w, img_h)) if 'rect' in a else a for a in areas]
 
-    def _get_screen_size(self):
+    def _get_scren_size(self):
         """
         Zwraca rozmiar ekranu bazując wyłącznie na `self.var_resolution`.
         Oczekiwany format: 'WIDTHxHEIGHT' (np. '2560x1440').
