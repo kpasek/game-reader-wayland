@@ -107,8 +107,6 @@ class AreaConfig:
         def _pick(name, default):
             if isinstance(d, dict) and name in d and d.get(name) is not None:
                 return d.get(name)
-            if isinstance(s, dict) and name in s:
-                return s.get(name)
             return default
 
         kw['text_thickening'] = int(_pick('text_thickening', 0))

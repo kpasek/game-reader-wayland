@@ -18,9 +18,10 @@ class TestSettingsOptimizer(unittest.TestCase):
 
     def test_optimizer_config_manager(self):
         """Test czy mock config managera zwraca to co mu podamy."""
-        settings = {"test_key": 123}
-        mgr = OptimizerConfigManager(settings)
-        self.assertEqual(mgr.load_preset(), settings)
+        from app.config_manager import PresetConfig
+        preset = PresetConfig(audio_speed=9.99)
+        mgr = OptimizerConfigManager(preset)
+        self.assertEqual(mgr.load_preset().audio_speed, 9.99)
 
     @patch('app.optimizer.preprocess_image')
     @patch('app.optimizer.recognize_text')

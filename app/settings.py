@@ -24,7 +24,7 @@ class SettingsDialog(tk.Toplevel):
         self.app: 'LektorApp' = app_instance
 
         # Zmienne UI (Globalne)
-        self.var_brightness_threshold = tk.IntVar(value=settings.get('brightness_threshold', 150))
+        self.var_brightness_threshold = tk.IntVar(value=app_instance.config_mgr.brightness_threshold)
         self.var_hk_start = tk.StringVar(value=settings.get('hotkey_start_stop', '<f2>'))
         self.var_hk_area3 = tk.StringVar(value=settings.get('hotkey_area3', '<f3>'))
 
