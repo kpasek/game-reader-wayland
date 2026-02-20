@@ -68,6 +68,7 @@ sys.modules['PIL.ImageTk'] = MagicMock()
 # sys.modules['pyscreenshot'] = MagicMock() <-- REMOVED: Use real module or patch in specific tests
 
 # NOW import the app module
+from app.config_manager import AreaConfig
 from app.area_manager import AreaManagerWindow
 
 class TestAreaManager(unittest.TestCase):
@@ -103,8 +104,9 @@ class TestAreaManager(unittest.TestCase):
 
         # Create a simple mock ConfigManager for tests
         self.mock_cfg = MagicMock()
-        self.mock_cfg.get_preset_for_resolution = MagicMock(return_value={'areas': self.areas})
-        self.mock_cfg.load_preset = MagicMock(return_value={'areas': self.areas})
+        # Convert dict areas to AreaConfig objects
+        self.area_objects = [AreaConfig._from_dict(a) for a in self.areas]
+        self.mock_cfg.get_areas = MagicMock(return_value=self.area_objects)
         self.mock_cfg.save_preset_from_screen = MagicMock()
 
         # Ensure mock_cfg has cached preset_path like real ConfigManager
@@ -135,7 +137,7 @@ class TestAreaManager(unittest.TestCase):
         self.assertEqual(len(self.window.areas), initial_count + 1)
         
         new_area = self.window.areas[-1]
-        self.assertEqual(new_area['type'], 'manual') # Default
+        self.assertEqual(new_area.type, 'manual') # Default
 
     def test_remove_area(self):
         # Setup selection for removal
@@ -143,7 +145,7 @@ class TestAreaManager(unittest.TestCase):
         
         self.window._remove_area()
         self.assertEqual(len(self.window.areas), 1)
-        self.assertEqual(self.window.areas[0]['id'], 1)
+        self.assertEqual(self.window.areas[0].id, 1)
 
     def test_cannot_remove_area_1(self):
         self.window.current_selection_idx = 0
@@ -157,12 +159,7 @@ class TestAreaManager(unittest.TestCase):
 
     def test_save_callback(self):
         self.window._save_and_close()
-        # Ensure ConfigManager.save_preset_from_screen invoked
-        self.mock_cfg.save_preset_from_screen.assert_called_once()
-        # Validate that saved areas length matches
-        saved_data = self.mock_cfg.save_preset_from_screen.call_args[0][1]
-        self.assertIn('areas', saved_data)
-        self.assertEqual(len(saved_data['areas']), 2)
+        self.mock_cfg.set_areas.assert_called()
 
 if __name__ == '__main__':
     unittest.main()

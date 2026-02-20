@@ -1,87 +1,40 @@
 import unittest
-from unittest.mock import MagicMock, patch
-import sys
+from app.scale_utils import scale_rect_to_physical, scale_rect_to_4k, scale_list_to_physical, scale_list_to_4k
 
-# We should rely on installed dependencies for imports to ensure other tests aren't affected by global mocks.
-# Specific dependencies will be mocked in setUp or tests.
+class TestScalingUtils(unittest.TestCase):
+    def test_scale_rect_to_physical(self):
+        # 4K (3840x2160) to 1080p (1920x1080) -> factor 0.5
+        rect = {'left': 100, 'top': 200, 'width': 1000, 'height': 500}
+        scaled = scale_rect_to_physical(rect, 1920, 1080)
+        self.assertEqual(scaled['left'], 50)
+        self.assertEqual(scaled['top'], 100)
+        self.assertEqual(scaled['width'], 500)
+        self.assertEqual(scaled['height'], 250)
 
-from app.reader import ReaderThread
+    def test_scale_rect_to_4k(self):
+        # 1080p to 4K -> factor 2.0
+        rect = {'left': 50, 'top': 100, 'width': 500, 'height': 250}
+        scaled = scale_rect_to_4k(rect, 1920, 1080)
+        self.assertEqual(scaled['left'], 100)
+        self.assertEqual(scaled['top'], 200)
+        self.assertEqual(scaled['width'], 1000)
+        self.assertEqual(scaled['height'], 500)
 
-class TestScaling(unittest.TestCase):
-    def setUp(self):
-        # Mock capture module methods that are used
-        self.patcher = patch('app.capture.capture_fullscreen')
-        self.mock_capture = self.patcher.start()
-        
-        # Configure default behavior properly (1080p)
-        self.mock_capture.return_value = MagicMock()
-        self.mock_capture.return_value.size = (1920, 1080)
+    def test_rounding(self):
+        # Test if rounding works correctly (not just floor)
+        # 3840 / 1366 = 2.811...
+        # 100 * (1366 / 3840) = 100 * 0.3557 = 35.57 -> 36
+        rect = {'left': 100, 'top': 100, 'width': 100, 'height': 100}
+        scaled = scale_rect_to_physical(rect, 1366, 768)
+        self.assertEqual(scaled['left'], 36)
 
-    def tearDown(self):
-        self.patcher.stop()
-
-    def set_res(self, w, h):
-        if w is None:
-            self.mock_capture.return_value = None
-        else:
-            self.mock_capture.return_value = MagicMock()
-            self.mock_capture.return_value.size = (w, h)
-
-    def test_scale_monitor_areas_no_scaling(self):
-        # Niezależnie od rozdzielczości, funkcja nie skaluje (wejście == wyjście)
-        self.set_res(1920, 1080)
-        reader = ReaderThread(MagicMock(), MagicMock(), MagicMock(), target_resolution=(1920, 1080))
-        monitors = [{'left': 100, 'top': 100, 'width': 200, 'height': 200}]
-        scaled = reader._scale_monitor_areas(monitors)
-        self.assertEqual(scaled, monitors)
-        
-    def test_scale_monitor_areas_downscaling(self):
-        # Niezależnie od rozdzielczości, funkcja nie skaluje (wejście == wyjście)
-        self.set_res(1920, 1080)
-        reader = ReaderThread(MagicMock(), MagicMock(), MagicMock(), target_resolution=(1920, 1080))
-        monitors = [{'left': 200, 'top': 200, 'width': 400, 'height': 400}]
-        scaled = reader._scale_monitor_areas(monitors)
-        self.assertEqual(scaled, monitors)
-
-    def test_scale_monitor_areas_upscaling(self):
-        # Niezależnie od rozdzielczości, funkcja nie skaluje (wejście == wyjście)
-        self.set_res(3840, 2160)
-        reader = ReaderThread(MagicMock(), MagicMock(), MagicMock(), target_resolution=(3840, 2160))
-        monitors = [{'left': 100, 'top': 100, 'width': 200, 'height': 200}]
-        scaled = reader._scale_monitor_areas(monitors)
-        self.assertEqual(scaled, monitors)
-        
-    def test_logic_flaw_with_screen_resolution_fixed(self):
-        # Niezależnie od rozdzielczości, funkcja nie skaluje (wejście == wyjście)
-        self.set_res(3840, 2160)
-        reader = ReaderThread(MagicMock(), MagicMock(), MagicMock(), target_resolution=(1920, 1080))
-        monitors = [{'left': 3000, 'top': 2000, 'width': 100, 'height': 100}]
-        preset_res = "3840x2160"
-        scaled = reader._scale_monitor_areas(monitors)
-        self.assertEqual(scaled, monitors)
-
-    def test_capture_fails_fallback_logic(self):
-        # Niezależnie od rozdzielczości, funkcja nie skaluje (wejście == wyjście)
-        self.set_res(None, None)
-        reader = ReaderThread(MagicMock(), MagicMock(), MagicMock(), target_resolution=(1920, 1080))
-        monitors = [{'left': 3000, 'top': 2000, 'width': 100, 'height': 100}]
-        preset_res = "3840x2160"
-        scaled = reader._scale_monitor_areas(monitors)
-        self.assertEqual(scaled, monitors)
-
-    def test_hidpi_logical_vs_physical_mismatch(self):
-        # Niezależnie od rozdzielczości, funkcja nie skaluje (wejście == wyjście)
-        self.set_res(2560, 1440)
-        reader = ReaderThread(MagicMock(), MagicMock(), MagicMock(), target_resolution=(2560, 1440))
-        monitors = [{'left': 3000, 'top': 2000, 'width': 100, 'height': 100}]
-        preset_res = "3840x2160"
-        scaled = reader._scale_monitor_areas(monitors)
-        self.assertEqual(scaled, monitors)
-
-    def test_logic_upscaling_with_physical_resolution(self):
-        # Niezależnie od rozdzielczości, funkcja nie skaluje (wejście == wyjście)
-        self.set_res(3840, 2160)
-        reader = ReaderThread(MagicMock(), MagicMock(), MagicMock(), target_resolution=(1920, 1080))
-        monitors = [{'left': 100, 'top': 100, 'width': 100, 'height': 100}]
-        scaled = reader._scale_monitor_areas(monitors)
-        self.assertEqual(scaled, monitors)
+    def test_list_scaling(self):
+        rects = [
+            {'left': 100, 'top': 100, 'width': 100, 'height': 100},
+            None,
+            {'left': 200, 'top': 200, 'width': 200, 'height': 200}
+        ]
+        scaled = scale_list_to_physical(rects, 1920, 1080)
+        self.assertEqual(len(scaled), 3)
+        self.assertEqual(scaled[0]['left'], 50)
+        self.assertIsNone(scaled[1])

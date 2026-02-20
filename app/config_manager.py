@@ -104,7 +104,6 @@ class AreaConfig:
         
         kw['colors'] = list(d.get('colors', d.get('colors', [])) or [])
 
-        # Per-area settings may be nested under 'settings' or present at top-level
         def _pick(name, default):
             if isinstance(d, dict) and name in d and d.get(name) is not None:
                 return d.get(name)
@@ -740,7 +739,7 @@ class ConfigManager:
     def _migrate_legacy_areas(self, data: Dict[str, Any]):
         """Konwertuje stare ustawienia 'monitor' i 'colors' na nową strukturę 'areas'."""
         monitors = data.get('monitor', [])
-        colors = data.get('colors', [])
+        colors = data.get('colors', data.get('subtitle_colors', []))
         
         new_areas = []
 

@@ -28,7 +28,7 @@ class MockApp:
         self.var_tolerance = tk.IntVar(value=10)
         self.var_text_thickening = tk.IntVar(value=1)
         self.var_show_debug = tk.BooleanVar(value=False)
-        self.var_text_alignment = tk.StringVar(value="None")
+        self.var_text_color_mode = tk.StringVar(value="None")
         self.var_text_color = tk.StringVar(value="Light")
         self.var_match_score_short = tk.IntVar(value=90)
         self.var_match_score_long = tk.IntVar(value=75)
@@ -51,7 +51,7 @@ class MockApp:
         path = self.var_preset_full_path.get()
         if path and os.path.exists(path):
             data = self.config_mgr.load_preset(path)
-            data[key] = val
+            setattr(data, key, val)
             self.config_mgr.save_preset(path, data)
 
 @pytest.fixture
@@ -95,7 +95,7 @@ def test_settings_save_global_hotkeys(setup_integration):
     }
     
     try:
-        dialog = SettingsDialog(root, settings, app)
+        dialog = SettingsDialog(root, app.config_mgr.settings, app)
         
         # Change values in DIALOG variables
         dialog.var_hk_start.set('<f5>')
@@ -105,8 +105,8 @@ def test_settings_save_global_hotkeys(setup_integration):
         dialog.save()
         
         # Verify dictionary update
-        assert settings['hotkey_start_stop'] == '<f5>'
-        assert settings['hotkey_area3'] == '<f6>'
+        assert app.config_mgr.settings['hotkey_start_stop'] == '<f5>'
+        assert app.config_mgr.settings['hotkey_area3'] == '<f6>'
     finally:
         if 'dialog' in locals(): dialog.destroy()
 
@@ -129,20 +129,20 @@ def test_settings_dialog_interaction_mock(setup_integration):
     Since we can't easily click, we verify logic flow of callbacks if we could fetch them.
     Instead, we trust test_settings_change_persisted_to_json covers the mechanism used by the dialog.
     
-    But let's verify one complex mapping provided by dialog logic, e.g. 'text_alignment'.
+    But let's verify one complex mapping provided by dialog logic, e.g. 'text_color_mode'.
     """
     app, cm, preset_path, root = setup_integration
     
     # Simulate Combobox selection event logic (from settings.py code)
-    # cb_align.bind("<<ComboboxSelected>>", lambda e: self.app._save_preset_val("text_alignment", self.app.var_text_alignment.get()))
+    # cb_align.bind("<<ComboboxSelected>>", lambda e: self.app._save_preset_val("text_color_mode", self.app.var_text_color_mode.get()))
     
-    app.var_text_alignment.set("Center")
+    app.var_text_color_mode.set("Dark")
     # Trigger save
-    app._save_preset_val("text_alignment", app.var_text_alignment.get())
+    app._save_preset_val("text_color_mode", app.var_text_color_mode.get())
     
     with open(preset_path, 'r') as f:
         data = json.load(f)
-    assert data["text_alignment"] == "Center"
+    assert data["text_color_mode"] == "Dark"
 
 def test_settings_slider_rounding(setup_integration):
     app, cm, preset_path, root = setup_integration

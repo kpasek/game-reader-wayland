@@ -4,12 +4,12 @@ from app.matcher import precompute_subtitles, find_best_match, SubtitleEntry, MA
 from app.config_manager import ConfigManager
 
 
-class DummyConfig(ConfigManager):
-    def __init__(self, data: Dict[str, Any]):
-        # Don't call super to avoid file IO; just store provided data
-        self._data = data or {}
-        self.settings = {}
-        self.preset_path = None
+class DummyConfig:
+    def __init__(self, data):
+        self.match_score_short = data.get("match_score_short", 90)
+        self.match_score_long = data.get("match_score_long", 75)
+        self.match_len_diff_ratio = data.get("match_len_diff_ratio", 0.3)
+        self.partial_mode_min_len = data.get("partial_mode_min_len", 20)
 
     def _current_preset(self):
         return self._data

@@ -26,7 +26,7 @@ class TestOptimizerExtra(unittest.TestCase):
         for call_args in mock_evaluate.call_args_list:
             # call_args[0] = (crop, settings, db, mode)
             settings = call_args[0][1]
-            if settings.get('subtitle_colors') == [target_color]:
+            if getattr(settings, 'colors', []) == [target_color]:
                 found = True
                 break
         

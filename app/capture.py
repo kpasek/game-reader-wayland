@@ -145,7 +145,7 @@ def capture_region(region: Dict[str, int]) -> Optional[Image.Image]:
                 sct_img = sct.grab(rect)
                 img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
                 return img
-        img = ImageGrab.grab(bbox=(left, top, left + width, top + height))
+        return ImageGrab.grab(bbox=(left, top, left + width, top + height))
 
     except Exception as e:
         print(f"BŁĄD (capture_region): {e}", file=sys.stderr)
