@@ -143,10 +143,10 @@ class LektorApp:
 
     # --- LOGIKA SKALI OCR ---
     def _calc_auto_scale(self, width, height):
-        if height <= 800: return 0.8
-        if height >= 2160: return 0.3
+        if height <= 800: return 1.0
+        if height >= 2160: return 0.4
         ratio = (height - 800) / (2160 - 800)
-        scale = 0.8 + ratio * (0.3 - 0.8)
+        scale = 1.0 + ratio * (0.4 - 1.0)
         return round(scale * 20) / 20.0
 
     def _update_scale_for_resolution(self, res_str, force_auto=False):
