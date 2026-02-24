@@ -225,14 +225,14 @@ class SettingsOptimizer:
 
         # Pierwszy zrzut: score_list = [score]
         survivors = [([score], s, bbox) for score, s, bbox in survivors]
-        print_summary(survivors, 0, len(input_images))
+        print_summary(survivors, 0, len(images))
 
         # Jeśli mamy więcej obrazów, filtrujemy
         rejected_screens = []
-        if len(input_images) > 1 and survivors:
+        if len(images) > 1 and survivors:
             finalists = survivors
             # Sprawdzamy kolejne obrazy
-            for idx, img in enumerate(input_images[1:], start=1):
+            for idx, img in enumerate(images[1:], start=1):
                 crop_n = create_crop(img)
                 if not crop_n: continue
                 next_round = []
@@ -270,7 +270,7 @@ class SettingsOptimizer:
                     continue
                 next_round.sort(key=sort_key, reverse=True)
                 finalists = next_round
-                print_summary(finalists, idx, len(input_images))
+                print_summary(finalists, idx, len(images))
             if finalists:
                 finalists.sort(key=sort_key, reverse=True)
                 best_score_list, best_preset, best_bbox = finalists[0]
