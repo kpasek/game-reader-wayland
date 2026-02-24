@@ -99,22 +99,12 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager, area_con
     Przetwarza obraz pod kątem OCR w oparciu o jawną konfigurację.
     """
     try:
-        # Pobieranie parametrów z area_config lub config_manager
-        if area_config:
-            thick = int(area_config.text_thickening)
-            thresh = int(area_config.brightness_threshold)
-            contr = float(area_config.contrast or 0.0)
-            # Priorytet: override_colors > area colors
-            cols_source = override_colors if override_colors is not None else area_config.colors
-            color_tol = int(area_config.color_tolerance)
-            show_debug = bool(area_config.show_debug)
-        else:
-            thick = int(config_manager.text_thickening)
-            thresh = int(config_manager.brightness_threshold)
-            contr = float(config_manager.contrast)
-            cols_source = override_colors if override_colors is not None else config_manager.colors
-            color_tol = int(config_manager.color_tolerance)
-            show_debug = bool(config_manager.show_debug)
+        thick = int(area_config.text_thickening)
+        thresh = int(area_config.brightness_threshold)
+        contr = float(area_config.contrast or 0.0)
+        cols_source = override_colors if override_colors is not None else area_config.colors
+        color_tol = int(area_config.color_tolerance)
+        show_debug = bool(config_manager.show_debug)
 
         # Parametry globalne
         color_mode = str(config_manager.text_color_mode)

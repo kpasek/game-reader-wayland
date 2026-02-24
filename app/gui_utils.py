@@ -1,4 +1,5 @@
 import tkinter as tk
+from app.ctk_widgets import CTkToplevel
 
 class ToolTip:
     def __init__(self, widget, text):
@@ -15,12 +16,12 @@ class ToolTip:
             return
         x = self.widget.winfo_rootx() + 20
         y = self.widget.winfo_rooty() + self.widget.winfo_height() + 5
-        self.tip_window = tw = tk.Toplevel(self.widget)
+        self.tip_window = tw = CTkToplevel(self.widget)
         tw.wm_overrideredirect(1)
         tw.wm_geometry("+%d+%d" % (x, y))
         label = tk.Label(tw, text=self.text, justify=tk.LEFT,
-                      background="#ffffe0", relief=tk.SOLID, borderwidth=1,
-                      font=("tahoma", "9", "normal"), padx=5, pady=5)
+                             background="#ffffe0", relief=tk.SOLID, borderwidth=1,
+                             font=("tahoma", "9", "normal"), padx=5, pady=5)
         label.pack(ipadx=1)
 
     def hide_tip(self, event=None):

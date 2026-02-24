@@ -11,3 +11,4 @@ ordered-set
 zstandard
 # inputs
 pynput
+customtkinter

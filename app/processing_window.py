@@ -1,7 +1,9 @@
+from app.ctk_widgets import CTkToplevel, make_frame, make_label
 import tkinter as tk
 from tkinter import ttk
 
-class ProcessingWindow(tk.Toplevel):
+
+class ProcessingWindow(CTkToplevel):
     def __init__(self, parent, title="Przetwarzanie"):
         super().__init__(parent)
         self.title(title)
@@ -19,21 +21,31 @@ class ProcessingWindow(tk.Toplevel):
         except Exception:
             pass
 
-        main_f = ttk.Frame(self, padding=20)
+        main_f = make_frame(self, padding=20)
         main_f.pack(fill=tk.BOTH, expand=True)
 
         # Warn user that optimization may be long-running when progressbar is shown
-        self.lbl_status = ttk.Label(
+        self.lbl_status = make_label(
             main_f,
             text=("Trwa optymalizacja ustawień...\n"),
-            justify=tk.CENTER
         )
         self.lbl_status.pack(pady=10)
 
-        self.progress = ttk.Progressbar(main_f, mode='indeterminate')
-        self.progress.pack(fill=tk.X, pady=10)
-        self.progress.start(10)
+        # Progressbar via factory (fallback to ttk.Progressbar)
+        self.progress = make_progressbar(main_f, mode='indeterminate')
+        if self.progress:
+            self.progress.pack(fill=tk.X, pady=10)
+            try:
+                self.progress.start(10)
+            except Exception:
+                pass
 
     def set_status(self, text):
-        self.lbl_status.config(text=text)
+        try:
+            self.lbl_status.configure(text=text)
+        except Exception:
+            try:
+                self.lbl_status.configure(text=text)
+            except Exception:
+                pass
         self.update_idletasks()

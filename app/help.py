@@ -1,7 +1,9 @@
 import tkinter as tk
 from tkinter import scrolledtext, font
+from app.ctk_widgets import CTkToplevel
 
-class HelpWindow(tk.Toplevel):
+
+class HelpWindow(CTkToplevel):
     def __init__(self, parent):
         super().__init__(parent)
         self.title("Pomoc i Instrukcja")
@@ -131,4 +133,4 @@ class HelpWindow(tk.Toplevel):
             else:
                 txt.insert(tk.END, item[0])  # Fallback
 
-        txt.config(state=tk.DISABLED)
+        txt.configure(state=tk.DISABLED)

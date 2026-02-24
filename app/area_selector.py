@@ -9,9 +9,11 @@ except ImportError:
     Image = None
     ImageTk = None
 
+from app.ctk_widgets import CTkToplevel
 
 
-class AreaSelector(tk.Toplevel):
+
+class AreaSelector(CTkToplevel):
     """
     Pełnoekranowe okno pozwalające zaznaczyć prostokątny obszar myszką.
     Zwraca słownik geometrii w self.geometry (współrzędne względem oryginalnego screenshotu).
@@ -112,7 +114,7 @@ class AreaSelector(tk.Toplevel):
         self.bind("<Escape>", lambda e: self.destroy())
 
         # Informacja dla usera
-        self.lbl_info = tk.Label(self, text="Zaznacz obszar myszką (ESC aby anulować)", bg="yellow", font=("Arial", 12))
+        self.lbl_info = make_label(self, text="Zaznacz obszar myszką (ESC aby anulować)", text_color=None, font=("Arial", 12))
         self.lbl_info.place(x=10, y=10)
 
         # Focus i czekanie na okno
@@ -168,7 +170,7 @@ class AreaSelector(tk.Toplevel):
         self.destroy()
 
 
-class ColorSelector(tk.Toplevel):
+class ColorSelector(CTkToplevel):
     def __init__(self, parent, screenshot: Image.Image):
         super().__init__(parent)
         self.original_screenshot = screenshot # Physical

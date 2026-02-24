@@ -1,9 +1,10 @@
 import tkinter as tk
-from tkinter import  scrolledtext
+from tkinter import scrolledtext
+from app.ctk_widgets import CTkToplevel
 import queue
 
 
-class LogWindow(tk.Toplevel):
+class LogWindow(CTkToplevel):
     def __init__(self, parent, log_queue):
         super().__init__(parent)
         self.title("Podgląd Logów OCR")
@@ -68,7 +69,7 @@ class LogWindow(tk.Toplevel):
                 msg += "   >>> Brak dopasowania\n"
             msg += "-" * 40 + "\n"
 
-        self.text_area.config(state='normal')
+        self.text_area.configure(state='normal')
         self.text_area.insert(tk.END, msg)
 
         num_lines = int(self.text_area.index('end-1c').split('.')[0])
@@ -77,4 +78,4 @@ class LogWindow(tk.Toplevel):
             self.text_area.delete("1.0", f"{diff}.0")
 
         self.text_area.see(tk.END)
-        self.text_area.config(state='disabled')
+        self.text_area.configure(state='disabled')

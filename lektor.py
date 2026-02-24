@@ -18,6 +18,22 @@ try:
 except ImportError:
     print("Błąd: Brak biblioteki tkinter.", file=sys.stderr)
     sys.exit(1)
+import customtkinter as ctk
+
+# Initialize customtkinter appearance so CTk widgets and windows use the chosen theme.
+# Default to system appearance; change to 'dark' or 'light' to force a mode.
+try:
+    ctk.set_appearance_mode("system")
+    ctk.set_default_color_theme("blue")
+except Exception:
+    # Fail gracefully if customtkinter doesn't expose these (older versions/tests)
+    pass
+
+from app.ctk_widgets import (
+    CTkFrame, CTkLabel, make_button, make_label, make_frame,
+    make_combobox, make_scale, make_slider
+)
+
 
 if platform.system() == "Windows":
     try:
@@ -55,7 +71,7 @@ audio_queue = queue.Queue()
 log_queue = queue.Queue()
 debug_queue = queue.Queue()
 
-APP_VERSION = "v1.5.5"
+APP_VERSION = "v1.6.0"
 
 
 class LektorApp:
@@ -84,7 +100,7 @@ class LektorApp:
         self.var_text_color = tk.StringVar(value="Light")
         self.var_ocr_scale = tk.DoubleVar(value=1.0)
         def _on_scale_var_change(*args):
-            self.lbl_ocr_scale.config(text=f"{self.var_ocr_scale.get():.2f}")
+            self.lbl_ocr_scale.configure(text=f"{self.var_ocr_scale.get():.2f}")
         self.var_ocr_scale.trace_add("write", _on_scale_var_change)
         self.var_brightness_threshold = tk.IntVar(value=200)
         self.var_similarity = tk.DoubleVar(value=5.0)
@@ -257,39 +273,39 @@ class LektorApp:
         help_menu.add_command(label="Podgląd logów", command=self.show_logs)
         help_menu.add_command(label="Instrukcja", command=self.show_help)
         menubar.add_cascade(label="Pomoc", menu=help_menu)
-        self.root.config(menu=menubar)
+        self.root.configure(menu=menubar)
 
-        panel = ttk.Frame(self.root, padding=10)
-        panel.pack(fill=tk.BOTH, expand=True)
+        panel = CTkFrame(self.root)
+        panel.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        ttk.Label(panel, text="Aktywny lektor (Katalog):").pack(anchor=tk.W)
-        self.cb_preset = ttk.Combobox(panel, textvariable=self.var_preset_display, state="readonly", width=60)
+        CTkLabel(panel, text="Aktywny lektor (Katalog):").pack(anchor=tk.W)
+        # Use factory for comboboxes (falls back to ttk.Combobox if CTk lacks one)
+        self.cb_preset = make_combobox(panel, textvariable=self.var_preset_display, state="readonly", width=60)
         self.cb_preset.pack(fill=tk.X, pady=5)
         self.cb_preset.bind("<<ComboboxSelected>>", self.on_preset_selected_from_combo)
 
         # --- ROZDZIELCZOŚĆ ---
-        f_res = ttk.Frame(panel)
+        f_res = CTkFrame(panel)
         f_res.pack(fill=tk.X, pady=5)
-        ttk.Label(f_res, text="Rozdzielczość:").pack(side=tk.LEFT)
-        self.cb_res = ttk.Combobox(f_res, textvariable=self.var_resolution, values=self.resolutions)
+        CTkLabel(f_res, text="Rozdzielczość:").pack(side=tk.LEFT)
+        self.cb_res = make_combobox(f_res, textvariable=self.var_resolution, values=self.resolutions)
         self.cb_res.pack(side=tk.LEFT, padx=5)
         self.cb_res.bind("<<ComboboxSelected>>", self._on_resolution_selected)
-        ttk.Button(f_res, text="Dopasuj rozdz.", command=self.auto_detect_resolution).pack(side=tk.LEFT, padx=5)
+        make_button(f_res, text="Dopasuj rozdz.", command=self.auto_detect_resolution).pack(side=tk.LEFT, padx=5)
 
 
         # Actions Panel (Replaces Colors Panel)
-        grp_act = ttk.LabelFrame(panel, text="Akcje", padding=10)
+        grp_act = CTkFrame(panel)
         grp_act.pack(fill=tk.X, pady=5)
-
         # Big Buttons for main actions
-        btn_detect = tk.Button(grp_act, text="Wykryj Ustawienia", command=self.detect_optimal_settings, bg="#e0e0e0", relief="raised")
+        btn_detect = make_button(grp_act, text="Wykryj Ustawienia", command=self.detect_optimal_settings)
         btn_detect.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
-        btn_areas = tk.Button(grp_act, text="Zarządzaj Obszarami", command=self.open_area_manager, bg="#e0e0e0", relief="raised")
+        btn_areas = make_button(grp_act, text="Zarządzaj Obszarami", command=self.open_area_manager)
         btn_areas.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
         # Przycisk Ustawienia
-        self.btn_settings = ttk.Button(grp_act, text="⚙ Ustawienia", command=self.open_settings)
+        self.btn_settings = make_button(grp_act, text="⚙ Ustawienia", command=self.open_settings)
         self.btn_settings.pack(side=tk.LEFT, padx=5)
 
         # Removed old subtitle colors section
@@ -297,52 +313,59 @@ class LektorApp:
 
 
         # --- AUDIO + SKALA OCR ---
-        grp_aud = ttk.LabelFrame(panel, text="Kontrola Audio i Skala OCR", padding=10)
+        grp_aud = CTkFrame(panel)
         grp_aud.pack(fill=tk.X, pady=10)
 
-        ttk.Label(grp_aud, text="Prędkość:").grid(row=0, column=0)
-        s_spd = ttk.Scale(grp_aud, from_=0.9, to=1.5, variable=self.var_speed,
-                  command=lambda v: self.lbl_spd.config(text=f"{float(v):.2f}x"))
+        CTkLabel(grp_aud, text="Prędkość:").grid(row=0, column=0)
+        s_spd = make_slider(grp_aud, from_=0.9, to=1.5, variable=self.var_speed,
+                  command=lambda v: self.lbl_spd.configure(text=f"{float(v):.2f}x") if hasattr(self, 'lbl_spd') else None)
         s_spd.grid(row=0, column=1, sticky="ew", padx=10)
-        s_spd.bind("<ButtonRelease-1>", lambda e: setattr(self.config_mgr, "audio_speed", round(self.var_speed.get(), 2)))
-        self.lbl_spd = ttk.Label(grp_aud, text="1.00x", width=5)
+        try:
+            s_spd.bind("<ButtonRelease-1>", lambda e: setattr(self.config_mgr, "audio_speed", round(self.var_speed.get(), 2)))
+        except Exception:
+            pass
+        self.lbl_spd = CTkLabel(grp_aud, text="1.00x", width=5)
         self.lbl_spd.grid(row=0, column=2)
 
-        ttk.Label(grp_aud, text="Głośność:").grid(row=1, column=0)
-        s_vol = ttk.Scale(grp_aud, from_=0.0, to=1.5, variable=self.var_volume,
-                  command=lambda v: self.lbl_vol.config(text=f"{float(v):.2f}"))
+        CTkLabel(grp_aud, text="Głośność:").grid(row=1, column=0)
+        s_vol = make_slider(grp_aud, from_=0.0, to=1.5, variable=self.var_volume,
+                  command=lambda v: self.lbl_vol.configure(text=f"{float(v):.2f}"))
         s_vol.grid(row=1, column=1, sticky="ew", padx=10)
-        s_vol.bind("<ButtonRelease-1>",
-               lambda e: setattr(self.config_mgr, "audio_volume", round(self.var_volume.get(), 2)))
-        self.lbl_vol = ttk.Label(grp_aud, text="1.00", width=5)
+        try:
+            s_vol.bind("<ButtonRelease-1>", lambda e: setattr(self.config_mgr, "audio_volume", round(self.var_volume.get(), 2)))
+        except Exception:
+            pass
+        self.lbl_vol = CTkLabel(grp_aud, text="1.00", width=5)
         self.lbl_vol.grid(row=1, column=2)
 
-        ttk.Label(grp_aud, text="Format:").grid(row=2, column=0)
-        ttk.Label(grp_aud, textvariable=self.var_audio_ext, font=("Arial", 8, "bold")).grid(row=2, column=1, sticky="w",
+        CTkLabel(grp_aud, text="Format:").grid(row=2, column=0)
+        CTkLabel(grp_aud, textvariable=self.var_audio_ext, font=("Arial", 8, "bold")).grid(row=2, column=1, sticky="w",
                                                     padx=10)
         grp_aud.columnconfigure(1, weight=1)
 
         # --- SKALA OCR ---
-        ttk.Label(grp_aud, text="Skala OCR:").grid(row=3, column=0, sticky="w", pady=(10,0))
-        s_ocr = ttk.Scale(grp_aud, from_=0.1, to=1.0, variable=self.var_ocr_scale,
-                 command=lambda v: self.lbl_ocr_scale.config(text=f"{float(v):.2f}"))
+        CTkLabel(grp_aud, text="Skala OCR:").grid(row=3, column=0, sticky="w", pady=(10,0))
+        s_ocr = make_slider(grp_aud, from_=0.1, to=1.0, variable=self.var_ocr_scale,
+                 command=lambda v: self.lbl_ocr_scale.configure(text=f"{float(v):.2f}"))
         s_ocr.grid(row=3, column=1, sticky="ew", padx=10)
-        s_ocr.bind("<ButtonRelease-1>", lambda e: self.on_manual_scale_change())
-        self.lbl_ocr_scale = ttk.Label(grp_aud, text=f"{self.var_ocr_scale.get():.2f}", width=5)
+        try:
+            s_ocr.bind("<ButtonRelease-1>", lambda e: self.on_manual_scale_change())
+        except Exception:
+            pass
+        self.lbl_ocr_scale = CTkLabel(grp_aud, text=f"{self.var_ocr_scale.get():.2f}", width=5)
         self.lbl_ocr_scale.grid(row=3, column=2)
 
         # --- STEROWANIE ---
         hk_start = self.config_mgr.hotkey_start_stop
-        frm_btn = ttk.Frame(panel)
+        frm_btn = CTkFrame(panel)
         frm_btn.pack(side=tk.BOTTOM, fill=tk.X, pady=10)
 
-        self.btn_start = ttk.Button(frm_btn, text=f"START ({hk_start})", command=self.start_reading)
+        self.btn_start = make_button(frm_btn, text=f"START ({hk_start})", command=self.start_reading)
         self.btn_start.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        self.btn_stop = ttk.Button(frm_btn, text=f"STOP ({hk_start})", command=self.stop_reading, state="disabled")
+        self.btn_stop = make_button(frm_btn, text=f"STOP ({hk_start})", command=self.stop_reading, state="disabled")
         self.btn_stop.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
-        ttk.Label(self.root, text=f"Wersja: {APP_VERSION}", font=("Arial", 8)) \
-            .pack(side=tk.BOTTOM, anchor=tk.E, padx=5)
+        CTkLabel(self.root, text=f"Wersja: {APP_VERSION}", font=("Arial", 8)).pack(side=tk.BOTTOM, anchor=tk.E, padx=5)
 
         self.root.after(200, self.refresh_color_canvas)
 
@@ -423,10 +446,10 @@ class LektorApp:
 
         # Sync UI state from canonical properties via ConfigManager
         self.var_speed.set(self.config_mgr.audio_speed)
-        self.lbl_spd.config(text=f"{self.var_speed.get():.2f}x")
+        self.lbl_spd.configure(text=f"{self.var_speed.get():.2f}x")
 
         self.var_volume.set(self.config_mgr.audio_volume)
-        self.lbl_vol.config(text=f"{self.var_volume.get():.2f}")
+        self.lbl_vol.configure(text=f"{self.var_volume.get():.2f}")
 
         # Automatyczna detekcja formatu audio
         detected_ext = self._detect_audio_format(self.config_mgr.audio_dir or "")
@@ -466,7 +489,7 @@ class LektorApp:
 
         if hasattr(self, 'ent_regex') and self.ent_regex:
             try:
-                self.ent_regex.config(state="normal" if mode == "Własny (Regex)" else "disabled")
+                self.ent_regex.configure(state="normal" if mode == "Własny (Regex)" else "disabled")
             except Exception:
                 self.ent_regex = None
 
@@ -558,8 +581,8 @@ class LektorApp:
         self.config_mgr.save_app_config()
         self._restart_hotkeys()
         hk = self.config_mgr.hotkey_start_stop
-        self.btn_start.config(text=f"START ({hk})")
-        self.btn_stop.config(text=f"STOP ({hk})")
+        self.btn_start.configure(text=f"START ({hk})")
+        self.btn_stop.configure(text=f"STOP ({hk})")
 
     def show_logs(self):
         if not self.log_window or not self.log_window.winfo_exists():
@@ -618,10 +641,10 @@ class LektorApp:
 
     def _toggle_ui(self, running):
         s = "disabled" if running else "normal"
-        self.btn_start.config(state=s)
-        self.btn_stop.config(state="normal" if running else "disabled")
-        self.cb_preset.config(state=s)
-        self.cb_res.config(state=s)
+        self.btn_start.configure(state=s)
+        self.btn_stop.configure(state="normal" if running else "disabled")
+        self.cb_preset.configure(state=s)
+        self.cb_res.configure(state=s)
 
     def _detect_audio_format(self, audio_dir_path: str) -> Optional[str]:
         if not audio_dir_path or not os.path.exists(audio_dir_path):
@@ -1156,7 +1179,7 @@ def main():
     args = parser.parse_args()
     cmd = args.game_command
     if cmd and cmd[0] == '--': cmd.pop(0)
-    root = tk.Tk(className='Lektor')
+    root = ctk.CTk(className='Lektor')
     LektorApp(root, args.preset, cmd)
     root.mainloop()
 

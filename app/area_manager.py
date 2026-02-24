@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
+from app.ctk_widgets import CTkToplevel, make_frame, make_label, make_button, make_combobox, make_scrollbar, make_separator, make_slider, make_entry, make_checkbutton, make_notebook, make_notebook_tab, make_listbox
 import os
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 
@@ -35,7 +36,7 @@ STATE_ON = "ON"
 STATE_OFF = "OFF"
 
 
-class AreaManagerWindow(tk.Toplevel):
+class AreaManagerWindow(CTkToplevel):
 
     def __init__(self, parent: tk.Misc, app: 'LektorApp', subtitle_lines: Optional[List[Dict[str, Any]]] = None):
         """Accepts the main `LektorApp` instance so AreaManager can access
@@ -76,153 +77,138 @@ class AreaManagerWindow(tk.Toplevel):
             self.lb_areas.selection_set(self.current_selection_idx)
             self._load_details(self.current_selection_idx)
             area = self.areas[self.current_selection_idx]
-            if self._is_main_area(area.id):
-                self.btn_remove.config(state=tk.DISABLED)
-            else:
-                self.btn_remove.config(state=tk.NORMAL)
+            # Allow removing/editing all areas — always enable remove button
+            self.btn_remove.configure(state=tk.NORMAL)
 
     def _init_ui(self):
         # Left side: List
-        left_frame = ttk.Frame(self, padding=5)
+        left_frame = make_frame(self, padding=5)
         left_frame.pack(side=tk.LEFT, fill=tk.Y)
 
-        ttk.Label(left_frame, text="Lista Obszarów").pack(anchor=tk.W)
-        self.lb_areas = tk.Listbox(left_frame, width=30)
+        make_label(left_frame, text="Lista Obszarów").pack(anchor=tk.W)
+        self.lb_areas = make_listbox(left_frame, width=30)
         self.lb_areas.pack(fill=tk.BOTH, expand=True, pady=5)
         self.lb_areas.bind('<<ListboxSelect>>', self._on_list_select)
         self.lb_areas.bind('<Double-Button-1>', self._rename_area_dialog)
 
-        btn_frame = ttk.Frame(left_frame)
+        btn_frame = make_frame(left_frame)
         btn_frame.pack(fill=tk.X)
-        ttk.Button(btn_frame, text="+ Dodaj",
-                   command=self._add_area).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(btn_frame, text="Duplikuj", command=self._duplicate_area).pack(
-            side=tk.LEFT, fill=tk.X, expand=True)
-        self.btn_remove = ttk.Button(
-            btn_frame, text="- Usuń", command=self._remove_area, state=tk.DISABLED)
-        self.btn_remove.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        make_button(btn_frame, text="+ Dodaj", command=self._add_area).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
+        make_button(btn_frame, text="Duplikuj", command=self._duplicate_area).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
+        self.btn_remove = make_button(btn_frame, text="- Usuń", command=self._remove_area, state=tk.DISABLED)
+        self.btn_remove.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
 
         # Save / Close
-        action_frame = ttk.Frame(left_frame, padding=(0, 20, 0, 0))
+        action_frame = make_frame(left_frame, padding=(0, 20, 0, 0))
         action_frame.pack(fill=tk.X, side=tk.BOTTOM)
-        ttk.Button(action_frame, text="Zapisz i Zamknij",
-                   command=self._save_and_close).pack(fill=tk.X, pady=5)
+        make_button(action_frame, text="Zapisz i Zamknij", command=self._save_and_close).pack(fill=tk.X, pady=5)
 
         # Test Button
-        self.btn_test = ttk.Button(
-            action_frame, text="🧪 Testuj ustawienia", command=self._test_current_settings)
+        self.btn_test = make_button(action_frame, text="🧪 Testuj ustawienia", command=self._test_current_settings)
         self.btn_test.pack(fill=tk.X, pady=5)
 
-        ttk.Button(action_frame, text="Anuluj",
-                   command=self.destroy).pack(fill=tk.X)
+        make_button(action_frame, text="Anuluj", command=self.destroy).pack(fill=tk.X)
 
         # Right side: Full Editor (Notebook)
-        self.right_frame = ttk.Frame(self, padding=10)
+        self.right_frame = make_frame(self, padding=10)
         self.right_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        self.notebook = ttk.Notebook(self.right_frame)
+        self.notebook = make_notebook(self.right_frame)
         self.notebook.pack(fill=tk.BOTH, expand=True)
 
         # Tab 1: Ogólne (Type, Rect, Hotkey + OCR)
-        self.tab_general = ttk.Frame(self.notebook, padding=15)
-        self.notebook.add(self.tab_general, text="Ogólne")
+        self.tab_general = make_notebook_tab(self.notebook, "Ogólne")
         self._init_tab_general(self.tab_general)
 
         # Tab 2: Kolory (Colors List)
-        self.tab_colors = ttk.Frame(self.notebook, padding=15)
-        self.notebook.add(self.tab_colors, text="Kolory")
+        self.tab_colors = make_notebook_tab(self.notebook, "Kolory")
         self._init_tab_colors(self.tab_colors)
 
     def _init_tab_general(self, parent):
-        grid = ttk.Frame(parent)
+        grid = make_frame(parent)
         grid.pack(fill=tk.X)
         grid.columnconfigure(1, weight=1)
 
         # Type
-        ttk.Label(grid, text="Typ obszaru:", font=("Arial", 10, "bold")).grid(
+        make_label(grid, text="Typ obszaru:", font=("Arial", 10, "bold")).grid(
             row=0, column=0, sticky=tk.W, pady=10)
         self.var_type = tk.StringVar()
         self.type_mapping = TYPE_SHORT_MAP
         self.rev_type_mapping = {v: k for k, v in self.type_mapping.items()}
-        self.cb_type = ttk.Combobox(grid, textvariable=self.var_type, values=list(
+        self.cb_type = make_combobox(grid, textvariable=self.var_type, values=list(
             self.type_mapping.values()), state="readonly")
         self.cb_type.grid(row=0, column=1, sticky=tk.EW, padx=10)
         self.cb_type.bind("<<ComboboxSelected>>", self._on_field_change)
 
         # Name
-        ttk.Label(grid, text="Nazwa:", font=("Arial", 10, "bold")).grid(
+        make_label(grid, text="Nazwa:", font=("Arial", 10, "bold")).grid(
             row=1, column=0, sticky=tk.W, pady=10)
         self.var_name = tk.StringVar()
-        self.entry_name = ttk.Entry(grid, textvariable=self.var_name)
+        self.entry_name = make_entry(grid, textvariable=self.var_name)
         self.entry_name.grid(row=1, column=1, sticky=tk.EW, padx=10)
         self.entry_name.bind("<KeyRelease>", self._on_field_change)
 
         # Tab General
         self.var_enabled = tk.BooleanVar()
-        self.chk_enabled = ttk.Checkbutton(
+        self.chk_enabled = make_checkbutton(
             grid, text="Aktywny (Włączony)", variable=self.var_enabled, command=self._on_field_change)
         self.chk_enabled.grid(row=2, column=1, sticky=tk.W, padx=10)
 
         # Rect
-        ttk.Separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=15)
+        make_separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=15)
 
-        f_rect = ttk.Frame(parent)
+        f_rect = make_frame(parent)
         f_rect.pack(fill=tk.X)
-        ttk.Label(f_rect, text="Pozycja i Rozmiar:", font=(
-            "Arial", 10, "bold")).pack(anchor=tk.W)
-        self.lbl_rect = ttk.Label(
-            f_rect, text="Brak zdefiniowanego obszaru", foreground="#555")
+        make_label(f_rect, text="Pozycja i Rozmiar:", font=("Arial", 10, "bold")).pack(anchor=tk.W)
+        self.lbl_rect = make_label(f_rect, text="Brak zdefiniowanego obszaru", text_color="#555")
         self.lbl_rect.pack(anchor=tk.W, pady=5)
-        ttk.Button(f_rect, text="Ręcznie zaznacz obszar",
-                   command=self._select_area_on_screen).pack(anchor=tk.W, pady=5)
+        make_button(f_rect, text="Ręcznie zaznacz obszar", command=self._select_area_on_screen).pack(anchor=tk.W, pady=5)
 
         # Hotkey
-        ttk.Separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=15)
+        make_separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=15)
 
-        f_hk = ttk.Frame(parent)
+        f_hk = make_frame(parent)
         f_hk.pack(fill=tk.X)
-        ttk.Label(f_hk, text="Skrót klawiszowy:", font=(
+        make_label(f_hk, text="Skrót klawiszowy:", font=(
             "Arial", 10, "bold")).pack(anchor=tk.W)
 
-        h_row = ttk.Frame(f_hk)
+        h_row = make_frame(f_hk)
         h_row.pack(fill=tk.X, pady=5)
         self.var_hotkey = tk.StringVar()
-        self.entry_hotkey = ttk.Entry(
+        self.entry_hotkey = make_entry(
             h_row, textvariable=self.var_hotkey, state="readonly")
         self.entry_hotkey.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        self.btn_record = ttk.Button(
-            h_row, text="Nagraj", command=self._record_hotkey)
+        self.btn_record = make_button(h_row, text="Nagraj", command=self._record_hotkey)
         self.btn_record.pack(side=tk.LEFT, padx=5)
-        ttk.Button(h_row, text="X", width=3,
-                   command=self._clear_hotkey).pack(side=tk.LEFT)
+        make_button(h_row, text="X", width=3, command=self._clear_hotkey).pack(side=tk.LEFT)
 
         # OCR Settings
-        ttk.Separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=15)
-        ttk.Label(parent, text="Ustawienia Obrazu i OCR:", font=(
+        make_separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=15)
+        make_label(parent, text="Ustawienia Obrazu i OCR:", font=(
             "Arial", 10, "bold")).pack(anchor=tk.W, pady=(0, 10))
 
-        pl = ttk.Frame(parent)
+        pl = make_frame(parent)
         pl.pack(fill=tk.BOTH, expand=True)
         pl.columnconfigure(1, weight=1)
         r = 0
 
         def add_row(label, widget):
             nonlocal r
-            ttk.Label(pl, text=label).grid(
+            make_label(pl, text=label).grid(
                 row=r, column=0, sticky=tk.W, pady=5, padx=5)
             widget.grid(row=r, column=1, sticky=tk.EW, pady=5, padx=5)
             r += 1
             return widget
 
         # Thickening
-        f_th = ttk.Frame(pl)
+        f_th = make_frame(pl)
         self.var_thickening = tk.IntVar()
-        ttk.Scale(f_th, from_=0, to=5, variable=self.var_thickening,
-                  command=lambda v: self._on_field_change()).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        l_th = ttk.Label(f_th, text="0")
+        make_slider(f_th, from_=0, to=5, variable=self.var_thickening,
+                command=lambda v: self._on_field_change()).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        l_th = make_label(f_th, text="0")
         l_th.pack(side=tk.LEFT, padx=5)
         self.var_thickening.trace_add(
-            "write", lambda *a: l_th.config(text=f"{self.var_thickening.get()}"))
+            "write", lambda *a: l_th.configure(text=f"{self.var_thickening.get()}"))
         add_row("Pogrubienie:", f_th)
 
         # Mode
@@ -234,13 +220,12 @@ class AreaManagerWindow(tk.Toplevel):
             MATCH_MODE_PARTIAL: "Częściowe"
         }
         self.rev_mode_mapping = {v: k for k, v in self.mode_mapping.items()}
-        cb_mode = ttk.Combobox(pl, textvariable=self.var_mode, values=list(
-            self.mode_mapping.values()), state="readonly")
+        cb_mode = make_combobox(pl, textvariable=self.var_mode, values=list(self.mode_mapping.values()), state="readonly")
         cb_mode.bind("<<ComboboxSelected>>", self._on_field_change)
         add_row("Tryb dopasowania:", cb_mode)
 
         # Brightness
-        f_br = ttk.Frame(pl)
+        f_br = make_frame(pl)
         self.var_brightness = tk.IntVar()
         def _on_brightness_change(v):
             try:
@@ -250,58 +235,51 @@ class AreaManagerWindow(tk.Toplevel):
                 pass
             self._on_field_change()
 
-        ttk.Scale(f_br, from_=0, to=255, variable=self.var_brightness,
-                  command=_on_brightness_change).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        l_br = ttk.Label(f_br, text="0")
+        make_slider(f_br, from_=0, to=255, variable=self.var_brightness, command=_on_brightness_change).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        l_br = make_label(f_br, text="0")
         l_br.pack(side=tk.LEFT, padx=5)
-        self.var_brightness.trace_add("write", lambda *a: l_br.config(text=f"{self.var_brightness.get()}"))
+        self.var_brightness.trace_add("write", lambda *a: l_br.configure(text=f"{self.var_brightness.get()}"))
         add_row("Próg jasności:", f_br)
 
         # Contrast
-        f_co = ttk.Frame(pl)
+        f_co = make_frame(pl)
         self.var_contrast = tk.DoubleVar()
-        ttk.Scale(f_co, from_=0.0, to=5.0, variable=self.var_contrast,
-                  command=lambda v: self._on_field_change()).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        l_co = ttk.Label(f_co, text="0.0")
+        make_slider(f_co, from_=0.0, to=5.0, variable=self.var_contrast, command=lambda v: self._on_field_change()).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        l_co = make_label(f_co, text="0.0")
         l_co.pack(side=tk.LEFT, padx=5)
         self.var_contrast.trace_add(
-            "write", lambda *a: l_co.config(text=f"{self.var_contrast.get():.1f}"))
+            "write", lambda *a: l_co.configure(text=f"{self.var_contrast.get():.1f}"))
         add_row("Kontrast:", f_co)
 
     def _init_tab_colors(self, parent):
         self.var_use_colors = tk.BooleanVar()
-        self.chk_use_colors = ttk.Checkbutton(
+        self.chk_use_colors = make_checkbutton(
             parent, text="Używaj filtrowania kolorów", variable=self.var_use_colors, command=self._on_field_change)
         self.chk_use_colors.pack(anchor=tk.W, pady=10)
 
-        row = ttk.Frame(parent)
+        row = make_frame(parent)
         row.pack(fill=tk.BOTH, expand=True)
 
-        self.lb_colors = tk.Listbox(row, height=8)
+        self.lb_colors = make_listbox(row, height=8)
         self.lb_colors.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        btns = ttk.Frame(row)
+        btns = make_frame(row)
         btns.pack(side=tk.LEFT, fill=tk.Y, padx=5)
-        ttk.Button(btns, text="Pobierz z Ekranu",
-                   command=self._pick_color_screen).pack(fill=tk.X, pady=2)
-        ttk.Button(btns, text="Dodaj Biały", command=lambda: self._add_color_manual(
-            "#FFFFFF")).pack(fill=tk.X, pady=2)
-        ttk.Button(btns, text="Usuń zaznaczony",
-                   command=self._remove_color).pack(fill=tk.X, pady=2)
+        make_button(btns, text="Pobierz z Ekranu", command=self._pick_color_screen).pack(fill=tk.X, pady=2)
+        make_button(btns, text="Dodaj Biały", command=lambda: self._add_color_manual("#FFFFFF")).pack(fill=tk.X, pady=2)
+        make_button(btns, text="Usuń zaznaczony", command=self._remove_color).pack(fill=tk.X, pady=2)
 
         # Tolerance
-        f_tol = ttk.Frame(parent)
+        f_tol = make_frame(parent)
         f_tol.pack(fill=tk.X, pady=15)
-        ttk.Label(f_tol, text="Tolerancja koloru:").pack(anchor=tk.W)
+        make_label(f_tol, text="Tolerancja koloru:").pack(anchor=tk.W)
         self.var_tolerance = tk.IntVar()
 
         def on_tol_change(v):
             self.var_tolerance.set(int(float(v)))
             self._on_field_change()
-        ttk.Scale(f_tol, from_=0, to=100, variable=self.var_tolerance, orient=tk.HORIZONTAL,
-                  command=on_tol_change).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Label(f_tol, textvariable=self.var_tolerance).pack(
-            side=tk.LEFT, padx=5)
+        make_slider(f_tol, from_=0, to=100, variable=self.var_tolerance, orient=tk.HORIZONTAL, command=on_tol_change).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        make_label(f_tol, textvariable=self.var_tolerance).pack(side=tk.LEFT, padx=5)
 
     def _load_details(self, idx):
         if idx < 0 or idx >= len(self.areas):
@@ -317,10 +295,11 @@ class AreaManagerWindow(tk.Toplevel):
         self.var_name.set(area.name or "")
 
         self.var_enabled.set(area.enabled)
-        if typ == TYPE_CONTINUOUS and area.id != 1:
-            self.chk_enabled.config(state=tk.NORMAL)
-        else:
-            self.chk_enabled.config(state=tk.DISABLED)
+        # Make enabled checkbox editable for all areas
+        try:
+            self.chk_enabled.configure(state=tk.NORMAL)
+        except Exception:
+            pass
 
         r = area.rect
         if r:
@@ -328,12 +307,12 @@ class AreaManagerWindow(tk.Toplevel):
             try:
                 srect = {'left': int(r.get('left', 0)), 'top': int(r.get('top', 0)), 'width': int(
                     r.get('width', 0)), 'height': int(r.get('height', 0))}
-                self.lbl_rect.config(
+                self.lbl_rect.configure(
                     text=f"X:{srect['left']} Y:{srect['top']} {srect['width']}x{srect['height']}")
             except Exception:
-                self.lbl_rect.config(text="Błąd przeliczenia obszaru")
+                self.lbl_rect.configure(text="Błąd przeliczenia obszaru")
         else:
-            self.lbl_rect.config(text="Brak (Kliknij 'Wybierz Obszar')")
+            self.lbl_rect.configure(text="Brak (Kliknij 'Wybierz Obszar')")
 
         self.var_hotkey.set(area.hotkey or '')
 
@@ -361,10 +340,10 @@ class AreaManagerWindow(tk.Toplevel):
 
         for tab in [self.tab_general, self.tab_colors]:
             for child in tab.winfo_children():
-                try:
-                    child.config(state=tk.NORMAL)
-                except tk.TclError:
-                    pass
+                    try:
+                        child.configure(state=tk.NORMAL)
+                    except (tk.TclError, ValueError):
+                        pass
 
     def _on_field_change(self, event=None):
         if self.current_selection_idx < 0:
@@ -431,35 +410,35 @@ class AreaManagerWindow(tk.Toplevel):
         dlg.transient(self)
         dlg.grab_set()
 
-        frm = ttk.Frame(dlg, padding=10)
+        frm = make_frame(dlg, padding=10)
         frm.pack(fill=tk.BOTH, expand=True)
 
-        lb = tk.Listbox(frm, selectmode=tk.EXTENDED)
+        lb = make_listbox(frm, selectmode=tk.EXTENDED)
         lb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         for p in files:
             lb.insert(tk.END, os.path.basename(p))
 
-        scr = ttk.Scrollbar(frm, orient=tk.VERTICAL, command=lb.yview)
+        scr = make_scrollbar(frm, orient=tk.VERTICAL, command=lb.yview)
         scr.pack(side=tk.LEFT, fill=tk.Y)
-        lb.config(yscrollcommand=scr.set)
+        lb.configure(yscrollcommand=scr.set)
 
-        right = ttk.Frame(frm)
+        right = make_frame(frm)
         right.pack(side=tk.LEFT, fill=tk.Y, padx=8)
 
-        preview_lab = ttk.Label(right, text="Brak podglądu", width=40)
+        preview_lab = make_label(right, text="Brak podglądu", width=40)
         preview_lab.pack(pady=4)
 
         def on_preview(evt=None):
             sel = lb.curselection()
             if not sel:
-                preview_lab.config(text="Brak podglądu")
+                preview_lab.configure(text="Brak podglądu")
                 return
             idx = sel[0]
-            preview_lab.config(text=os.path.basename(files[idx]))
+            preview_lab.configure(text=os.path.basename(files[idx]))
 
         lb.bind('<<ListboxSelect>>', on_preview)
 
-        btns = ttk.Frame(dlg, padding=8)
+        btns = make_frame(dlg, padding=8)
         btns.pack(fill=tk.X)
 
         def do_ok():
@@ -470,10 +449,8 @@ class AreaManagerWindow(tk.Toplevel):
         def do_cancel():
             dlg.destroy()
 
-        ttk.Button(btns, text="Importuj wybrane",
-                   command=do_ok).pack(side=tk.LEFT, padx=4)
-        ttk.Button(btns, text="Anuluj", command=do_cancel).pack(
-            side=tk.LEFT, padx=4)
+        make_button(btns, text="Importuj wybrane", command=do_ok).pack(side=tk.LEFT, padx=4)
+        make_button(btns, text="Anuluj", command=do_cancel).pack(side=tk.LEFT, padx=4)
 
         self.wait_window(dlg)
 
@@ -535,11 +512,6 @@ class AreaManagerWindow(tk.Toplevel):
 
     def _remove_area(self):
         if self.current_selection_idx < 0:
-            return
-        area = self.areas[self.current_selection_idx]
-        if self._is_main_area(area.id):
-            messagebox.showwarning(
-                "Błąd", "Nie można usunąć głównego obszaru.")
             return
         del self.areas[self.current_selection_idx]
         # ensure index is valid
@@ -622,7 +594,7 @@ class AreaManagerWindow(tk.Toplevel):
                 self._load_details(self.current_selection_idx)
                 # Auto update bounds label (screen coords)
                 r = self.areas[self.current_selection_idx].rect or {}
-                self.lbl_rect.config(
+                self.lbl_rect.configure(
                     text=f"X:{r.get('left')} Y:{r.get('top')} {r.get('width')}x{r.get('height')}")
         except Exception as e:
             print(f"Error selecting area: {e}")
@@ -699,7 +671,7 @@ class AreaManagerWindow(tk.Toplevel):
             messagebox.showerror("Błąd", "Biblioteka pynput niedostępna.")
             return
 
-        self.btn_record.config(text="Naciśnij klawisz...", state=tk.DISABLED)
+        self.btn_record.configure(text="Naciśnij klawisz...", state=tk.DISABLED)
         self.update()
 
         def on_press(key):
@@ -720,7 +692,7 @@ class AreaManagerWindow(tk.Toplevel):
                 area.hotkey = key_str
             self.config_mgr.set_areas(self.areas)
             self.var_hotkey.set(key_str)
-        self.btn_record.config(text="Nagraj", state=tk.NORMAL)
+        self.btn_record.configure(text="Nagraj", state=tk.NORMAL)
 
     def _clear_hotkey(self):
         if self.current_selection_idx >= 0:
@@ -914,7 +886,6 @@ class AreaManagerWindow(tk.Toplevel):
             messagebox.showerror("Błąd zapisu", f"Nie udało się zapisać obszarów: {e}")
 
 
-class OptimizationResultWindow(tk.Toplevel):
-    # This class is now imported from app.optimization_result
-    # The redundant implementation here is removed.
+class OptimizationResultWindow(CTkToplevel):
+    # This class is provided by app.optimization_result; keep a light alias
     pass
