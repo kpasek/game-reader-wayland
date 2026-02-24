@@ -27,8 +27,7 @@ class SettingsDialog(CTkToplevel):
 
         # Zmienne UI (Globalne)
         self.var_brightness_threshold = tk.IntVar(value=app_instance.config_mgr.brightness_threshold)
-        self.var_hk_start = tk.StringVar(value=settings.get('hotkey_start_stop', '<f2>'))
-        self.var_hk_area3 = tk.StringVar(value=settings.get('hotkey_area3', '<f3>'))
+        self.var_hk_start = tk.StringVar(value=settings.get('hotkey_start_stop', '<f10>'))
 
         self._initialize_app_variables()
 
@@ -221,7 +220,7 @@ class SettingsDialog(CTkToplevel):
         lf_hk.pack(fill=tk.X, pady=10, padx=10)
         make_label(lf_hk, text="Start / Stop:").pack(anchor=tk.W)
         make_entry(lf_hk, textvariable=self.var_hk_start).pack(fill=tk.X, pady=(0, 10))
-        make_label(lf_hk, text="Przykłady: <ctrl>+<f5>, <alt>+x, <f9>", text_color="gray").pack(anchor=tk.W)
+        make_label(lf_hk, text="Przykłady: <ctrl>+<f10>, <alt>+x, <f9>", text_color="gray").pack(anchor=tk.W)
 
     def _add_slider(self, parent, label, variable, from_, to, config_key, fmt="{:.2f}", resolution=None):
         f = make_frame(parent)

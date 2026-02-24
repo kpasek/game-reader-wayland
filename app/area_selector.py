@@ -1,4 +1,5 @@
 import sys
+import traceback
 
 try:
     import tkinter as tk
@@ -9,7 +10,7 @@ except ImportError:
     Image = None
     ImageTk = None
 
-from app.ctk_widgets import CTkToplevel
+from app.ctk_widgets import CTkToplevel, make_label
 
 
 

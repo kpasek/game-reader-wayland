@@ -1,4 +1,4 @@
-from app.ctk_widgets import CTkToplevel, make_frame, make_label
+from app.ctk_widgets import CTkToplevel, make_frame, make_label, make_progressbar
 import tkinter as tk
 from tkinter import ttk
 
@@ -10,7 +10,17 @@ class ProcessingWindow(CTkToplevel):
         self.geometry("500x200")
         self.resizable(False, False)
         self.transient(parent)
-        self.grab_set()
+        # Try to set grab only if parent is viewable; on some flows the
+        # caller may have withdrawn or not yet mapped the root which causes
+        # `grab_set()` to raise `TclError: grab failed: window not viewable`.
+        try:
+            if getattr(parent, 'winfo_viewable', None) and parent.winfo_viewable():
+                self.grab_set()
+        except Exception:
+            # If grab fails, continue without modal grab — the processing
+            # window is informational and the optimization continues in a
+            # background thread.
+            pass
 
         # Center relative to parent
         self.update_idletasks()

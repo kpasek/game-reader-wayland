@@ -4,7 +4,7 @@ from collections import Counter
 from typing import Tuple, List, Dict, Any, Optional
 
 from app.ocr import preprocess_image, recognize_text
-from app.matcher import find_best_match, precompute_subtitles, MATCH_MODE_FULL
+from app.matcher import find_best_match, precompute_subtitles, MATCH_MODE_FULL, MATCH_MODE_STARTS, MATCH_MODE_PARTIAL
 from app.config_manager import ConfigManager, PresetConfig
 
 class OptimizerConfigManager(ConfigManager):
@@ -197,13 +197,12 @@ class SettingsOptimizer:
 
         def sort_key(item):
             score, s, _ = item
-            # Prefer color-mode candidates over brightness-mode when otherwise equal.
-            mode_prio = 1 if getattr(s, '_setting_mode', '') == 'color' else 0
+            mode_prio = 1 if s._setting_mode == 'color' else 0
 
-            if getattr(s, '_setting_mode', '') == 'color':
-                return (score, mode_prio, -s.color_tolerance, -int(s.text_thickening == 0), -s.contrast)
+            if s._setting_mode == 'color':
+                return (score, mode_prio, -s.color_tolerance, -s.text_thickening, -s.contrast)
 
-            return (score, mode_prio, s.brightness_threshold, 1, -s.contrast)
+            return (score, mode_prio, -s.brightness_threshold, 0, -s.contrast)
 
         ranked_candidates.sort(key=sort_key, reverse=True)
         survivors = ranked_candidates[:50]
@@ -304,7 +303,8 @@ class SettingsOptimizer:
         mock_cfg = OptimizerConfigManager(preset)
 
         try:
-            processed_img, has_content, bbox = preprocess_image(crop.copy(), mock_cfg)
+            # Pass the preset as area_config so preprocess_image can read per-preset values
+            processed_img, has_content, bbox = preprocess_image(crop.copy(), mock_cfg, area_config=preset)
             if not has_content:
                 return 0, None
 
@@ -328,7 +328,25 @@ class SettingsOptimizer:
 
         ocr_no_name = smart_remove_name(ocr_text)
         cleaned_ocr = clean_text(ocr_no_name)
-        if cleaned_ocr in precomputed_db[1]:
-            score = 101
+        # For exact/full-lines mode require full equality.
+        if match_mode == MATCH_MODE_FULL:
+            if cleaned_ocr in precomputed_db[1]:
+                score = 101
+        # For 'Starts' mode allow the recognized text to be a prefix or the
+        # original to be a prefix of the recognized text — treat as exact start.
+        elif match_mode == MATCH_MODE_STARTS:
+            try:
+                exact_map_keys = list(precomputed_db[1].keys())
+            except Exception:
+                exact_map_keys = []
+            for key in exact_map_keys:
+                if not key:
+                    continue
+                if cleaned_ocr.startswith(key) or key.startswith(cleaned_ocr):
+                    score = 101
+                    break
+        else:
+            # For other modes (partial etc.) keep existing behavior (no forced 101).
+            pass
 
         return score, bbox

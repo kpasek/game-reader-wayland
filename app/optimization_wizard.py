@@ -82,13 +82,9 @@ class OptimizationWizard(CTkToplevel):
         col_frame = make_frame(opt_frame)
         col_frame.pack(fill=tk.X)
 
-        # Color preview uses tk.Label to allow background color
-        self.lbl_color_preview = make_label(col_frame, text="", font=("Arial", 8), width=10)
-        # use underlying tk widget background where needed
-        try:
-            self.lbl_color_preview.configure(background="#FFFFFF")
-        except Exception:
-            pass
+        # Color preview uses a plain tk.Label to allow background color changes
+        initial_bg = self.var_color.get() or "#FFFFFF"
+        self.lbl_color_preview = tk.Label(col_frame, text="", font=("Arial", 8), width=10, bg=initial_bg)
         self.lbl_color_preview.pack(side=tk.LEFT, padx=(0, 5))
 
         make_button(col_frame, text="Wybierz...", command=self._pick_color, fg_color="#1f6aa5", hover_color="#145f8a", text_color="#ffffff").pack(side=tk.LEFT)

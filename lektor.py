@@ -71,7 +71,7 @@ audio_queue = queue.Queue()
 log_queue = queue.Queue()
 debug_queue = queue.Queue()
 
-APP_VERSION = "v1.6.1"
+APP_VERSION = "v1.6.2"
 
 
 class LektorApp:
@@ -889,7 +889,7 @@ class LektorApp:
         """
         return [dict(a, rect=self._normalize_area_to_4k(a['rect'], img_w, img_h)) if 'rect' in a else a for a in areas]
 
-    def _get_scren_size(self):
+    def _get_screen_size(self):
         """
         Zwraca rozmiar ekranu bazując wyłącznie na `self.var_resolution`.
         Oczekiwany format: 'WIDTHxHEIGHT' (np. '2560x1440').
