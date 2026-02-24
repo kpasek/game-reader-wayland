@@ -50,6 +50,66 @@ class ProcessingWindow(CTkToplevel):
             except Exception:
                 pass
 
+        # Small label showing percent progress and current best score
+        self.lbl_progress_info = make_label(main_f, text=("0% | Jakość ustawień: 0.0%"))
+        self.lbl_progress_info.pack()
+
+        # Internal flag to mark determinate progress initialization
+        self._progress_determinate = False
+
+    def set_progress(self, value: int, total: int = None, best_score: float = None):
+        """
+        Update progress bar. If `total` is provided on first call, switch the
+        progress bar to determinate mode and set maximum.
+        This method is safe to call from the main thread; callers from other
+        threads should schedule via `after(0, ...)` on this window.
+        """
+        try:
+            if not self.progress:
+                return
+            if total is not None and not self._progress_determinate:
+                try:
+                    # Configure determinate mode and maximum value
+                    self.progress.config(mode='determinate', maximum=int(total))
+                    self._progress_determinate = True
+                    # Stop any indeterminate animation
+                    try:
+                        self.progress.stop()
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+            # Set current value
+            try:
+                self.progress['value'] = int(value)
+            except Exception:
+                try:
+                    self.progress.configure(value=int(value))
+                except Exception:
+                    pass
+            # Update percent label and best score if provided
+            try:
+                pct = 0
+                if total:
+                    try:
+                        pct = (int(value) / int(total)) * 100
+                    except Exception:
+                        pct = 0
+                else:
+                    pct = int(value)
+                best_display = f"{(min(best_score, 100) if best_score is not None else 0):.1f}%"
+                try:
+                    self.lbl_progress_info.configure(text=f"{pct:.0f}% | Jakość ustawień: {best_display}")
+                except Exception:
+                    try:
+                        self.lbl_progress_info.configure(text=f"{pct:.0f}% | Jakość ustawień: {best_display}")
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        except Exception:
+            pass
+
     def set_status(self, text):
         try:
             self.lbl_status.configure(text=text)

@@ -79,11 +79,12 @@ class SettingsOptimizer:
 
 
     def optimize(self, 
-                 images: Any, 
+                 images: List[Image.Image], 
                  rough_area: Tuple[int, int, int, int], 
                  subtitle_db: List[str],
                  match_mode: str = MATCH_MODE_FULL,
-                 initial_color: str = None) -> Dict[str, Any]:
+                 initial_color: str = None,
+                 progress_callback=None) -> Dict[str, Any]:
         """
         Znajduje optymalne ustawienia OCR i matchingu dla zadanego wycinka ekranu (rough_area)
         i bazy napisów.
@@ -92,22 +93,11 @@ class SettingsOptimizer:
             images: Pojedynczy obraz PIL.Image lub lista obrazów [PIL.Image].
                     Jeśli podano listę, optymalizacja odbywa się wieloetapowo.
         """
-        
-        try:
-            num_images = len(images) if isinstance(images, list) else 1
-        except Exception:
-            num_images = 'unknown'
-
-        # Normalizacja do listy
-        if not isinstance(images, list):
-            input_images = [images]
-        else:
-            input_images = images
             
-        if not input_images:
+        if not images:
             return {}
 
-        first_image = input_images[0]
+        first_image = images[0]
         rx, ry, rw, rh = rough_area
 
         # Przygotowanie funkcji pomocniczej do cropowania
@@ -182,12 +172,28 @@ class SettingsOptimizer:
         survivors = []
         best_score_st1 = 0
         best_settings_st1 = None
+        best_candidates_amount = 100
 
         ranked_candidates = []
 
+        total_candidates = len(candidates) + (len(images) -1) * best_candidates_amount
+        # Report initial zero progress (include best score placeholder)
+        if progress_callback:
+            try:
+                progress_callback(0, total_candidates, 0)
+            except Exception:
+                pass
+
+        checked = 0
         for preset_obj in candidates:
             score, bbox = self._evaluate_settings(crop0, preset_obj, precomputed_db, match_mode)
 
+            checked += 1
+            if progress_callback:
+                try:
+                    progress_callback(checked, total_candidates, best_score_st1)
+                except Exception:
+                    pass
             if score > best_score_st1:
                 best_score_st1 = score
                 best_settings_st1 = preset_obj
@@ -200,12 +206,12 @@ class SettingsOptimizer:
             mode_prio = 1 if s._setting_mode == 'color' else 0
 
             if s._setting_mode == 'color':
-                return (score, mode_prio, -s.color_tolerance, -s.text_thickening, -s.contrast)
+                return (score, mode_prio, -s.color_tolerance, -(s.text_thickening + 1), -s.contrast)
 
             return (score, mode_prio, -s.brightness_threshold, 0, -s.contrast)
 
         ranked_candidates.sort(key=sort_key, reverse=True)
-        survivors = ranked_candidates[:50]
+        survivors = ranked_candidates[:best_candidates_amount]
 
         # --- PODSUMOWANIE 5 NAJLEPSZYCH USTAWIEŃ po każdym zrzucie ---
         def print_summary(ranked, img_idx, total_imgs):

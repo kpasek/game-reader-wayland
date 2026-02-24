@@ -71,7 +71,7 @@ audio_queue = queue.Queue()
 log_queue = queue.Queue()
 debug_queue = queue.Queue()
 
-APP_VERSION = "v1.6.2"
+APP_VERSION = "v1.6.3"
 
 
 class LektorApp:
@@ -1038,7 +1038,14 @@ class LektorApp:
             def worker():
                 try:
                     optimizer = SettingsOptimizer(self.config_mgr)
-                    res = optimizer.optimize(valid_images, target_rect, subtitle_lines, mode, initial_color=initial_color)
+                    # Progress callback: schedule UI updates on the processing window
+                    def progress_cb(done, total, best=None):
+                        try:
+                            prog.after(0, lambda d=done, t=total, b=best: prog.set_progress(d, t, b))
+                        except Exception:
+                            pass
+
+                    res = optimizer.optimize(valid_images, target_rect, subtitle_lines, mode, initial_color=initial_color, progress_callback=progress_cb)
                     thread_context["result"] = res
                 except Exception as e:
                     thread_context["error"] = e
