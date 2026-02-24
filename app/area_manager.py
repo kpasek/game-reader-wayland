@@ -93,21 +93,20 @@ class AreaManagerWindow(CTkToplevel):
 
         btn_frame = make_frame(left_frame)
         btn_frame.pack(fill=tk.X)
-        make_button(btn_frame, text="+ Dodaj", command=self._add_area).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
-        make_button(btn_frame, text="Duplikuj", command=self._duplicate_area).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
-        self.btn_remove = make_button(btn_frame, text="- Usuń", command=self._remove_area, state=tk.DISABLED)
+        make_button(btn_frame, text="+ Dodaj", command=self._add_area, fg_color="#1f6aa5", hover_color="#145f8a", text_color="#ffffff").pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
+        make_button(btn_frame, text="Duplikuj", command=self._duplicate_area, fg_color="#7f8c8d", hover_color="#6c7a7b", text_color="#ffffff").pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
+        self.btn_remove = make_button(btn_frame, text="- Usuń", command=self._remove_area, state=tk.DISABLED, fg_color="#c0392b", hover_color="#992d22", text_color="#ffffff")
         self.btn_remove.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
 
         # Save / Close
         action_frame = make_frame(left_frame, padding=(0, 20, 0, 0))
         action_frame.pack(fill=tk.X, side=tk.BOTTOM)
-        make_button(action_frame, text="Zapisz i Zamknij", command=self._save_and_close).pack(fill=tk.X, pady=5)
+        make_button(action_frame, text="Zapisz i Zamknij", command=self._save_and_close, fg_color="#27ae60", hover_color="#1e8449", text_color="#ffffff").pack(fill=tk.X, pady=5)
 
-        # Test Button
-        self.btn_test = make_button(action_frame, text="🧪 Testuj ustawienia", command=self._test_current_settings)
+        self.btn_test = make_button(action_frame, text="🧪 Testuj ustawienia", command=self._test_current_settings, fg_color="#1f6aa5", hover_color="#145f8a", text_color="#ffffff")
         self.btn_test.pack(fill=tk.X, pady=5)
 
-        make_button(action_frame, text="Anuluj", command=self.destroy).pack(fill=tk.X)
+        make_button(action_frame, text="Anuluj", command=self.destroy, fg_color="#7f8c8d", hover_color="#6c7a7b", text_color="#ffffff").pack(fill=tk.X)
 
         # Right side: Full Editor (Notebook)
         self.right_frame = make_frame(self, padding=10)
@@ -162,7 +161,7 @@ class AreaManagerWindow(CTkToplevel):
         make_label(f_rect, text="Pozycja i Rozmiar:", font=("Arial", 10, "bold")).pack(anchor=tk.W)
         self.lbl_rect = make_label(f_rect, text="Brak zdefiniowanego obszaru", text_color="#555")
         self.lbl_rect.pack(anchor=tk.W, pady=5)
-        make_button(f_rect, text="Ręcznie zaznacz obszar", command=self._select_area_on_screen).pack(anchor=tk.W, pady=5)
+        make_button(f_rect, text="Ręcznie zaznacz obszar", command=self._select_area_on_screen, fg_color="#1f6aa5", hover_color="#145f8a", text_color="#ffffff").pack(anchor=tk.W, pady=5)
 
         # Hotkey
         make_separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=15)
@@ -178,9 +177,9 @@ class AreaManagerWindow(CTkToplevel):
         self.entry_hotkey = make_entry(
             h_row, textvariable=self.var_hotkey, state="readonly")
         self.entry_hotkey.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        self.btn_record = make_button(h_row, text="Nagraj", command=self._record_hotkey)
+        self.btn_record = make_button(h_row, text="Nagraj", command=self._record_hotkey, fg_color="#1f6aa5", hover_color="#145f8a", text_color="#ffffff")
         self.btn_record.pack(side=tk.LEFT, padx=5)
-        make_button(h_row, text="X", width=3, command=self._clear_hotkey).pack(side=tk.LEFT)
+        make_button(h_row, text="X", width=3, command=self._clear_hotkey, fg_color="#c0392b", hover_color="#992d22", text_color="#ffffff").pack(side=tk.LEFT)
 
         # OCR Settings
         make_separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=15)
@@ -265,9 +264,9 @@ class AreaManagerWindow(CTkToplevel):
 
         btns = make_frame(row)
         btns.pack(side=tk.LEFT, fill=tk.Y, padx=5)
-        make_button(btns, text="Pobierz z Ekranu", command=self._pick_color_screen).pack(fill=tk.X, pady=2)
-        make_button(btns, text="Dodaj Biały", command=lambda: self._add_color_manual("#FFFFFF")).pack(fill=tk.X, pady=2)
-        make_button(btns, text="Usuń zaznaczony", command=self._remove_color).pack(fill=tk.X, pady=2)
+        make_button(btns, text="Pobierz z Ekranu", command=self._pick_color_screen, fg_color="#1f6aa5", hover_color="#145f8a", text_color="#ffffff").pack(fill=tk.X, pady=2)
+        make_button(btns, text="Dodaj Biały", command=lambda: self._add_color_manual("#FFFFFF"), fg_color="#1f6aa5", hover_color="#145f8a", text_color="#ffffff").pack(fill=tk.X, pady=2)
+        make_button(btns, text="Usuń zaznaczony", command=self._remove_color, fg_color="#c0392b", hover_color="#992d22", text_color="#ffffff").pack(fill=tk.X, pady=2)
 
         # Tolerance
         f_tol = make_frame(parent)
@@ -449,8 +448,8 @@ class AreaManagerWindow(CTkToplevel):
         def do_cancel():
             dlg.destroy()
 
-        make_button(btns, text="Importuj wybrane", command=do_ok).pack(side=tk.LEFT, padx=4)
-        make_button(btns, text="Anuluj", command=do_cancel).pack(side=tk.LEFT, padx=4)
+        make_button(btns, text="Importuj wybrane", command=do_ok, fg_color="#27ae60", hover_color="#1e8449", text_color="#ffffff").pack(side=tk.LEFT, padx=4)
+        make_button(btns, text="Anuluj", command=do_cancel, fg_color="#7f8c8d", hover_color="#6c7a7b", text_color="#ffffff").pack(side=tk.LEFT, padx=4)
 
         self.wait_window(dlg)
 
@@ -719,17 +718,18 @@ class AreaManagerWindow(CTkToplevel):
         except Exception:
             area_copy.colors = list(area_copy.colors or [])
         
+        # Append the copied area once, persist and refresh.
         self.areas.append(area_copy)
         self.config_mgr.set_areas(self.areas)
-        self._refresh_list()
+
+        # Normalize rect dict if present
         if area_copy.rect:
             try:
                 area_copy.rect = dict(area_copy.rect)
             except Exception:
                 pass
 
-        self.areas.append(area_copy)
-        self.config_mgr.set_areas(self.areas)
+        # Refresh list and select the newly added area
         self._refresh_list()
         self.lb_areas.selection_clear(0, tk.END)
         self.lb_areas.selection_set(tk.END)

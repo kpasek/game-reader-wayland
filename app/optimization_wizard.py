@@ -50,13 +50,12 @@ class OptimizationWizard(CTkToplevel):
         btn_box = make_frame(self.list_frame)
         btn_box.pack(side=tk.LEFT, fill=tk.Y, padx=5)
 
-        self.btn_add_area = make_button(btn_box, text="Zrób zrzut [F4]", command=self._add_with_selection)
+        self.btn_add_area = make_button(btn_box, text="Zrób zrzut [F4]", command=self._add_with_selection, fg_color="#1f6aa5", hover_color="#145f8a", text_color="#ffffff")
         self.btn_add_area.pack(fill=tk.X, pady=2)
-
-        self.btn_import = make_button(btn_box, text="Importuj zrzuty", command=self._import_screenshot)
+        self.btn_import = make_button(btn_box, text="Importuj zrzuty", command=self._import_screenshot, fg_color="#1f6aa5", hover_color="#145f8a", text_color="#ffffff")
         self.btn_import.pack(fill=tk.X, pady=2)
 
-        self.btn_rem = make_button(btn_box, text="Usuń", command=self._remove_screenshot)
+        self.btn_rem = make_button(btn_box, text="Usuń", command=self._remove_screenshot, fg_color="#c0392b", hover_color="#992d22", text_color="#ffffff")
         self.btn_rem.pack(fill=tk.X, pady=2)
         
         # Options Frame
@@ -92,11 +91,11 @@ class OptimizationWizard(CTkToplevel):
             pass
         self.lbl_color_preview.pack(side=tk.LEFT, padx=(0, 5))
 
-        make_button(col_frame, text="Wybierz...", command=self._pick_color).pack(side=tk.LEFT)
-        make_button(col_frame, text="X", width=3, command=self._clear_color).pack(side=tk.LEFT, padx=2)
+        make_button(col_frame, text="Wybierz...", command=self._pick_color, fg_color="#1f6aa5", hover_color="#145f8a", text_color="#ffffff").pack(side=tk.LEFT)
+        make_button(col_frame, text="X", width=3, command=self._clear_color, fg_color="#c0392b", hover_color="#992d22", text_color="#ffffff").pack(side=tk.LEFT, padx=2)
 
         # Start
-        self.btn_run = make_button(main_f, text="Uruchom Optymalizację", command=self._start_opt)
+        self.btn_run = make_button(main_f, text="Uruchom Optymalizację", command=self._start_opt, fg_color="#27ae60", hover_color="#1e8449", text_color="#ffffff")
         self.btn_run.pack(pady=10, fill=tk.X)
 
     def _pick_color(self):

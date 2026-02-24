@@ -77,8 +77,8 @@ class OptimizationResultWindow(CTkToplevel):
         btn_frame = make_frame(self, padding=10)
         btn_frame.pack(side="bottom", fill="x")
 
-        make_button(btn_frame, text="Zastosuj i Zapisz", command=self._confirm).pack(side="right", padx=5)
-        make_button(btn_frame, text="Anuluj", command=self.destroy).pack(side="right")
+        make_button(btn_frame, text="Zastosuj i Zapisz", command=self._confirm, fg_color="#27ae60", hover_color="#1e8449", text_color="#ffffff").pack(side="right", padx=5)
+        make_button(btn_frame, text="Anuluj", command=self.destroy, fg_color="#7f8c8d", hover_color="#6c7a7b", text_color="#ffffff").pack(side="right")
 
     def _confirm(self):
         choice = self.selected_option.get()

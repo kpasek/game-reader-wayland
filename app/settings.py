@@ -78,8 +78,8 @@ class SettingsDialog(CTkToplevel):
 
         btn_f = make_frame(self)
         btn_f.pack(side=tk.BOTTOM, fill=tk.X, pady=10, padx=10)
-        make_button(btn_f, text="Zapisz", command=self.save).pack(side=tk.RIGHT)
-        make_button(btn_f, text="Anuluj", command=self.destroy).pack(side=tk.RIGHT, padx=5)
+        make_button(btn_f, text="Zapisz", command=self.save, fg_color="#27ae60", hover_color="#1e8449", text_color="#ffffff").pack(side=tk.RIGHT)
+        make_button(btn_f, text="Anuluj", command=self.destroy, fg_color="#7f8c8d", hover_color="#6c7a7b", text_color="#ffffff").pack(side=tk.RIGHT, padx=5)
 
     def _setup_scroll_frame(self, parent, fill_function):
         canvas = tk.Canvas(parent, highlightthickness=0)

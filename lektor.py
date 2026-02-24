@@ -71,7 +71,7 @@ audio_queue = queue.Queue()
 log_queue = queue.Queue()
 debug_queue = queue.Queue()
 
-APP_VERSION = "v1.6.0"
+APP_VERSION = "v1.6.1"
 
 
 class LektorApp:
@@ -291,21 +291,21 @@ class LektorApp:
         self.cb_res = make_combobox(f_res, textvariable=self.var_resolution, values=self.resolutions)
         self.cb_res.pack(side=tk.LEFT, padx=5)
         self.cb_res.bind("<<ComboboxSelected>>", self._on_resolution_selected)
-        make_button(f_res, text="Dopasuj rozdz.", command=self.auto_detect_resolution).pack(side=tk.LEFT, padx=5)
+        make_button(f_res, text="Dopasuj rozdz.", command=self.auto_detect_resolution, fg_color="#2980b9", hover_color="#21618c", text_color="#ffffff").pack(side=tk.LEFT, padx=5)
 
 
         # Actions Panel (Replaces Colors Panel)
         grp_act = CTkFrame(panel)
         grp_act.pack(fill=tk.X, pady=5)
         # Big Buttons for main actions
-        btn_detect = make_button(grp_act, text="Wykryj Ustawienia", command=self.detect_optimal_settings)
+        btn_detect = make_button(grp_act, text="Wykryj Ustawienia", command=self.detect_optimal_settings, fg_color="#1f6aa5", hover_color="#145f8a", text_color="#ffffff")
         btn_detect.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
-        btn_areas = make_button(grp_act, text="Zarządzaj Obszarami", command=self.open_area_manager)
+        btn_areas = make_button(grp_act, text="Zarządzaj Obszarami", command=self.open_area_manager, fg_color="#6c757d", hover_color="#5a6268", text_color="#ffffff")
         btn_areas.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
         # Przycisk Ustawienia
-        self.btn_settings = make_button(grp_act, text="⚙ Ustawienia", command=self.open_settings)
+        self.btn_settings = make_button(grp_act, text="⚙ Ustawienia", command=self.open_settings, fg_color="#7f8c8d", hover_color="#6c7a7b", text_color="#ffffff")
         self.btn_settings.pack(side=tk.LEFT, padx=5)
 
         # Removed old subtitle colors section
@@ -360,9 +360,9 @@ class LektorApp:
         frm_btn = CTkFrame(panel)
         frm_btn.pack(side=tk.BOTTOM, fill=tk.X, pady=10)
 
-        self.btn_start = make_button(frm_btn, text=f"START ({hk_start})", command=self.start_reading)
+        self.btn_start = make_button(frm_btn, text=f"START ({hk_start})", command=self.start_reading, fg_color="#27ae60", hover_color="#1e8449", text_color="#ffffff")
         self.btn_start.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        self.btn_stop = make_button(frm_btn, text=f"STOP ({hk_start})", command=self.stop_reading, state="disabled")
+        self.btn_stop = make_button(frm_btn, text=f"STOP ({hk_start})", command=self.stop_reading, state="disabled", fg_color="#c0392b", hover_color="#992d22", text_color="#ffffff")
         self.btn_stop.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
         CTkLabel(self.root, text=f"Wersja: {APP_VERSION}", font=("Arial", 8)).pack(side=tk.BOTTOM, anchor=tk.E, padx=5)
