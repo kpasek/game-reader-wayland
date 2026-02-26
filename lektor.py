@@ -380,7 +380,14 @@ class LektorApp:
     def auto_detect_resolution(self):
         # We prefer capture_fullscreen dimensions because it matches the 
         # physical pixel grid used by the reader and coordinate mapping.
-        img = capture_fullscreen()
+        import app.capture
+        img = None
+        # Zapobiegaj wywołaniu portalu PipeWire przy starcie aplikacji (lazy loading)
+        if app.capture.SCREENSHOT_BACKEND == 'pipewire_wayland' and app.capture._PIPEWIRE_CAPTURE is None:
+            pass
+        else:
+            img = capture_fullscreen()
+            
         if img:
             w, h = img.size
         else:
@@ -623,8 +630,7 @@ class LektorApp:
             if was_running:
                 self.start_reading()
             messagebox.showinfo("Zmieniono okno", "Nowe okno zostało wybrane prawidłowo.")
-        else:
-            messagebox.showwarning("Anulowano", "Wybór okna PipeWire anulowany lub nie powiódł się. Zostaną użyte domyślne ustawienia zapasowe.")
+        # else: The user cancelled the portal silently. Fallback captures will be used or state is maintained.
 
     def show_logs(self):
         if not self.log_window or not self.log_window.winfo_exists():
@@ -641,6 +647,16 @@ class LektorApp:
     def start_reading(self):
         path = self.var_preset_full_path.get()
         if not path or not os.path.exists(path): return messagebox.showerror("Błąd", "Brak profilu.")
+        
+        # Trigger explicit portal if pipewire is active and not initialized
+        import app.capture
+        if app.capture.SCREENSHOT_BACKEND == 'pipewire_wayland' and app.capture._PIPEWIRE_CAPTURE is None:
+             try:
+                 app.capture._get_pipewire_capture()
+             except Exception as e:
+                 # Cancelled or failed silently
+                 return
+                 
         self.config_mgr.add_recent_preset(path)
         self._update_preset_list()
 
