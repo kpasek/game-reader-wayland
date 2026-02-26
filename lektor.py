@@ -533,10 +533,6 @@ class LektorApp:
         if new:
             setattr(self.config_mgr, key, new)
 
-    def _scale_rect(self, rect, sx, sy):
-        return {'left': int(rect['left'] * sx), 'top': int(rect['top'] * sy), 'width': int(rect['width'] * sx),
-                'height': int(rect['height'] * sy)}
-
     def set_area(self, idx):
         path = self.var_preset_full_path.get()
         if not path: return messagebox.showerror("Błąd", "Wybierz profil.")
@@ -928,25 +924,6 @@ class LektorApp:
         # Open Manager: pass the LektorApp instance
         AreaManagerWindow(self.root, self, subs)
 
-    def _normalize_area_to_4k(self, rect, img_w, img_h):
-        """
-        Przeskalowuje podany rect (dict) do bazy 4K (3840x2160) na podstawie rozmiaru obrazu img_w, img_h.
-        """
-        sx = 3840 / img_w
-        sy = 2160 / img_h
-        return {
-            'left': int(rect['left'] * sx),
-            'top': int(rect['top'] * sy),
-            'width': int(rect['width'] * sx),
-            'height': int(rect['height'] * sy)
-        }
-
-    def _normalize_areas_list_to_4k(self, areas, img_w, img_h):
-        """
-        Przeskalowuje wszystkie recty w liście obszarów do bazy 4K.
-        """
-        return [dict(a, rect=self._normalize_area_to_4k(a['rect'], img_w, img_h)) if 'rect' in a else a for a in areas]
-
     def _get_screen_size(self):
         """
         Zwraca rozmiar ekranu bazując wyłącznie na `self.var_resolution`.
@@ -1089,40 +1066,42 @@ class LektorApp:
 
             # Uruchomienie optymalizatora w wątku i pokazanie okna postępu
             prog = ProcessingWindow(self.root, "Trwa optymalizacja...")
-            prog.set_status("Analiza obrazu i szukanie optymalnych ustawień...\nMoże to potrwać kilka minut. Nie zamykaj tego okna.")
+            prog.set_status("Przygotowanie danych...")
 
             thread_context = {"result": None, "error": None, "img_size": (fw, fh), "match_mode": mode}
 
             def worker():
                 try:
                     optimizer = SettingsOptimizer(self.config_mgr)
-                    # Progress callback: schedule UI updates on the processing window
+                    
+                    # Progress callback: uses thread-safe set_progress (via queue)
                     def progress_cb(done, total, best=None):
-                        try:
-                            prog.after(0, lambda d=done, t=total, b=best: prog.set_progress(d, t, b))
-                        except Exception:
-                            pass
+                        prog.set_progress(done, total, best)
+                        # Switch status label based on stage
+                        candidates_stage1 = total - 100 * (len(valid_images) - 1)
+                        if done < candidates_stage1:
+                            prog.set_status(f"Etap 1: Testowanie wszystkich wariantów ({done}/{candidates_stage1})")
+                        else:
+                            prog.set_status(f"Etap 2: Weryfikacja najlepszych 100 na kolejnych klatkach")
 
-                    res = optimizer.optimize(valid_images, target_rect, subtitle_lines, mode, initial_color=initial_color, progress_callback=progress_cb)
+                    res = optimizer.optimize(valid_images, target_rect, subtitle_lines, mode, initial_color=initial_color, progress_callback=progress_cb, stop_event=prog.stop_event)
                     thread_context["result"] = res
                 except Exception as e:
-                    thread_context["error"] = e
+                    import traceback
+                    traceback.print_exc()
+                    thread_context["error"] = str(e)
+                finally:
+                    # Signal completion via queue to trigger UI code on main thread
+                    def final_callback():
+                        try: prog.destroy()
+                        except: pass
+                        self.root.deiconify()
+                        self._on_optimization_finished(thread_context, path)
+
+                    prog.queue.put({"type": "complete", "callback": final_callback})
 
             t = threading.Thread(target=worker, daemon=True)
             t.start()
-
-            def check_thread():
-                if t.is_alive():
-                    self.root.after(100, check_thread)
-                    return
-                try:
-                    prog.destroy()
-                except Exception:
-                    pass
-                self.root.deiconify()
-                self._on_optimization_finished(thread_context, path)
-
-            check_thread()
 
         # Otwórz wizard (ten callback kończy cały przepływ optymalizacji)
         OptimizationWizard(self.root, on_wizard_finish)

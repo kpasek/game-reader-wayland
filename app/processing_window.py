@@ -1,6 +1,7 @@
 from app.ctk_widgets import CTkToplevel, make_frame, make_label, make_progressbar
 import tkinter as tk
 from tkinter import ttk
+import queue
 
 
 class ProcessingWindow(CTkToplevel):
@@ -56,66 +57,85 @@ class ProcessingWindow(CTkToplevel):
 
         # Internal flag to mark determinate progress initialization
         self._progress_determinate = False
+        
+        # Thread-safe communication
+        self.queue = queue.Queue()
+        self.after(100, self._poll_queue)
+        
+        # Stop signal for background processing
+        import multiprocessing
+        self.stop_event = multiprocessing.Event()
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _on_close(self):
+        """Handle window closure by signaling background thread to stop."""
+        self.stop_event.set()
+        self.destroy()
+
+    def _poll_queue(self):
+        """Periodically check for updates from the background thread."""
+        try:
+            while True:
+                msg = self.queue.get_nowait()
+                msg_type = msg.get("type")
+                if msg_type == "progress":
+                    self._update_progress_ui(msg.get("value"), msg.get("total"), msg.get("best_score"))
+                elif msg_type == "status":
+                    self._update_status_ui(msg.get("text"))
+                elif msg_type == "complete":
+                    if msg.get("callback"):
+                        msg.get("callback")()
+                self.queue.task_done()
+        except queue.Empty:
+            pass
+        finally:
+            # Continue polling even if window is closed (after handles errors)
+            try:
+                self.after(100, self._poll_queue)
+            except Exception:
+                pass
 
     def set_progress(self, value: int, total: int = None, best_score: float = None):
-        """
-        Update progress bar. If `total` is provided on first call, switch the
-        progress bar to determinate mode and set maximum.
-        This method is safe to call from the main thread; callers from other
-        threads should schedule via `after(0, ...)` on this window.
-        """
+        """Thread-safe method to update progress via queue."""
+        self.queue.put({"type": "progress", "value": value, "total": total, "best_score": best_score})
+
+    def set_status(self, text: str):
+        """Thread-safe method to update status via queue."""
+        self.queue.put({"type": "status", "text": text})
+
+    def _update_progress_ui(self, value: int, total: int = None, best_score: float = None):
+        """Internal method to update UI components - must be called from main thread."""
         try:
             if not self.progress:
                 return
             if total is not None and not self._progress_determinate:
                 try:
-                    # Configure determinate mode and maximum value
                     self.progress.config(mode='determinate', maximum=int(total))
                     self._progress_determinate = True
-                    # Stop any indeterminate animation
-                    try:
-                        self.progress.stop()
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
-            # Set current value
+                    try: self.progress.stop()
+                    except Exception: pass
+                except Exception: pass
+            
             try:
                 self.progress['value'] = int(value)
             except Exception:
-                try:
-                    self.progress.configure(value=int(value))
-                except Exception:
-                    pass
-            # Update percent label and best score if provided
-            try:
-                pct = 0
-                if total:
-                    try:
-                        pct = (int(value) / int(total)) * 100
-                    except Exception:
-                        pct = 0
-                else:
-                    pct = int(value)
-                best_display = f"{(min(best_score, 100) if best_score is not None else 0):.1f}%"
-                try:
-                    self.lbl_progress_info.configure(text=f"{pct:.0f}% | Jakość ustawień: {best_display}")
-                except Exception:
-                    try:
-                        self.lbl_progress_info.configure(text=f"{pct:.0f}% | Jakość ustawień: {best_display}")
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                try: self.progress.configure(value=int(value))
+                except Exception: pass
+
+            pct = 0
+            if total:
+                pct = (int(value) / int(total)) * 100
+            else:
+                pct = int(value)
+            best_display = f"{(min(best_score, 100) if best_score is not None else 0):.1f}%"
+            self.lbl_progress_info.configure(text=f"{pct:.0f}% | Jakość ustawień: {best_display}")
         except Exception:
             pass
 
-    def set_status(self, text):
+    def _update_status_ui(self, text: str):
+        """Internal method to update status label - must be called from main thread."""
         try:
             self.lbl_status.configure(text=text)
         except Exception:
-            try:
-                self.lbl_status.configure(text=text)
-            except Exception:
-                pass
+            pass
         self.update_idletasks()
