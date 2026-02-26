@@ -60,7 +60,7 @@ from app.log import LogWindow
 from app.settings import SettingsDialog
 from app.area_selector import AreaSelector, ColorSelector
 from app.area_manager import AreaManagerWindow
-from app.capture import capture_fullscreen
+from app.capture import capture_fullscreen, reset_pipewire_source, SCREENSHOT_BACKEND
 from app.help import HelpWindow
 from app.optimizer import SettingsOptimizer
 from app.geometry_utils import calculate_merged_area
@@ -71,7 +71,7 @@ audio_queue = queue.Queue()
 log_queue = queue.Queue()
 debug_queue = queue.Queue()
 
-APP_VERSION = "v1.6.3"
+APP_VERSION = "v1.7.0"
 
 
 class LektorApp:
@@ -206,6 +206,7 @@ class LektorApp:
 
         hotkeys = {
             hk_start: self._on_hotkey_start_stop,
+            '<f9>': self.change_source,
         }
         
         # Load areas from current preset
@@ -292,6 +293,13 @@ class LektorApp:
         self.cb_res.pack(side=tk.LEFT, padx=5)
         self.cb_res.bind("<<ComboboxSelected>>", self._on_resolution_selected)
         make_button(f_res, text="Dopasuj rozdz.", command=self.auto_detect_resolution, fg_color="#2980b9", hover_color="#21618c", text_color="#ffffff").pack(side=tk.LEFT, padx=5)
+
+        self.btn_change_source = make_button(f_res, text="Zmień okno (F9)", command=self.change_source, fg_color="#8e44ad", hover_color="#732d91", text_color="#ffffff")
+        self.btn_change_source.pack(side=tk.LEFT, padx=5)
+        
+        # Disable by default if not wayland
+        if SCREENSHOT_BACKEND != 'pipewire_wayland':
+            self.btn_change_source.configure(state="disabled")
 
 
         # Actions Panel (Replaces Colors Panel)
@@ -583,6 +591,40 @@ class LektorApp:
         hk = self.config_mgr.hotkey_start_stop
         self.btn_start.configure(text=f"START ({hk})")
         self.btn_stop.configure(text=f"STOP ({hk})")
+        
+        # Odśwież dostępność przycisku Zmień Okno
+        import app.capture
+        if app.capture._determine_backend() == 'pipewire_wayland':
+            self.btn_change_source.configure(state="normal")
+        else:
+            self.btn_change_source.configure(state="disabled")
+
+    def change_source(self):
+        """Zmienia źródło okna/ekranu dla backendu PipeWire."""
+        import app.capture
+        if app.capture._determine_backend() != 'pipewire_wayland':
+            messagebox.showinfo("Informacja", "Dynamiczna zmiana źródła jest obsługiwana tylko przez backend PipeWire (Wayland).")
+            return
+
+        self.root.withdraw()
+        time.sleep(0.3)
+        
+        # Zatrzymanie aktywnego czytania, aby zapobiec crashom przy wymianie portalu
+        was_running = self.is_running
+        if was_running:
+            self.stop_reading()
+            
+        success = reset_pipewire_source()
+        
+        self.root.deiconify()
+        
+        if success:
+            # Wznów czytanie
+            if was_running:
+                self.start_reading()
+            messagebox.showinfo("Zmieniono okno", "Nowe okno zostało wybrane prawidłowo.")
+        else:
+            messagebox.showwarning("Anulowano", "Wybór okna PipeWire anulowany lub nie powiódł się. Zostaną użyte domyślne ustawienia zapasowe.")
 
     def show_logs(self):
         if not self.log_window or not self.log_window.winfo_exists():

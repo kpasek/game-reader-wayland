@@ -12,3 +12,4 @@ zstandard
 # inputs
 pynput
 customtkinter
+pipewire-capture

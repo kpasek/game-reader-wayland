@@ -28,6 +28,8 @@ class SettingsDialog(CTkToplevel):
         # Zmienne UI (Globalne)
         self.var_brightness_threshold = tk.IntVar(value=app_instance.config_mgr.brightness_threshold)
         self.var_hk_start = tk.StringVar(value=settings.get('hotkey_start_stop', '<f10>'))
+        self.var_hk_area3 = tk.StringVar(value=settings.get('hotkey_area3', '<f3>'))
+        self.var_capture_backend = tk.StringVar(value=settings.get('capture_backend', 'Auto'))
 
         self._initialize_app_variables()
 
@@ -104,8 +106,16 @@ class SettingsDialog(CTkToplevel):
 
     def _fill_main_tab(self, pnl):
         # 1. Konfiguracja Obrazu (Filtry)
-        grp_img = make_labelframe(pnl, text="Filtry Obrazu", padding=10)
+        grp_img = make_labelframe(pnl, text="Wideo i Obraz", padding=10)
         grp_img.pack(fill=tk.X, pady=10, padx=10)
+
+        f_backend = make_frame(grp_img)
+        f_backend.pack(fill=tk.X, pady=5)
+        make_label(f_backend, text="Backend przechwytywania:").pack(side=tk.LEFT)
+        backend_choices = ["Auto", "pipewire_wayland", "kde_spectacle", "mss", "pyscreenshot"]
+        cb_backend = make_combobox(f_backend, textvariable=self.var_capture_backend, values=backend_choices, state="readonly", width=18)
+        cb_backend.pack(side=tk.LEFT, padx=5)
+        make_label(f_backend, text="(Wymaga restartu po zmianie)", font=("Arial", 8, "italic"), text_color="gray").pack(side=tk.LEFT, padx=5)
 
         # 2. Parametry OCR (bez skali)
         grp_ocr = make_labelframe(pnl, text="Parametry OCR", padding=10)
@@ -259,5 +269,6 @@ class SettingsDialog(CTkToplevel):
         # Zapisz ustawienia globalne
         self.settings['hotkey_start_stop'] = self.var_hk_start.get()
         self.settings['hotkey_area3'] = self.var_hk_area3.get()
+        self.settings['capture_backend'] = self.var_capture_backend.get()
         self.app.config_mgr.save_app_config()
         self.destroy()
