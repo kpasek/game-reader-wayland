@@ -40,7 +40,7 @@ class ProcessingWindow(CTkToplevel):
             main_f,
             text=("Trwa optymalizacja ustawień...\n"),
         )
-        self.lbl_status.pack(pady=10)
+        self.lbl_status.pack(pady=(10, 10))
 
         # Progressbar via factory (fallback to ttk.Progressbar)
         self.progress = make_progressbar(main_f, mode='indeterminate')

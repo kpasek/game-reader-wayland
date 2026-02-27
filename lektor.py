@@ -276,18 +276,18 @@ class LektorApp:
         menubar.add_cascade(label="Pomoc", menu=help_menu)
         self.root.configure(menu=menubar)
 
-        panel = CTkFrame(self.root)
-        panel.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        panel = CTkFrame(self.root, fg_color="transparent")
+        panel.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
-        CTkLabel(panel, text="Aktywny lektor (Katalog):").pack(anchor=tk.W)
+        CTkLabel(panel, text="Aktywny lektor (Katalog):").pack(anchor=tk.W, pady=(0, 5))
         # Use factory for comboboxes (falls back to ttk.Combobox if CTk lacks one)
         self.cb_preset = make_combobox(panel, textvariable=self.var_preset_display, state="readonly", width=60)
-        self.cb_preset.pack(fill=tk.X, pady=5)
+        self.cb_preset.pack(fill=tk.X, pady=(0, 15))
         self.cb_preset.bind("<<ComboboxSelected>>", self.on_preset_selected_from_combo)
 
         # --- ROZDZIELCZOŚĆ ---
-        f_res = CTkFrame(panel)
-        f_res.pack(fill=tk.X, pady=5)
+        f_res = CTkFrame(panel, fg_color="transparent")
+        f_res.pack(fill=tk.X, pady=(0, 15))
         CTkLabel(f_res, text="Rozdzielczość:").pack(side=tk.LEFT)
         self.cb_res = make_combobox(f_res, textvariable=self.var_resolution, values=self.resolutions)
         self.cb_res.pack(side=tk.LEFT, padx=5)
@@ -303,8 +303,8 @@ class LektorApp:
 
 
         # Actions Panel (Replaces Colors Panel)
-        grp_act = CTkFrame(panel)
-        grp_act.pack(fill=tk.X, pady=5)
+        grp_act = CTkFrame(panel, fg_color="transparent")
+        grp_act.pack(fill=tk.X, pady=(0, 15))
         # Big Buttons for main actions
         btn_detect = make_button(grp_act, text="Wykryj Ustawienia", command=self.detect_optimal_settings, fg_color="#1f6aa5", hover_color="#145f8a", text_color="#ffffff")
         btn_detect.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
@@ -321,8 +321,8 @@ class LektorApp:
 
 
         # --- AUDIO + SKALA OCR ---
-        grp_aud = CTkFrame(panel)
-        grp_aud.pack(fill=tk.X, pady=10)
+        grp_aud = CTkFrame(panel, fg_color="transparent")
+        grp_aud.pack(fill=tk.X, pady=(0, 20))
 
         CTkLabel(grp_aud, text="Prędkość:").grid(row=0, column=0)
         s_spd = make_slider(grp_aud, from_=0.9, to=1.5, variable=self.var_speed,
@@ -365,8 +365,8 @@ class LektorApp:
 
         # --- STEROWANIE ---
         hk_start = self.config_mgr.hotkey_start_stop
-        frm_btn = CTkFrame(panel)
-        frm_btn.pack(side=tk.BOTTOM, fill=tk.X, pady=10)
+        frm_btn = CTkFrame(panel, fg_color="transparent")
+        frm_btn.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 0))
 
         self.btn_start = make_button(frm_btn, text=f"START ({hk_start})", command=self.start_reading, fg_color="#27ae60", hover_color="#1e8449", text_color="#ffffff")
         self.btn_start.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)

@@ -91,12 +91,15 @@ class AreaManagerWindow(CTkToplevel):
         self.lb_areas.bind('<<ListboxSelect>>', self._on_list_select)
         self.lb_areas.bind('<Double-Button-1>', self._rename_area_dialog)
 
-        btn_frame = make_frame(left_frame)
-        btn_frame.pack(fill=tk.X)
-        make_button(btn_frame, text="+ Dodaj", command=self._add_area, fg_color="#1f6aa5", hover_color="#145f8a", text_color="#ffffff").pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
-        make_button(btn_frame, text="Duplikuj", command=self._duplicate_area, fg_color="#7f8c8d", hover_color="#6c7a7b", text_color="#ffffff").pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
-        self.btn_remove = make_button(btn_frame, text="- Usuń", command=self._remove_area, state=tk.DISABLED, fg_color="#c0392b", hover_color="#992d22", text_color="#ffffff")
-        self.btn_remove.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
+        btn_frame_top = make_frame(left_frame, fg_color="transparent")
+        btn_frame_top.pack(fill=tk.X, pady=(5, 0))
+        make_button(btn_frame_top, text="+ Dodaj", command=self._add_area, fg_color="#27ae60", hover_color="#1e8449", text_color="#ffffff").pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2))
+        self.btn_remove = make_button(btn_frame_top, text="- Usuń", command=self._remove_area, state=tk.DISABLED, fg_color="#c0392b", hover_color="#992d22", text_color="#ffffff")
+        self.btn_remove.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(2, 0))
+
+        btn_frame_bot = make_frame(left_frame, fg_color="transparent")
+        btn_frame_bot.pack(fill=tk.X, pady=(5, 5))
+        make_button(btn_frame_bot, text="Duplikuj Wybrany", command=self._duplicate_area, fg_color="#1f6aa5", hover_color="#145f8a", text_color="#ffffff").pack(fill=tk.X, expand=True)
 
         # Save / Close
         action_frame = make_frame(left_frame, padding=(0, 20, 0, 0))
