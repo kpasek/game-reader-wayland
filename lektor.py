@@ -259,7 +259,6 @@ class LektorApp:
         preset_menu.add_command(label="Zmień folder audio", command=lambda: self.change_path('audio_dir'))
         preset_menu.add_command(label="Zmień plik napisów", command=lambda: self.change_path('text_file_path'))
         preset_menu.add_command(label="Importuj preset (Game Reader)", command=self.import_preset_dialog)
-        preset_menu.add_separator()
         # Removed 'Wykryj optymalne ustawienia' as requested
         menubar.add_cascade(label="Lektor", menu=preset_menu)
 
