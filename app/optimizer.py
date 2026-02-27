@@ -117,6 +117,8 @@ class SettingsOptimizer:
         Wykorzystuje jeden Pool procesów dla wszystkich etapów.
         """
         if not images: return {}
+        if not isinstance(images, list):
+            images = [images]
         if stop_event and stop_event.is_set(): return {"score": 0, "settings": None, "optimized_area": rough_area}
         
         first_image = images[0]
@@ -128,7 +130,7 @@ class SettingsOptimizer:
             return img.crop((cx, cy, cx+cw, cy+ch)) if cw > 0 and ch > 0 else None
 
         crop0 = create_crop(first_image)
-        if not crop0: return {"score": 0, "settings": {}, "optimized_area": rough_area}
+        if not crop0: return {"score": 0, "settings": {}, "optimized_area": rough_area, "error": "Invalid area or empty crop"}
 
         precomputed_db = precompute_subtitles(subtitle_db)
         candidate_colors = [initial_color] if initial_color else sorted(list(set(self._extract_dominant_colors(crop0)) | {"#FFFFFF"}))
@@ -182,7 +184,8 @@ class SettingsOptimizer:
                 if stop_event and stop_event.is_set():
                     pool.terminate(); return {"score": 0, "settings": None, "optimized_area": rough_area}
                 update_progress(1, score)
-                if score > 50: ranked.append((score, candidates[i], bbox))
+                if score > 50: 
+                    ranked.append((score, candidates[i], bbox))
 
             ranked.sort(key=sort_key, reverse=True)
             finalists = [([score], s, bbox) for score, s, bbox in ranked[:best_amount]]
@@ -212,27 +215,98 @@ class SettingsOptimizer:
 
             if finalists:
                 finalists.sort(key=sort_key, reverse=True)
-                scores, s, bbox = finalists[0]
-                return {"score": sum(scores)/len(scores), "settings": s, "optimized_area": self._apply_area_refinement(first_image.size, rough_area, bbox), "rejected_screens": rejected}
+                scores, s, _ = finalists[0]
+                
+                # Collect all bboxes from the best candidate across all successful frames
+                all_bboxes = []
+                # Re-evaluate the best settings on all images to get bboxes
+                # (Or we could have tracked them, but re-evaluating on a few images is safer and fast)
+                final_score = sum(scores)/len(scores)
+                
+                for img in images:
+                    c = create_crop(img)
+                    if c:
+                        sc, bb = self._evaluate_settings(c, s, precomputed_db, match_mode)
+                        if sc > 50 and bb:
+                            all_bboxes.append(bb)
+                
+                refined_area = self._apply_area_refinement(first_image.size, rough_area, all_bboxes)
+                return {"score": final_score, "settings": s, "optimized_area": refined_area, "rejected_screens": rejected}
 
         if finalists: # From survivors in Stage 1 if Stage 2 didn't run
             scores, s, bbox = finalists[0]
-            return {"score": scores[0], "settings": s, "optimized_area": self._apply_area_refinement(first_image.size, rough_area, bbox), "rejected_screens": []}
+            # If only Stage 1 ran, we just have one bbox
+            refined_area = self._apply_area_refinement(first_image.size, rough_area, [bbox] if bbox else [])
+            return {"score": scores[0], "settings": s, "optimized_area": refined_area, "rejected_screens": []}
         return {"score": 0, "settings": None, "optimized_area": rough_area}
 
-    def _apply_area_refinement(self, screen_size, rough_area, bbox):
-        if not bbox: return rough_area
+    def _apply_area_refinement(self, screen_size, rough_area, bboxes: List[Tuple[int, int, int, int]]):
+        """
+        Calculates the union of all bboxes, applies padding, and constrains to rough_area and screen.
+        bboxes are relative to rough_area.
+        """
+        valid_bboxes = [b for b in bboxes if b]
+        if not valid_bboxes: 
+            return rough_area
+            
         rx, ry, rw, rh = rough_area
         sw, sh = screen_size
-        bl, bt, br, bb = bbox
-        bw, bh = br - bl, bb - bt
-        abs_x, abs_y = rx + bl, ry + bt
-        margin_h, margin_v = bw * 0.10, bh * 0.05
-        final_x = max(0, int(abs_x - margin_h))
-        final_y = max(0, int(abs_y - margin_v))
-        final_w, final_h = int(bw + margin_h*2), int(bh + margin_v*2)
-        if final_x + final_w > sw: final_w = sw - final_x
-        if final_y + final_h > sh: final_h = sh - final_y
+        
+        # Calculate Union (Aggregate Area)
+        # bbox format from ocr.py (preprocess_image): (left, top, right, bottom)
+        min_l = min(b[0] for b in valid_bboxes)
+        min_t = min(b[1] for b in valid_bboxes)
+        max_r = max(b[2] for b in valid_bboxes)
+        max_b = max(b[3] for b in valid_bboxes)
+        
+        agg_w = max_r - min_l
+        agg_h = max_b - min_t
+        
+        # Absolute coordinates of the union
+        abs_l = rx + min_l
+        abs_t = ry + min_t
+        
+        # Apply padding: 10% horizontal, 5% vertical of aggregate size
+        margin_h = agg_w * 0.10
+        margin_v = agg_h * 0.05
+        
+        final_x = int(abs_l - margin_h)
+        final_y = int(abs_t - margin_v)
+        final_w = int(agg_w + margin_h * 2)
+        final_h = int(agg_h + margin_v * 2)
+        
+        # Constraint 1: Keep within screen boundaries
+        if final_x < 0:
+            final_w += final_x # Reduce width if x was negative
+            final_x = 0
+        if final_y < 0:
+            final_h += final_y
+            final_y = 0
+            
+        if final_x + final_w > sw:
+            final_w = sw - final_x
+        if final_y + final_h > sh:
+            final_h = sh - final_y
+            
+        # Constraint 2: Must be contained within the original rough_area
+        # final_x should be at least rx, but not more than rx + rw
+        # We also need to be careful about not shrinking it too much if the detected text was outside? 
+        # Actually, the detection is performed ON the crop, so it's always within rough_area relative (0,0,rw,rh).
+        
+        # Re-constrain to rough_area just in case of over-padding
+        final_x = max(rx, final_x)
+        final_y = max(ry, final_y)
+        
+        # Adjust width/height if we moved final_x/y
+        if final_x + final_w > rx + rw:
+            final_w = (rx + rw) - final_x
+        if final_y + final_h > ry + rh:
+            final_h = (ry + rh) - final_y
+            
+        # Ensure non-negative dimensions
+        final_w = max(0, final_w)
+        final_h = max(0, final_h)
+        
         return (final_x, final_y, final_w, final_h)
 
     def _evaluate_settings(self, crop, preset, db, match_mode=MATCH_MODE_FULL):
