@@ -45,7 +45,7 @@ class AreaManagerWindow(CTkToplevel):
         """
         super().__init__(parent)
         self.title("Zarządzanie Obszarami")
-        self.geometry("1000x700")
+        self.geometry("1050x750")
         self.app: 'LektorApp' = app
         self.config_mgr: Optional[ConfigManager] = app.config_mgr
         self.subtitle_lines: Optional[List[Dict[str, Any]]] = subtitle_lines
@@ -209,17 +209,6 @@ class AreaManagerWindow(CTkToplevel):
             r += 1
             return widget
 
-        # Thickening
-        f_th = make_frame(pl)
-        self.var_thickening = tk.IntVar()
-        make_slider(f_th, from_=0, to=5, variable=self.var_thickening,
-                command=lambda v: self._on_field_change()).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        l_th = make_label(f_th, text="0")
-        l_th.pack(side=tk.LEFT, padx=5)
-        self.var_thickening.trace_add(
-            "write", lambda *a: l_th.configure(text=f"{self.var_thickening.get()}"))
-        add_row("Pogrubienie:", f_th)
-
         # Mode
         self.var_mode = tk.StringVar()
         from app.matcher import MATCH_MODE_FULL, MATCH_MODE_STARTS, MATCH_MODE_PARTIAL
@@ -232,6 +221,17 @@ class AreaManagerWindow(CTkToplevel):
         cb_mode = make_combobox(pl, textvariable=self.var_mode, values=list(self.mode_mapping.values()), state="readonly")
         cb_mode.bind("<<ComboboxSelected>>", self._on_field_change)
         add_row("Tryb dopasowania:", cb_mode)
+
+        # Magnification (OCR Scale)
+        f_sc = make_frame(pl)
+        self.var_ocr_scale = tk.DoubleVar()
+        make_slider(f_sc, from_=0.1, to=3.0, variable=self.var_ocr_scale,
+                 command=lambda v: self._on_field_change()).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        l_sc = make_label(f_sc, text="100%")
+        l_sc.pack(side=tk.LEFT, padx=5)
+        self.var_ocr_scale.trace_add(
+            "write", lambda *a: l_sc.configure(text=f"{int(round(self.var_ocr_scale.get() * 100))}%"))
+        add_row("Powiększenie:", f_sc)
 
         # Brightness
         f_br = make_frame(pl)
@@ -259,6 +259,17 @@ class AreaManagerWindow(CTkToplevel):
         self.var_contrast.trace_add(
             "write", lambda *a: l_co.configure(text=f"{self.var_contrast.get():.1f}"))
         add_row("Kontrast:", f_co)
+
+        # Thickening
+        f_th = make_frame(pl)
+        self.var_thickening = tk.IntVar()
+        make_slider(f_th, from_=0, to=5, variable=self.var_thickening,
+                command=lambda v: self._on_field_change()).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        l_th = make_label(f_th, text="0")
+        l_th.pack(side=tk.LEFT, padx=5)
+        self.var_thickening.trace_add(
+            "write", lambda *a: l_th.configure(text=f"{self.var_thickening.get()}"))
+        add_row("Pogrubienie:", f_th)
 
     def _init_tab_colors(self, parent):
         self.var_use_colors = tk.BooleanVar()
@@ -334,6 +345,7 @@ class AreaManagerWindow(CTkToplevel):
 
         self.var_brightness.set(settings.brightness_threshold)
         self.var_contrast.set(settings.contrast)
+        self.var_ocr_scale.set(settings.ocr_scale_factor)
 
         # Tab Colors
         self.var_use_colors.set(settings.use_colors)
@@ -375,6 +387,7 @@ class AreaManagerWindow(CTkToplevel):
         # s['text_color_mode'] removed
         area.brightness_threshold = self.var_brightness.get()
         area.contrast = self.var_contrast.get()
+        area.ocr_scale_factor = self.var_ocr_scale.get()
         area.use_colors = self.var_use_colors.get()
         area.color_tolerance = self.var_tolerance.get()
         # Zapisz tryb dopasowania do settings (ensure normalized)

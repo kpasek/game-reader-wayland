@@ -4,9 +4,11 @@ from typing import Dict, Any, List, Optional
 from pathlib import Path
 from typing import Tuple
 from dataclasses import dataclass, field
-from app import scale_utils
+from dataclasses import dataclass, field
 
 APP_CONFIG_FILE = Path.home() / '.config' / 'app_config.json'
+STANDARD_WIDTH = 3840
+STANDARD_HEIGHT = 2160
 
 DEFAULT_CONFIG = {
     'recent_presets': [],
@@ -23,7 +25,6 @@ DEFAULT_PRESET_CONTENT = {
     # Domyślny tryb dopasowania napisów (musi być zgodny z MATCH_MODE_FULL z matcher.py)
     "subtitle_mode": "Full Lines",
     "text_color_mode": "Light",
-    "ocr_scale_factor": 0.5,
     "capture_interval": 0.5,
     "audio_speed": 1.15,
     "audio_volume": 1.0,
@@ -52,7 +53,7 @@ class AreaConfig:
     rect: Dict[str, int] = field(default_factory=lambda: {"left": 0, "top": 0, "width": 0, "height": 0})
     hotkey: str = ""
     name: str = ""
-    enabled: bool = False
+    enabled: bool = True
     colors: List[str] = field(default_factory=list)
 
     # Flattened per-area settings
@@ -64,6 +65,7 @@ class AreaConfig:
     color_tolerance: int = 10
     setting_mode: str = ''
     show_debug: bool = False
+    ocr_scale_factor: float = 1.0
 
     def _to_dict(self) -> Dict[str, Any]:
         """Returns a full dictionary representation of the AreaConfig for persistence."""
@@ -82,7 +84,8 @@ class AreaConfig:
             "use_colors": bool(self.use_colors),
             "color_tolerance": int(self.color_tolerance),
             "setting_mode": str(self.setting_mode or ''),
-            "show_debug": bool(self.show_debug)
+            "show_debug": bool(self.show_debug),
+            "ocr_scale_factor": float(self.ocr_scale_factor)
         }
 
     @classmethod
@@ -123,6 +126,7 @@ class AreaConfig:
             
         kw['setting_mode'] = str(_pick('setting_mode', ''))
         kw['show_debug'] = bool(_pick('show_debug', False))
+        kw['ocr_scale_factor'] = float(_pick('ocr_scale_factor', 1.0))
 
         return cls(**kw)
 
@@ -135,7 +139,6 @@ class PresetConfig:
     text_file_path: str = "subtitles.txt"
     subtitle_mode: str = "Full Lines"
     text_color_mode: str = "Light"
-    ocr_scale_factor: float = 0.5
     capture_interval: float = 0.5
     audio_ext: str = ".mp3"
     auto_remove_names: bool = True
@@ -360,17 +363,6 @@ class ConfigManager:
             self.save_preset(self.preset_path, obj)
 
     @property
-    def ocr_scale_factor(self) -> float:
-        return self._get_preset_obj().ocr_scale_factor
-
-    @ocr_scale_factor.setter
-    def ocr_scale_factor(self, value: float):
-        obj = self._get_preset_obj()
-        obj.ocr_scale_factor = float(value)
-        if self.preset_path:
-            self.save_preset(self.preset_path, obj)
-
-    @property
     def save_logs(self) -> bool:
         return self._get_preset_obj().save_logs
 
@@ -439,8 +431,12 @@ class ConfigManager:
         
         if self.display_resolution:
             dw, dh = self.display_resolution
+            ratio = STANDARD_WIDTH / dw if dw > 0 else 1.0
             for area in new_areas:
-                area.rect = scale_utils.scale_rect_to_4k(area.rect, dw, dh)
+                area.rect = self._scale_rect_to_4k(area.rect, dw, dh)
+                # Normalize area-level ocr_scale_factor to 4K
+                if hasattr(area, 'ocr_scale_factor'):
+                    area.ocr_scale_factor = float(area.ocr_scale_factor) / ratio
         
         obj.areas = new_areas
         if self.preset_path:
@@ -602,7 +598,7 @@ class ConfigManager:
             src_w, src_h = map(int, res_str.lower().split('x'))
 
             # 2. Ustal rozdzielczość docelową (Lektor Wayland używa 4K jako bazy)
-            tgt_w, tgt_h = 3840, 2160
+            tgt_w, tgt_h = STANDARD_WIDTH, STANDARD_HEIGHT
 
             scale_x = tgt_w / src_w
             scale_y = tgt_h / src_h
@@ -788,8 +784,11 @@ class ConfigManager:
         target_res = dest_resolution or self.display_resolution
         if target_res:
             dw, dh = target_res
+            ratio = STANDARD_WIDTH / dw if dw > 0 else 1.0
             for area in res_obj.areas:
-                area.rect = scale_utils.scale_rect_to_physical(area.rect, dw, dh)
+                area.rect = self._scale_rect_to_physical(area.rect, dw, dh)
+                if hasattr(area, 'ocr_scale_factor'):
+                    area.ocr_scale_factor = float(area.ocr_scale_factor) * ratio
         
         return res_obj._to_dict()
 
@@ -802,8 +801,11 @@ class ConfigManager:
         
         if self.display_resolution:
             dw, dh = self.display_resolution
+            ratio = STANDARD_WIDTH / dw if dw > 0 else 1.0
             for area in areas_copy:
-                area.rect = scale_utils.scale_rect_to_physical(area.rect, dw, dh)
+                area.rect = self._scale_rect_to_physical(area.rect, dw, dh)
+                if hasattr(area, 'ocr_scale_factor'):
+                    area.ocr_scale_factor = float(area.ocr_scale_factor) * ratio
         
         return areas_copy
 
@@ -824,6 +826,32 @@ class ConfigManager:
         """
         self.areas = areas
 
+    # --- Private scaling helpers (replaces scale_utils) ---
+    def _scale_rect_to_physical(self, rect: Dict[str, int], dest_w: int, dest_h: int) -> Dict[str, int]:
+        """Scale a canonical-4K rect to physical resolution."""
+        if not rect:
+            return rect
+        sx = dest_w / STANDARD_WIDTH
+        sy = dest_h / STANDARD_HEIGHT
+        return {
+            'left': int(round(rect.get('left', 0) * sx)),
+            'top': int(round(rect.get('top', 0) * sy)),
+            'width': int(round(rect.get('width', 0) * sx)),
+            'height': int(round(rect.get('height', 0) * sy)),
+        }
+
+    def _scale_rect_to_4k(self, rect: Dict[str, int], src_w: int, src_h: int) -> Dict[str, int]:
+        """Scale a physical rect to canonical 4K."""
+        if not rect:
+            return rect
+        sx = STANDARD_WIDTH / src_w if src_w else 1.0
+        sy = STANDARD_HEIGHT / src_h if src_h else 1.0
+        return {
+            'left': int(round(rect.get('left', 0) * sx)),
+            'top': int(round(rect.get('top', 0) * sy)),
+            'width': int(round(rect.get('width', 0) * sx)),
+            'height': int(round(rect.get('height', 0) * sy)),
+        }
 
     def save_preset(self, path: Optional[str] = None, obj: Optional[PresetConfig] = None):
         """Saves PresetConfig to disk. Coordinate scaling (4K) is handled by property getters/setters."""

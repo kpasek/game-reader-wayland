@@ -30,8 +30,8 @@ class OptimizationResultWindow(CTkToplevel):
             add_row("Wykryty obszar:", f"X:{ox}, Y:{oy}, {ow}x{oh}")
 
         add_row("Jasność (Threshold):", settings.brightness_threshold)
-        add_row("Kontrast:", settings.contrast)
-        add_row("Skala OCR:", settings.ocr_scale_factor)
+        add_row("Kontrast:", f"{settings.contrast:.1f}")
+        add_row("Powiększenie:", f"{int(round(settings.ocr_scale_factor * 100))}%")
         
         # Colors
         cols = getattr(settings, 'colors', [])

@@ -106,9 +106,9 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager, area_con
         color_tol = int(area_config.color_tolerance)
         show_debug = bool(config_manager.show_debug)
 
-        # Parametry globalne
+        # Parametry obszaru
         color_mode = str(config_manager.text_color_mode)
-        scale_factor = float(config_manager.ocr_scale_factor)
+        scale_factor = float(area_config.ocr_scale_factor if area_config and hasattr(area_config, 'ocr_scale_factor') else 1.0)
 
         if show_debug:
             print(f"Preprocess area: thinning={thick}, threshold={thresh}, contrast={contr}, color_tol={color_tol}, colors={cols_source}")

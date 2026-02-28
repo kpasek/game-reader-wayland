@@ -147,14 +147,16 @@ class SettingsOptimizer:
         for color, tol, thick, contrast in itertools.product(candidate_colors, params["color_tolerances"], params["thickenings"], params["contrasts"]):
             s = copy.deepcopy(self.base_preset)
             s._setting_mode, s.auto_remove_names, s.colors = "color", True, [color]
-            s.color_tolerance, s.text_thickening, s.ocr_scale_factor = tol, thick, 1.0
+            s.color_tolerance, s.text_thickening = tol, thick
+            setattr(s, 'ocr_scale_factor', 1.0) # Optimization evaluates at 1.0 scale
             s.text_color_mode, s.brightness_threshold, s.contrast, s.subtitle_mode = "Light", 200, contrast, match_mode
             candidates.append(s)
         
         for mode, thick, contrast, bright in itertools.product(["Light", "Dark"], params["thickenings"], params["contrasts"], params["brightness_threshold"]):
             s = copy.deepcopy(self.base_preset)
             s._setting_mode, s.auto_remove_names, s.colors = "brightness", True, []
-            s.text_color_mode, s.text_thickening, s.ocr_scale_factor = mode, thick, 1.0
+            s.text_color_mode, s.text_thickening = mode, thick
+            setattr(s, 'ocr_scale_factor', 1.0)
             s.brightness_threshold, s.contrast, s.subtitle_mode = bright, contrast, match_mode
             candidates.append(s)
 

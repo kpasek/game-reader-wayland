@@ -48,7 +48,6 @@ class SettingsDialog(CTkToplevel):
         # Aktualizujemy istniejące zmienne zamiast tworzyć nowe, 
         # aby nie zerwać powiązań (bindings/traces) w głównym oknie.
         self.app.var_capture_interval.set(float(cm.capture_interval))
-        self.app.var_ocr_scale.set(float(cm.ocr_scale_factor))
         self.app.var_audio_speed.set(float(cm.audio_speed_inc))
 
         self.app.var_match_score_short.set(int(cm.match_score_short))
