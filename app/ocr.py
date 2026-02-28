@@ -106,9 +106,9 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager, area_con
         color_tol = int(area_config.color_tolerance)
         show_debug = bool(config_manager.show_debug)
 
-        # Parametry globalne
-        color_mode = str(config_manager.text_color_mode)
-        scale_factor = float(config_manager.ocr_scale_factor)
+        # Parametry obszaru
+        brightness_mode = str(area_config.brightness_mode if area_config and hasattr(area_config, 'brightness_mode') else "Light")
+        scale_factor = float(area_config.ocr_scale_factor if area_config and hasattr(area_config, 'ocr_scale_factor') else 1.0)
 
         if show_debug:
             print(f"Preprocess area: thinning={thick}, threshold={thresh}, contrast={contr}, color_tol={color_tol}, colors={cols_source}")
@@ -125,7 +125,7 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager, area_con
             enhancer = ImageEnhance.Contrast(image)
             image = enhancer.enhance(contr + 1.0)
 
-        effective_text_color = "Light" if has_valid_colors else color_mode
+        effective_text_color = "Light" if has_valid_colors else brightness_mode
 
         if effective_text_color != "Mixed":
             image = ImageOps.grayscale(image)
@@ -163,7 +163,7 @@ def preprocess_image(image: Image.Image, config_manager: ConfigManager, area_con
             new_h = int(image.height * scale_factor)
             image = image.resize((new_w, new_h), Image.BICUBIC)
 
-        if color_mode != "Mixed":
+        if brightness_mode != "Mixed":
             image = ImageOps.invert(image)
 
         return image, True, crop_box

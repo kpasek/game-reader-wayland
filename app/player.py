@@ -8,7 +8,9 @@ import platform
 
 
 class PlayerThread(threading.Thread):
-    def __init__(self, stop_event, audio_queue, base_speed_callback=None, volume_callback=None):
+    def __init__(
+        self, stop_event, audio_queue, base_speed_callback=None, volume_callback=None
+    ):
         super().__init__(daemon=True)
         self.stop_event = stop_event
         self.audio_queue = audio_queue
@@ -66,24 +68,27 @@ class PlayerThread(threading.Thread):
 
             # Budowanie komendy dla ffplay
             # Używamy final_speed w filtrze atempo
-            filter_complex = f"atempo={final_speed:.2f},volume={base_volume:.2f},alimiter=limit=0.95"
+            filter_complex = (
+                f"atempo={final_speed:.2f},volume={base_volume:.2f},alimiter=limit=0.95"
+            )
 
             cmd = [
                 self.ffplay_cmd,
-                '-nodisp',
-                '-autoexit',
-                '-af', filter_complex,
-                audio_file
+                "-nodisp",
+                "-autoexit",
+                "-af",
+                filter_complex,
+                audio_file,
             ]
 
             try:
                 # Uruchomienie procesu z ukrytym oknem
-                pass # Player log removed
+                pass  # Player log removed
                 self.current_process = subprocess.Popen(
                     cmd,
                     startupinfo=self._get_startup_info(),
                     stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
+                    stderr=subprocess.DEVNULL,
                 )
 
                 # Czekamy na zakończenie odtwarzania lub sygnał stop
@@ -97,6 +102,9 @@ class PlayerThread(threading.Thread):
                 print(f"Błąd odtwarzacza: {e}", file=sys.stderr)
             finally:
                 self.current_process = None
+
+    def is_playing(self):
+        return self.current_process is not None and self.current_process.poll() is None
 
     def stop(self):
         self.stop_event.set()

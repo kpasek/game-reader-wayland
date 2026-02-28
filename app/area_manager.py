@@ -45,7 +45,7 @@ class AreaManagerWindow(CTkToplevel):
         """
         super().__init__(parent)
         self.title("Zarządzanie Obszarami")
-        self.geometry("1000x700")
+        self.geometry("1050x750")
         self.app: 'LektorApp' = app
         self.config_mgr: Optional[ConfigManager] = app.config_mgr
         self.subtitle_lines: Optional[List[Dict[str, Any]]] = subtitle_lines
@@ -125,13 +125,13 @@ class AreaManagerWindow(CTkToplevel):
         self.notebook = make_notebook(self.right_frame)
         self.notebook.pack(fill=tk.BOTH, expand=True)
 
-        # Tab 1: Ogólne (Type, Rect, Hotkey + OCR)
+        # Tab 1: Ogólne (Type, Name, Rect, Hotkey, Magnification, Mode, Thickening)
         self.tab_general = make_notebook_tab(self.notebook, "Ogólne")
         self._init_tab_general(self.tab_general)
 
-        # Tab 2: Kolory (Colors List)
-        self.tab_colors = make_notebook_tab(self.notebook, "Kolory")
-        self._init_tab_colors(self.tab_colors)
+        # Tab 2: Detekcja (Colors, Contrast, Brightness)
+        self.tab_detection = make_notebook_tab(self.notebook, "Detekcja")
+        self._init_tab_detection(self.tab_detection)
 
     def _init_tab_general(self, parent):
         grid = make_frame(parent)
@@ -157,7 +157,6 @@ class AreaManagerWindow(CTkToplevel):
         self.entry_name.grid(row=1, column=1, sticky=tk.EW, padx=10)
         self.entry_name.bind("<KeyRelease>", self._on_field_change)
 
-        # Tab General
         self.var_enabled = tk.BooleanVar()
         self.chk_enabled = make_checkbutton(
             grid, text="Aktywny (Włączony)", variable=self.var_enabled, command=self._on_field_change)
@@ -165,7 +164,6 @@ class AreaManagerWindow(CTkToplevel):
 
         # Rect
         make_separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=15)
-
         f_rect = make_frame(parent)
         f_rect.pack(fill=tk.X)
         make_label(f_rect, text="Pozycja i Rozmiar:", font=("Arial", 10, "bold")).pack(anchor=tk.W)
@@ -175,50 +173,33 @@ class AreaManagerWindow(CTkToplevel):
 
         # Hotkey
         make_separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=15)
-
         f_hk = make_frame(parent)
         f_hk.pack(fill=tk.X)
-        make_label(f_hk, text="Skrót klawiszowy:", font=(
-            "Arial", 10, "bold")).pack(anchor=tk.W)
-
+        make_label(f_hk, text="Skrót klawiszowy:", font=("Arial", 10, "bold")).pack(anchor=tk.W)
         h_row = make_frame(f_hk)
         h_row.pack(fill=tk.X, pady=5)
         self.var_hotkey = tk.StringVar()
-        self.entry_hotkey = make_entry(
-            h_row, textvariable=self.var_hotkey, state="readonly")
+        self.entry_hotkey = make_entry(h_row, textvariable=self.var_hotkey, state="readonly")
         self.entry_hotkey.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.btn_record = make_button(h_row, text="Nagraj", command=self._record_hotkey, fg_color="#1f6aa5", hover_color="#145f8a", text_color="#ffffff")
         self.btn_record.pack(side=tk.LEFT, padx=5)
         make_button(h_row, text="X", width=3, command=self._clear_hotkey, fg_color="#c0392b", hover_color="#992d22", text_color="#ffffff").pack(side=tk.LEFT)
 
-        # OCR Settings
+        # OCR Settings (Merged from OCR Tab)
         make_separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=15)
-        make_label(parent, text="Ustawienia Obrazu i OCR:", font=(
-            "Arial", 10, "bold")).pack(anchor=tk.W, pady=(0, 10))
+        make_label(parent, text="Ustawienia OCR:", font=("Arial", 10, "bold")).pack(anchor=tk.W, pady=(0, 10))
 
         pl = make_frame(parent)
         pl.pack(fill=tk.BOTH, expand=True)
         pl.columnconfigure(1, weight=1)
-        r = 0
+        r_ocr = 0
 
-        def add_row(label, widget):
-            nonlocal r
-            make_label(pl, text=label).grid(
-                row=r, column=0, sticky=tk.W, pady=5, padx=5)
-            widget.grid(row=r, column=1, sticky=tk.EW, pady=5, padx=5)
-            r += 1
+        def add_ocr_row(label, widget):
+            nonlocal r_ocr
+            make_label(pl, text=label).grid(row=r_ocr, column=0, sticky=tk.W, pady=5, padx=5)
+            widget.grid(row=r_ocr, column=1, sticky=tk.EW, pady=5, padx=5)
+            r_ocr += 1
             return widget
-
-        # Thickening
-        f_th = make_frame(pl)
-        self.var_thickening = tk.IntVar()
-        make_slider(f_th, from_=0, to=5, variable=self.var_thickening,
-                command=lambda v: self._on_field_change()).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        l_th = make_label(f_th, text="0")
-        l_th.pack(side=tk.LEFT, padx=5)
-        self.var_thickening.trace_add(
-            "write", lambda *a: l_th.configure(text=f"{self.var_thickening.get()}"))
-        add_row("Pogrubienie:", f_th)
 
         # Mode
         self.var_mode = tk.StringVar()
@@ -231,64 +212,128 @@ class AreaManagerWindow(CTkToplevel):
         self.rev_mode_mapping = {v: k for k, v in self.mode_mapping.items()}
         cb_mode = make_combobox(pl, textvariable=self.var_mode, values=list(self.mode_mapping.values()), state="readonly")
         cb_mode.bind("<<ComboboxSelected>>", self._on_field_change)
-        add_row("Tryb dopasowania:", cb_mode)
+        add_ocr_row("Tryb dopasowania:", cb_mode)
 
-        # Brightness
-        f_br = make_frame(pl)
-        self.var_brightness = tk.IntVar()
-        def _on_brightness_change(v):
-            try:
-                # Scale reports floats; store as int for display and settings
-                self.var_brightness.set(int(float(v)))
-            except Exception:
-                pass
-            self._on_field_change()
+        # Magnification
+        f_sc = make_frame(pl)
+        self.var_ocr_scale = tk.DoubleVar()
+        make_slider(f_sc, from_=0.1, to=3.0, variable=self.var_ocr_scale, command=lambda v: self._on_field_change()).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        l_sc = make_label(f_sc, text="100%")
+        l_sc.pack(side=tk.LEFT, padx=5)
+        self.var_ocr_scale.trace_add("write", lambda *a: l_sc.configure(text=f"{int(round(self.var_ocr_scale.get() * 100))}%"))
+        add_ocr_row("Powiększenie:", f_sc)
 
-        make_slider(f_br, from_=0, to=255, variable=self.var_brightness, command=_on_brightness_change).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        l_br = make_label(f_br, text="0")
-        l_br.pack(side=tk.LEFT, padx=5)
-        self.var_brightness.trace_add("write", lambda *a: l_br.configure(text=f"{self.var_brightness.get()}"))
-        add_row("Próg jasności:", f_br)
+        # Thickening
+        f_th = make_frame(pl)
+        self.var_thickening = tk.IntVar()
+        make_slider(f_th, from_=0, to=5, variable=self.var_thickening, command=lambda v: self._on_field_change()).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        l_th = make_label(f_th, text="0")
+        l_th.pack(side=tk.LEFT, padx=5)
+        self.var_thickening.trace_add("write", lambda *a: l_th.configure(text=f"{self.var_thickening.get()}"))
+        add_ocr_row("Pogrubienie napisów:", f_th)
 
-        # Contrast
-        f_co = make_frame(pl)
-        self.var_contrast = tk.DoubleVar()
-        make_slider(f_co, from_=0.0, to=5.0, variable=self.var_contrast, command=lambda v: self._on_field_change()).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        l_co = make_label(f_co, text="0.0")
-        l_co.pack(side=tk.LEFT, padx=5)
-        self.var_contrast.trace_add(
-            "write", lambda *a: l_co.configure(text=f"{self.var_contrast.get():.1f}"))
-        add_row("Kontrast:", f_co)
 
-    def _init_tab_colors(self, parent):
+    def _init_tab_detection(self, parent):
+        # 1. Color Group (Top)
+        f_color = make_frame(parent, padding=10)
+        f_color.pack(fill=tk.X)
+        make_label(f_color, text="Detekcja na podstawie koloru (precyzyjna):", font=("Arial", 10, "bold")).pack(anchor=tk.W, pady=(0, 10))
+
         self.var_use_colors = tk.BooleanVar()
-        self.chk_use_colors = make_checkbutton(
-            parent, text="Używaj filtrowania kolorów", variable=self.var_use_colors, command=self._on_field_change)
-        self.chk_use_colors.pack(anchor=tk.W, pady=10)
+        self.chk_use_colors = make_checkbutton(f_color, text="Używaj filtrowania kolorów (ignoruje ustawienia jasności)", variable=self.var_use_colors, command=self._on_use_colors_toggled)
+        self.chk_use_colors.pack(anchor=tk.W, pady=5)
 
-        row = make_frame(parent)
-        row.pack(fill=tk.BOTH, expand=True)
-
-        self.lb_colors = make_listbox(row, height=8)
+        row_c = make_frame(f_color)
+        row_c.pack(fill=tk.BOTH, expand=True, pady=5)
+        self.lb_colors = make_listbox(row_c, height=5)
         self.lb_colors.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        btns = make_frame(row)
+        btns = make_frame(row_c)
         btns.pack(side=tk.LEFT, fill=tk.Y, padx=5)
-        make_button(btns, text="Pobierz z Ekranu", command=self._pick_color_screen, fg_color="#1f6aa5", hover_color="#145f8a", text_color="#ffffff").pack(fill=tk.X, pady=2)
-        make_button(btns, text="Dodaj Biały", command=lambda: self._add_color_manual("#FFFFFF"), fg_color="#1f6aa5", hover_color="#145f8a", text_color="#ffffff").pack(fill=tk.X, pady=2)
-        make_button(btns, text="Usuń zaznaczony", command=self._remove_color, fg_color="#c0392b", hover_color="#992d22", text_color="#ffffff").pack(fill=tk.X, pady=2)
+        self.btn_pick = make_button(btns, text="Pobierz z Ekranu", command=self._pick_color_screen, fg_color="#1f6aa5", hover_color="#145f8a", text_color="#ffffff")
+        self.btn_pick.pack(fill=tk.X, pady=2)
+        self.btn_white = make_button(btns, text="+ Biały", command=lambda: self._add_color_manual("#FFFFFF"), fg_color="#1f6aa5", hover_color="#145f8a", text_color="#ffffff")
+        self.btn_white.pack(fill=tk.X, pady=2)
+        self.btn_del_col = make_button(btns, text="Usuń", command=self._remove_color, fg_color="#c0392b", hover_color="#992d22", text_color="#ffffff")
+        self.btn_del_col.pack(fill=tk.X, pady=2)
 
         # Tolerance
-        f_tol = make_frame(parent)
-        f_tol.pack(fill=tk.X, pady=15)
-        make_label(f_tol, text="Tolerancja koloru:").pack(anchor=tk.W)
+        f_tol = make_frame(f_color)
+        f_tol.pack(fill=tk.X, pady=10)
+        make_label(f_tol, text="Tolerancja koloru:").pack(side=tk.LEFT)
         self.var_tolerance = tk.IntVar()
-
         def on_tol_change(v):
             self.var_tolerance.set(int(float(v)))
             self._on_field_change()
-        make_slider(f_tol, from_=0, to=100, variable=self.var_tolerance, orient=tk.HORIZONTAL, command=on_tol_change).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        make_label(f_tol, textvariable=self.var_tolerance).pack(side=tk.LEFT, padx=5)
+        self.slider_tolerance = make_slider(f_tol, from_=0, to=100, variable=self.var_tolerance, orient=tk.HORIZONTAL, command=on_tol_change)
+        self.slider_tolerance.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.lbl_tol_val = make_label(f_tol, textvariable=self.var_tolerance)
+        self.lbl_tol_val.pack(side=tk.LEFT, padx=5)
+
+        make_separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
+
+        # 2. Contrast (Always active)
+        f_contrast = make_frame(parent, padding=10)
+        f_contrast.pack(fill=tk.X)
+        grid_co = make_frame(f_contrast)
+        grid_co.pack(fill=tk.X)
+        grid_co.columnconfigure(1, weight=1)
+        make_label(grid_co, text="Kontrast:", font=("Arial", 10, "bold")).grid(row=0, column=0, sticky=tk.W, pady=5, padx=5)
+        f_co = make_frame(grid_co)
+        f_co.grid(row=0, column=1, sticky=tk.EW, pady=5, padx=5)
+        self.var_contrast = tk.DoubleVar()
+        self.slider_contrast = make_slider(f_co, from_=0.0, to=5.0, variable=self.var_contrast, command=lambda v: self._on_field_change())
+        self.slider_contrast.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.lbl_contrast_val = make_label(f_co, text="0.0")
+        self.lbl_contrast_val.pack(side=tk.LEFT, padx=5)
+        self.var_contrast.trace_add("write", lambda *a: self.lbl_contrast_val.configure(text=f"{self.var_contrast.get():.1f}"))
+
+        make_separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
+
+        # 3. Brightness Group (Bottom)
+        f_bright = make_frame(parent, padding=10)
+        f_bright.pack(fill=tk.X)
+        make_label(f_bright, text="Detekcja na podstawie jasności:", font=("Arial", 10, "bold")).pack(anchor=tk.W, pady=(0, 10))
+
+        grid_b = make_frame(f_bright)
+        grid_b.pack(fill=tk.X)
+        grid_b.columnconfigure(1, weight=1)
+
+        # Brightness Mode (Light/Dark)
+        make_label(grid_b, text="Odcień napisów:").grid(row=0, column=0, sticky=tk.W, pady=5, padx=5)
+        self.var_brightness_mode = tk.StringVar(value="Jasne")
+        self.brightness_mode_map = {"Light": "Jasne", "Dark": "Ciemne"}
+        self.rev_brightness_mode_map = {v: k for k, v in self.brightness_mode_map.items()}
+        self.cb_bright_mode = make_combobox(grid_b, textvariable=self.var_brightness_mode, values=list(self.brightness_mode_map.values()), state="readonly")
+        self.cb_bright_mode.grid(row=0, column=1, sticky=tk.EW, pady=5, padx=5)
+        self.cb_bright_mode.bind("<<ComboboxSelected>>", self._on_field_change)
+
+        # Brightness Threshold
+        make_label(grid_b, text="Próg jasności:").grid(row=1, column=0, sticky=tk.W, pady=5, padx=5)
+        f_br = make_frame(grid_b)
+        f_br.grid(row=1, column=1, sticky=tk.EW, pady=5, padx=5)
+        self.var_brightness = tk.IntVar()
+        def _on_brightness_change(v):
+            self.var_brightness.set(int(float(v)))
+            self._on_field_change()
+        self.slider_brightness = make_slider(f_br, from_=0, to=255, variable=self.var_brightness, command=_on_brightness_change)
+        self.slider_brightness.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.lbl_bright_val = make_label(f_br, text="0")
+        self.lbl_bright_val.pack(side=tk.LEFT, padx=5)
+        self.var_brightness.trace_add("write", lambda *a: self.lbl_bright_val.configure(text=f"{self.var_brightness.get()}"))
+
+
+    def _on_use_colors_toggled(self):
+        enabled = self.var_use_colors.get()
+        # Visual feedback: ONLY disable brightness settings, keep contrast active
+        state = tk.DISABLED if enabled else tk.NORMAL
+        self.cb_bright_mode.configure(state=state)
+        self.slider_brightness.configure(state=state)
+        
+        # Dim labels for disabled items
+        dim_color = "#888888" if enabled else "#FFFFFF"
+        self.lbl_bright_val.configure(text_color=dim_color)
+        
+        self._on_field_change()
 
     def _load_details(self, idx):
         if idx < 0 or idx >= len(self.areas):
@@ -302,22 +347,14 @@ class AreaManagerWindow(CTkToplevel):
         typ = area.type
         self.var_type.set(self.type_mapping.get(typ, typ))
         self.var_name.set(area.name or "")
-
         self.var_enabled.set(area.enabled)
-        # Make enabled checkbox editable for all areas
-        try:
-            self.chk_enabled.configure(state=tk.NORMAL)
-        except Exception:
-            pass
 
+        # Rect
         r = area.rect
         if r:
-            # area['rect'] is expected to be in screen coordinates
             try:
-                srect = {'left': int(r.get('left', 0)), 'top': int(r.get('top', 0)), 'width': int(
-                    r.get('width', 0)), 'height': int(r.get('height', 0))}
-                self.lbl_rect.configure(
-                    text=f"X:{srect['left']} Y:{srect['top']} {srect['width']}x{srect['height']}")
+                srect = {'left': int(r.get('left', 0)), 'top': int(r.get('top', 0)), 'width': int(r.get('width', 0)), 'height': int(r.get('height', 0))}
+                self.lbl_rect.configure(text=f"X:{srect['left']} Y:{srect['top']} {srect['width']}x{srect['height']}")
             except Exception:
                 self.lbl_rect.configure(text="Błąd przeliczenia obszaru")
         else:
@@ -325,17 +362,17 @@ class AreaManagerWindow(CTkToplevel):
 
         self.var_hotkey.set(area.hotkey or '')
 
-        # Tab OCR - AreaConfig is flattened, read attrs directly
-        self.var_thickening.set(settings.text_thickening)
-
+        # Tab OCR
+        self.var_ocr_scale.set(settings.ocr_scale_factor)
         from app.matcher import MATCH_MODE_FULL
         mode_val = settings.subtitle_mode if settings.subtitle_mode is not None else MATCH_MODE_FULL
         self.var_mode.set(self.mode_mapping.get(mode_val, mode_val))
+        self.var_thickening.set(settings.text_thickening)
 
+        # Tab Detection
+        self.var_brightness_mode.set(self.brightness_mode_map.get(settings.brightness_mode, "Jasne"))
         self.var_brightness.set(settings.brightness_threshold)
         self.var_contrast.set(settings.contrast)
-
-        # Tab Colors
         self.var_use_colors.set(settings.use_colors)
         self.var_tolerance.set(settings.color_tolerance)
 
@@ -344,57 +381,54 @@ class AreaManagerWindow(CTkToplevel):
         for c in colors_list:
             self.lb_colors.insert(tk.END, c)
 
-        # Note: we intentionally do not block _on_field_change here —
-        # settings are saved explicitly via the "Zapisz i Zamknij" button.
+        # Sync UI state (disable sliders if colors enabled)
+        self._on_use_colors_toggled()
 
-        for tab in [self.tab_general, self.tab_colors]:
+        # Unlock all tabs if they were locked
+        for tab in [self.tab_general, self.tab_detection]:
             for child in tab.winfo_children():
-                    try:
-                        child.configure(state=tk.NORMAL)
-                    except (tk.TclError, ValueError):
-                        pass
+                try: child.configure(state=tk.NORMAL)
+                except: pass
 
     def _on_field_change(self, event=None):
         if self.current_selection_idx < 0:
             return
         area = self.areas[self.current_selection_idx]
-        # Map UI fields back to flattened area attributes
+        
+        # General
         disp_type = self.var_type.get()
-        real_type = self.rev_type_mapping.get(disp_type, disp_type)
-        area.type = real_type
+        area.type = self.rev_type_mapping.get(disp_type, disp_type)
         area.name = self.var_name.get()
-
         area.enabled = self.var_enabled.get()
         area.hotkey = self.var_hotkey.get()
 
-        area.text_thickening = self.var_thickening.get()
-
+        # OCR
+        area.ocr_scale_factor = self.var_ocr_scale.get()
         disp_mode = self.var_mode.get()
         area.subtitle_mode = self.rev_mode_mapping.get(disp_mode, disp_mode)
+        area.text_thickening = self.var_thickening.get()
 
-        # s['text_color_mode'] removed
+        # Detection
+        area.brightness_mode = self.rev_brightness_mode_map.get(self.var_brightness_mode.get(), "Light")
         area.brightness_threshold = self.var_brightness.get()
         area.contrast = self.var_contrast.get()
         area.use_colors = self.var_use_colors.get()
         area.color_tolerance = self.var_tolerance.get()
-        # Zapisz tryb dopasowania do settings (ensure normalized)
-        if self.var_mode.get() in self.rev_mode_mapping:
-            area.subtitle_mode = self.rev_mode_mapping[self.var_mode.get()]
 
-        # Refresh list name if type changed
+        # Refresh list name
         self.lb_areas.delete(self.current_selection_idx)
         typ_raw = area.type
         t = TYPE_SHORT_MAP.get(typ_raw, typ_raw)
         display = f"#{area.id}"
-        if area.name:
-            display += f" {area.name}"
+        if area.name: display += f" {area.name}"
         display += f" [{t}]"
-        if typ_raw == TYPE_CONTINUOUS and area.id != 1:
+        if typ_raw == TYPE_CONTINUOUS and not self._is_main_area(area.id):
             state = STATE_ON if area.enabled else STATE_OFF
             display += f" [{state}]"
         self.lb_areas.insert(self.current_selection_idx, display)
         self.lb_areas.selection_set(self.current_selection_idx)
-        # Persist immediate changes to ConfigManager so it's authoritative
+        
+        # Persist
         self.config_mgr.set_areas(self.areas)
 
 
@@ -720,7 +754,7 @@ class AreaManagerWindow(CTkToplevel):
 
         # New Unique ID
         max_id = max((a.id for a in self.areas), default=0)
-        area_copy.id = max_id + 1
+        area_copy.id = max_id + "c"
 
         # Normalize subtitle colors on the copy (flattened area attributes)
         try:

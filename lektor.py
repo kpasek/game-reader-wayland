@@ -47,10 +47,12 @@ try:
 except ImportError:
     HAS_PYNPUT = False
 
-STANDARD_WIDTH = 3840
-STANDARD_HEIGHT = 2160
-
-from app.config_manager import ConfigManager, AreaConfig
+from app.config_manager import (
+    ConfigManager,
+    AreaConfig,
+    STANDARD_WIDTH,
+    STANDARD_HEIGHT,
+)
 from app.reader import ReaderThread
 from app.player import PlayerThread
 from app.log import LogWindow
@@ -68,7 +70,7 @@ audio_queue = queue.Queue()
 log_queue = queue.Queue()
 debug_queue = queue.Queue()
 
-APP_VERSION = "v1.7.3"
+APP_VERSION = "v1.8.2"
 
 
 class LektorApp:
@@ -96,13 +98,7 @@ class LektorApp:
         self.preset_map = {}
 
         # Opcje Lektora
-        self.var_text_color = tk.StringVar(value="Light")
-        self.var_ocr_scale = tk.DoubleVar(value=1.0)
 
-        def _on_scale_var_change(*args):
-            self.lbl_ocr_scale.configure(text=f"{self.var_ocr_scale.get():.2f}")
-
-        self.var_ocr_scale.trace_add("write", _on_scale_var_change)
         self.var_brightness_threshold = tk.IntVar(value=200)
         self.var_similarity = tk.DoubleVar(value=5.0)
         self.var_contrast = tk.DoubleVar(value=5.0)
@@ -137,7 +133,7 @@ class LektorApp:
         )
         self.var_speed = tk.DoubleVar(value=1.2)
         self.var_volume = tk.DoubleVar(value=1.0)
-        self.var_audio_ext = tk.StringVar(value=".ogg")
+        self.var_audio_ext = tk.StringVar(value=".mp3")
 
         self.regex_map = {
             "Brak": r"",
@@ -165,43 +161,15 @@ class LektorApp:
             self._start_hotkey_listener()
 
     # --- LOGIKA SKALI OCR ---
-    def _calc_auto_scale(self, width, height):
-        if height <= 800:
-            return 1.0
-        if height >= 2160:
-            return 0.4
-        ratio = (height - 800) / (2160 - 800)
-        scale = 1.0 + ratio * (0.4 - 1.0)
-        return round(scale * 20) / 20.0
-
-    def _update_scale_for_resolution(self, res_str, force_auto=False):
-        try:
-            w, h = map(int, res_str.split("x"))
-        except:
-            return
-
-        # We no longer use scale_overrides.
-        # The ConfigManager is authoritative for the canonical ocr_scale_factor.
-        # However, for a new preset or resolution, we suggest a scale that maps to 1080p height.
-        new_scale = self._calc_auto_scale(w, h)
-        self.var_ocr_scale.set(new_scale)
-        self.config_mgr.display_resolution = (w, h)
-
     def _on_resolution_selected(self, event=None):
         """Handler for resolution combobox selection: persist and update ConfigManager."""
         res_str = self.var_resolution.get()
         # Persist user choice
         self.config_mgr.last_resolution_key = res_str
-        # Update scale and ConfigManager display resolution
+        # Update ConfigManager display resolution
         if "x" in res_str:
             w, h = map(int, res_str.split("x"))
             self.config_mgr.display_resolution = (w, h)
-            self._update_scale_for_resolution(res_str)
-
-    def on_manual_scale_change(self, event=None):
-        val = round(self.var_ocr_scale.get(), 2)
-        # Save to current preset
-        self.config_mgr.ocr_scale_factor = val
 
     # -----------------------
 
@@ -437,26 +405,7 @@ class LektorApp:
         ).grid(row=2, column=1, sticky="w", padx=10)
         grp_aud.columnconfigure(1, weight=1)
 
-        # --- SKALA OCR ---
-        CTkLabel(grp_aud, text="Skala OCR:").grid(
-            row=3, column=0, sticky="w", pady=(10, 0)
-        )
-        s_ocr = make_slider(
-            grp_aud,
-            from_=0.1,
-            to=1.0,
-            variable=self.var_ocr_scale,
-            command=lambda v: self.lbl_ocr_scale.configure(text=f"{float(v):.2f}"),
-        )
-        s_ocr.grid(row=3, column=1, sticky="ew", padx=10)
-        try:
-            s_ocr.bind("<ButtonRelease-1>", lambda e: self.on_manual_scale_change())
-        except Exception:
-            pass
-        self.lbl_ocr_scale = CTkLabel(
-            grp_aud, text=f"{self.var_ocr_scale.get():.2f}", width=5
-        )
-        self.lbl_ocr_scale.grid(row=3, column=2)
+        grp_aud.columnconfigure(1, weight=1)
 
         # --- STEROWANIE ---
         hk_start = self.config_mgr.hotkey_start_stop
@@ -515,7 +464,6 @@ class LektorApp:
         # Persist and inform ConfigManager about current UI resolution
         self.config_mgr.last_resolution_key = res_str
         self.config_mgr.display_resolution = (w, h)
-        self._update_scale_for_resolution(res_str)
 
     def _load_initial_state(self, autostart_path):
         self._update_preset_list()
@@ -641,10 +589,8 @@ class LektorApp:
 
         self.var_audio_ext.set(self.config_mgr.audio_ext)
         self.var_auto_names.set(self.config_mgr.auto_remove_names)
-        self.var_ocr_scale.set(self.config_mgr.ocr_scale_factor)
         self.var_capture_interval.set(self.config_mgr.capture_interval)
         self.var_min_line_len.set(self.config_mgr.min_line_length)
-        self.var_text_color.set(self.config_mgr.text_color_mode)
         self.var_save_logs.set(self.config_mgr.save_logs)
         self.var_show_debug.set(self.config_mgr.show_debug)
         self.var_brightness_threshold.set(self.config_mgr.brightness_threshold)
@@ -870,6 +816,7 @@ class LektorApp:
             stop_event=stop_event,
             audio_queue=audio_queue,
             target_resolution=target_res,
+            player_thread=self.player_thread,
             log_queue=log_queue,
             debug_queue=debug_queue,
         )
@@ -1156,7 +1103,7 @@ class LektorApp:
         """
         Zwraca rozmiar ekranu bazując wyłącznie na `self.var_resolution`.
         Oczekiwany format: 'WIDTHxHEIGHT' (np. '2560x1440').
-        W razie błędu zwraca fallback 4K (3840x2160).
+        W razie błędu zwraca fallback 4K.
         """
         try:
             res = self.var_resolution.get() if hasattr(self, "var_resolution") else None
@@ -1169,7 +1116,7 @@ class LektorApp:
         except Exception:
             pass
         # Fallback 4K
-        return (3840, 2160)
+        return (STANDARD_WIDTH, STANDARD_HEIGHT)
 
     def _save_areas_callback(self, new_areas):
         path = self.var_preset_full_path.get()
@@ -1459,6 +1406,16 @@ class LektorApp:
                 target_area.contrast = float(best_settings.contrast)
                 target_area.color_tolerance = int(best_settings.color_tolerance)
                 target_area.subtitle_mode = best_settings.subtitle_mode
+
+                # Apply brightness mode if available
+                if hasattr(best_settings, "brightness_mode"):
+                    target_area.brightness_mode = best_settings.brightness_mode
+                elif hasattr(best_settings, "text_color_mode"):
+                    target_area.brightness_mode = best_settings.text_color_mode
+
+                # Set optimized scale (currently always 1.0 from optimizer)
+                if hasattr(best_settings, "ocr_scale_factor"):
+                    target_area.ocr_scale_factor = float(best_settings.ocr_scale_factor)
 
                 target_area.colors = list(best_settings.colors or [])
 
