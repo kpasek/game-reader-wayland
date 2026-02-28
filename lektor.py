@@ -70,7 +70,7 @@ audio_queue = queue.Queue()
 log_queue = queue.Queue()
 debug_queue = queue.Queue()
 
-APP_VERSION = "v1.8.2"
+APP_VERSION = "v1.8.3"
 
 
 class LektorApp:
@@ -1251,7 +1251,7 @@ class LektorApp:
 
             # Uruchomienie optymalizatora w wątku i pokazanie okna postępu
             prog = ProcessingWindow(self.root, "Trwa optymalizacja...")
-            prog.set_status("Przygotowanie danych...")
+            prog.set_status("Trwa dobieranie parametrów...\nTen proces może zająć kilka minut.\nProsimy nie zamykać tego okna.")
 
             thread_context = {
                 "result": None,
@@ -1264,27 +1264,13 @@ class LektorApp:
                 try:
                     optimizer = SettingsOptimizer(self.config_mgr)
 
-                    # Progress callback: uses thread-safe set_progress (via queue)
-                    def progress_cb(done, total, best=None):
-                        prog.set_progress(done, total, best)
-                        # Switch status label based on stage
-                        candidates_stage1 = total - 100 * (len(valid_images) - 1)
-                        if done < candidates_stage1:
-                            prog.set_status(
-                                f"Etap 1: Testowanie wszystkich wariantów ({done}/{candidates_stage1})"
-                            )
-                        else:
-                            prog.set_status(
-                                f"Etap 2: Weryfikacja najlepszych 100 na kolejnych klatkach"
-                            )
-
                     res = optimizer.optimize(
                         valid_images,
                         target_rect,
                         subtitle_lines,
                         mode,
                         initial_color=initial_color,
-                        progress_callback=progress_cb,
+                        progress_callback=None, # Disabled for performance
                         stop_event=prog.stop_event,
                     )
                     thread_context["result"] = res

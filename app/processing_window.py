@@ -50,10 +50,6 @@ class ProcessingWindow(CTkToplevel):
             except Exception:
                 pass
 
-        # Small label showing percent progress and current best score
-        self.lbl_progress_info = make_label(main_f, text=("0% | Jakość ustawień: 0.0%"))
-        self.lbl_progress_info.pack()
-
         # Internal flag to mark determinate progress initialization
         self._progress_determinate = False
         

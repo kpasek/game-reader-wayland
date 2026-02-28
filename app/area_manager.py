@@ -845,17 +845,15 @@ class AreaManagerWindow(CTkToplevel):
             except Exception:
                 mode = MATCH_MODE_FULL
 
-            # Build a plain settings dict for the optimizer by reading authoritative
-            # properties from the AreaConfig instance. We use private _to_dict for this
-            # internal optimization step.
-            settings_dict = settings_area._to_dict()
-
+            # Przekazujemy pełny obiekt AreaConfig do testowania, zamiast słownika, 
+            # by funkcje OCR/preprocess poprawnie używały atrybutów zamiast słownika
+            
             score_original, _ = optimizer._evaluate_settings(
-                normal_crop, settings_dict, pre_db, mode)
+                normal_crop, settings_area, pre_db, mode)
 
             # Evaluate expanded
             score_expanded, _ = optimizer._evaluate_settings(
-                expanded_crop, settings_dict, pre_db, mode)
+                expanded_crop, settings_area, pre_db, mode)
 
             # Logic: If expanded score is significantly better OR (if both are good, check bounds)
             # Actually, if we expand, we might catch garbage which lowers score.

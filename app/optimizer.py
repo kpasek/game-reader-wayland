@@ -27,7 +27,11 @@ def _evaluate_worker(args):
 
     try:
         # We use the globally stored _worker_crop and _worker_db for efficiency
-        processed_img, has_content, bbox = preprocess_image(_worker_crop.copy(), mock_cfg, area_config=preset)
+        # Handle both PresetConfig/AreaConfig objects and legacy dictionaries
+        is_dict = isinstance(preset, dict)
+        area_config = preset if not is_dict else None
+        
+        processed_img, has_content, bbox = preprocess_image(_worker_crop.copy(), mock_cfg, area_config=area_config)
         if not has_content:
             return 0, None
 
@@ -37,6 +41,8 @@ def _evaluate_worker(args):
 
         match_result = find_best_match(ocr_text, _worker_db, mode=match_mode, matcher_config=mock_cfg)
     except Exception:
+        import traceback
+        traceback.print_exc()
         return 0, None
 
     if not match_result:
@@ -69,9 +75,9 @@ def _evaluate_worker(args):
 class OptimizerConfigManager(ConfigManager):
     """
     Specjalna wersja ConfigManager używana podczas optymalizacji.
-    Używa obiektu PresetConfig w pamięci zamiast ładować z pliku.
+    Używa obiektu PresetConfig/AreaConfig w pamięci zamiast ładować z pliku.
     """
-    def __init__(self, preset: 'PresetConfig'):
+    def __init__(self, preset: Any):
         self.settings = {} 
         self.preset_path = None
         self.display_resolution = None
@@ -85,6 +91,36 @@ class OptimizerConfigManager(ConfigManager):
 
     def save_preset(self, path, obj):
         pass
+
+    @property
+    def auto_remove_names(self):
+        if hasattr(self.preset_cache, 'auto_remove_names'):
+            return self.preset_cache.auto_remove_names
+        return True
+
+    @property
+    def partial_mode_min_len(self):
+        if hasattr(self.preset_cache, 'partial_mode_min_len'):
+            return self.preset_cache.partial_mode_min_len
+        return 20
+
+    @property
+    def match_score_short(self):
+        if hasattr(self.preset_cache, 'match_score_short'):
+            return self.preset_cache.match_score_short
+        return 90
+
+    @property
+    def match_score_long(self):
+        if hasattr(self.preset_cache, 'match_score_long'):
+            return self.preset_cache.match_score_long
+        return 75
+
+    @property
+    def match_len_diff_ratio(self):
+        if hasattr(self.preset_cache, 'match_len_diff_ratio'):
+            return self.preset_cache.match_len_diff_ratio
+        return 0.30
 
 class SettingsOptimizer:
     def __init__(self, original_config_manager: ConfigManager = None):
@@ -137,30 +173,31 @@ class SettingsOptimizer:
             
         candidates = []
         params = {
-            "color_tolerances": range(1, 30, 2),
+            "color_tolerances": range(1, 30, 1),
             "thickenings": [0, 1],
             "contrasts": [round(x * 0.4, 1) for x in range(0, 6)],
-            "brightness_threshold": range(150, 255, 10)
+            "brightness_threshold": range(150, 255, 3),
+            "scale_factors": [round(x * 0.05, 2) for x in range(6, 16)]
         }
 
         import copy
-        for color, tol, thick, contrast in itertools.product(candidate_colors, params["color_tolerances"], params["thickenings"], params["contrasts"]):
+        for color, tol, thick, contrast, scale in itertools.product(candidate_colors, params["color_tolerances"], params["thickenings"], params["contrasts"], params["scale_factors"]):
             s = copy.deepcopy(self.base_preset)
             s._setting_mode, s.auto_remove_names, s.colors = "color", True, [color]
             s.color_tolerance, s.text_thickening = tol, thick
-            setattr(s, 'ocr_scale_factor', 1.0) # Optimization evaluates at 1.0 scale
+            s.ocr_scale_factor = scale
             s.brightness_mode, s.brightness_threshold, s.contrast, s.subtitle_mode = "Light", 200, contrast, match_mode
             candidates.append(s)
         
-        for mode, thick, contrast, bright in itertools.product(["Light", "Dark"], params["thickenings"], params["contrasts"], params["brightness_threshold"]):
+        for mode, thick, contrast, bright, scale in itertools.product(["Light", "Dark"], params["thickenings"], params["contrasts"], params["brightness_threshold"], params["scale_factors"]):
             s = copy.deepcopy(self.base_preset)
             s._setting_mode, s.auto_remove_names, s.colors = "brightness", True, []
             s.brightness_mode, s.text_thickening = mode, thick
-            setattr(s, 'ocr_scale_factor', 1.0)
+            s.ocr_scale_factor = scale
             s.brightness_threshold, s.contrast, s.subtitle_mode = bright, contrast, match_mode
             candidates.append(s)
 
-        best_amount = 100
+        best_amount = 200
         total_steps = len(candidates) + (len(images) - 1) * best_amount
         checked, best_score = 0, 0
 
@@ -174,8 +211,10 @@ class SettingsOptimizer:
             data, s, _ = item
             score = data if isinstance(data, (int, float)) else (sum(data)/len(data))
             prio = 1 if s._setting_mode == 'color' else 0
-            if s._setting_mode == 'color': return (score, prio, -s.color_tolerance, -(s.text_thickening+1), -s.contrast)
-            return (score, prio, s.brightness_threshold, -s.contrast, 0)
+            # Preferred smaller scale factor if scores are tied
+            scale_prio = -getattr(s, 'ocr_scale_factor', 1.0)
+            if s._setting_mode == 'color': return (score, prio, scale_prio, -s.color_tolerance, -(s.text_thickening+1), -s.contrast)
+            return (score, prio, scale_prio, s.brightness_threshold, -s.contrast, 0)
 
         cpu_count = multiprocessing.cpu_count()
         with multiprocessing.Pool(processes=cpu_count) as pool:
@@ -313,6 +352,9 @@ class SettingsOptimizer:
 
     def _evaluate_settings(self, crop, preset, db, match_mode=MATCH_MODE_FULL):
         mock = OptimizerConfigManager(preset)
+        # Ensure fallback attributes exist when evaluating a pure AreaConfig 
+        # that doesn't have PresetConfig-level defaults like auto_remove_names
+        
         try:
             processed, has, bbox = preprocess_image(crop.copy(), mock, area_config=preset)
             if not has: return 0, None
@@ -320,4 +362,7 @@ class SettingsOptimizer:
             if not text or len(text.strip()) < 2: return 0, None
             res = find_best_match(text, db, mode=match_mode, matcher_config=mock)
             return (res[1] if res else 0), bbox
-        except Exception: return 0, None
+        except Exception as e: 
+            import traceback
+            print(f"OCR Error: {e}")
+            return 0, None
