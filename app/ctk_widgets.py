@@ -38,6 +38,8 @@ def _apply_text_color(widget, text_color: Optional[str]):
 def make_frame(master, **kwargs):
     # CTkFrame does not support `padding` kwarg (used by ttk).
     padding = kwargs.pop('padding', None)
+    # Default to transparent background for a unified look
+    kwargs.setdefault('fg_color', 'transparent')
     ctk_kwargs = {k: v for k, v in kwargs.items()}
 
     class _PaddingFrame(ctk.CTkFrame):
@@ -86,6 +88,10 @@ def make_label(master, text: str = None, text_color: Optional[str] = None, **kwa
 
 
 def make_button(master, text: str = None, command: Any = None, text_color: Optional[str] = None, **kwargs):
+    # Default modern styling
+    kwargs.setdefault('height', 40)
+    kwargs.setdefault('corner_radius', 12)
+    kwargs.setdefault('font', ("Arial", 12, "bold"))
     w = ctk.CTkButton(master, text=text, command=command, **kwargs)
     _apply_text_color(w, text_color)
     return w
@@ -94,11 +100,14 @@ def make_button(master, text: str = None, command: Any = None, text_color: Optio
 def make_scale(master, from_: float = 0.0, to: float = 1.0, variable=None, command=None, **kwargs):
     # Filter out kwargs unsupported by CTkSlider
     c_kwargs = {k: v for k, v in kwargs.items() if k not in ('orient', 'resolution', 'length')}
+    # Default to transparent for slider container
+    c_kwargs.setdefault('fg_color', 'transparent')
 
     class _SliderContainer(ctk.CTkFrame):
         def __init__(self, parent, **inner_kwargs):
-            super().__init__(parent)
-            self._slider = ctk.CTkSlider(self, from_=from_, to=to, variable=variable, command=command, **inner_kwargs)
+            super().__init__(parent, **inner_kwargs)
+            # Slider itself should have a bg inherited
+            self._slider = ctk.CTkSlider(self, from_=from_, to=to, variable=variable, command=command)
             self._slider.pack(fill=tk.BOTH, expand=True)
 
         def bind(self, *args, **kwargs):
@@ -129,11 +138,13 @@ def make_combobox(master, textvariable=None, values=None, state='readonly', widt
     if textvariable is not None:
         params['variable'] = textvariable
     params['values'] = values or []
-    params.update(kwargs)
+    # Ensure transparency for combo container
+    kwargs.setdefault('fg_color', 'transparent')
+    params.update({k: v for k, v in kwargs.items() if k != 'fg_color'})
 
     class _ComboContainer(ctk.CTkFrame):
-        def __init__(self, parent, **c_kwargs):
-            super().__init__(parent)
+        def __init__(self, parent, **wrapper_kwargs):
+            super().__init__(parent, **wrapper_kwargs)
             # Try to create CTkComboBox; if it fails, fallback to ttk.Combobox.
             try:
                 self._combobox = ctk.CTkComboBox(self, **params)

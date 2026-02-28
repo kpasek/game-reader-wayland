@@ -29,10 +29,7 @@ except Exception:
     # Fail gracefully if customtkinter doesn't expose these (older versions/tests)
     pass
 
-from app.ctk_widgets import (
-    CTkFrame, CTkLabel, make_button, make_label, make_frame,
-    make_combobox, make_scale, make_slider
-)
+from app.ctk_widgets import CTkFrame, CTkLabel, make_button, make_combobox, make_slider
 
 
 if platform.system() == "Windows":
@@ -49,7 +46,7 @@ try:
     HAS_PYNPUT = True
 except ImportError:
     HAS_PYNPUT = False
-    
+
 STANDARD_WIDTH = 3840
 STANDARD_HEIGHT = 2160
 
@@ -60,7 +57,7 @@ from app.log import LogWindow
 from app.settings import SettingsDialog
 from app.area_selector import AreaSelector, ColorSelector
 from app.area_manager import AreaManagerWindow
-from app.capture import capture_fullscreen
+from app.capture import capture_fullscreen, reset_pipewire_source, SCREENSHOT_BACKEND
 from app.help import HelpWindow
 from app.optimizer import SettingsOptimizer
 from app.geometry_utils import calculate_merged_area
@@ -71,7 +68,7 @@ audio_queue = queue.Queue()
 log_queue = queue.Queue()
 debug_queue = queue.Queue()
 
-APP_VERSION = "v1.6.3"
+APP_VERSION = "v1.7.3"
 
 
 class LektorApp:
@@ -90,17 +87,21 @@ class LektorApp:
         self.help_window = None
         self.is_running = False
         self.hotkey_listener = None
+        self.area_mgr_win = None
 
         # Zmienne UI
         self.var_preset_display = tk.StringVar()
         self.full_preset_paths = []
         self.var_preset_full_path = tk.StringVar()
+        self.preset_map = {}
 
         # Opcje Lektora
         self.var_text_color = tk.StringVar(value="Light")
         self.var_ocr_scale = tk.DoubleVar(value=1.0)
+
         def _on_scale_var_change(*args):
             self.lbl_ocr_scale.configure(text=f"{self.var_ocr_scale.get():.2f}")
+
         self.var_ocr_scale.trace_add("write", _on_scale_var_change)
         self.var_brightness_threshold = tk.IntVar(value=200)
         self.var_similarity = tk.DoubleVar(value=5.0)
@@ -131,7 +132,9 @@ class LektorApp:
         # Audio
         self.var_resolution = tk.StringVar()
         # Ensure any change to var_resolution updates ConfigManager immediately
-        self.var_resolution.trace_add("write", lambda *a: self._on_resolution_selected())
+        self.var_resolution.trace_add(
+            "write", lambda *a: self._on_resolution_selected()
+        )
         self.var_speed = tk.DoubleVar(value=1.2)
         self.var_volume = tk.DoubleVar(value=1.0)
         self.var_audio_ext = tk.StringVar(value=".ogg")
@@ -141,12 +144,16 @@ class LektorApp:
             "Standard (Imię: Dialog)": r"^(?i)({NAMES})\s*[:：\-; ]*",
             "Nawiasy ([Imię] Dialog)": r"^\[({NAMES})\]",
             "Imię na początku": r"^({NAMES})\s+",
-            "Własny (Regex)": "CUSTOM"
+            "Własny (Regex)": "CUSTOM",
         }
 
         self.resolutions = [
-            "1920x1080", "2560x1440", "3840x2160",
-            "1280x800", "2560x1600", "Niestandardowa"
+            "1920x1080",
+            "2560x1440",
+            "3840x2160",
+            "1280x800",
+            "2560x1600",
+            "Niestandardowa",
         ]
 
         self._init_gui()
@@ -159,19 +166,21 @@ class LektorApp:
 
     # --- LOGIKA SKALI OCR ---
     def _calc_auto_scale(self, width, height):
-        if height <= 800: return 1.0
-        if height >= 2160: return 0.4
+        if height <= 800:
+            return 1.0
+        if height >= 2160:
+            return 0.4
         ratio = (height - 800) / (2160 - 800)
         scale = 1.0 + ratio * (0.4 - 1.0)
         return round(scale * 20) / 20.0
 
     def _update_scale_for_resolution(self, res_str, force_auto=False):
         try:
-            w, h = map(int, res_str.split('x'))
+            w, h = map(int, res_str.split("x"))
         except:
             return
 
-        # We no longer use scale_overrides. 
+        # We no longer use scale_overrides.
         # The ConfigManager is authoritative for the canonical ocr_scale_factor.
         # However, for a new preset or resolution, we suggest a scale that maps to 1080p height.
         new_scale = self._calc_auto_scale(w, h)
@@ -185,7 +194,7 @@ class LektorApp:
         self.config_mgr.last_resolution_key = res_str
         # Update scale and ConfigManager display resolution
         if "x" in res_str:
-            w, h = map(int, res_str.split('x'))
+            w, h = map(int, res_str.split("x"))
             self.config_mgr.display_resolution = (w, h)
             self._update_scale_for_resolution(res_str)
 
@@ -198,28 +207,32 @@ class LektorApp:
 
     def _start_hotkey_listener(self):
         hk_start = self.config_mgr.hotkey_start_stop
-        
-        if hasattr(self, 'hotkey_listener') and self.hotkey_listener:
+
+        if hasattr(self, "hotkey_listener") and self.hotkey_listener:
             try:
                 self.hotkey_listener.stop()
-            except: pass
+            except:
+                pass
 
         hotkeys = {
             hk_start: self._on_hotkey_start_stop,
+            "<f9>": self.change_source,
         }
-        
+
         # Load areas from current preset
         path = self.var_preset_full_path.get()
         if path and os.path.exists(path):
-             data = self.config_mgr.load_preset(path)
-             if data and data.areas:
-                 for area in data.areas:
-                     hk = area.hotkey
-                     aid = area.id
-                     atype = area.type
-                     if hk:
-                         # Capture aid in lambda default arg
-                         hotkeys[hk] = lambda aid=aid, t=atype: self._on_hotkey_area_action(aid, t)
+            data = self.config_mgr.load_preset(path)
+            if data and data.areas:
+                for area in data.areas:
+                    hk = area.hotkey
+                    aid = area.id
+                    atype = area.type
+                    if hk:
+                        # Capture aid in lambda default arg
+                        hotkeys[hk] = lambda aid=aid, t=atype: (
+                            self._on_hotkey_area_action(aid, t)
+                        )
 
         try:
             self.hotkey_listener = keyboard.GlobalHotKeys(hotkeys)
@@ -228,7 +241,8 @@ class LektorApp:
             print(f"Ostrzeżenie: Nie udało się zarejestrować skrótów globalnych: {e}")
 
     def _restart_hotkeys(self):
-        if HAS_PYNPUT: self._start_hotkey_listener()
+        if HAS_PYNPUT:
+            self._start_hotkey_listener()
 
     def _on_hotkey_start_stop(self):
         self.root.after(0, self._toggle_start_stop_hotkey)
@@ -242,9 +256,9 @@ class LektorApp:
         else:
             self.start_reading()
 
-    def _trigger_reader_area(self, area_id, area_type='manual'):
-        if self.is_running and self.reader_thread: 
-            if area_type == 'continuous':
+    def _trigger_reader_area(self, area_id, area_type="manual"):
+        if self.is_running and self.reader_thread:
+            if area_type == "continuous":
                 self.reader_thread.toggle_continuous_area(area_id)
             else:
                 self.reader_thread.trigger_area(area_id)
@@ -253,12 +267,20 @@ class LektorApp:
         menubar = tk.Menu(self.root)
 
         preset_menu = tk.Menu(menubar, tearoff=0)
-        preset_menu.add_command(label="Wybierz katalog...", command=self.browse_lector_folder)
+        preset_menu.add_command(
+            label="Wybierz katalog...", command=self.browse_lector_folder
+        )
         preset_menu.add_separator()
-        preset_menu.add_command(label="Zmień folder audio", command=lambda: self.change_path('audio_dir'))
-        preset_menu.add_command(label="Zmień plik napisów", command=lambda: self.change_path('text_file_path'))
-        preset_menu.add_command(label="Importuj preset (Game Reader)", command=self.import_preset_dialog)
-        preset_menu.add_separator()
+        preset_menu.add_command(
+            label="Zmień folder audio", command=lambda: self.change_path("audio_dir")
+        )
+        preset_menu.add_command(
+            label="Zmień plik napisów",
+            command=lambda: self.change_path("text_file_path"),
+        )
+        preset_menu.add_command(
+            label="Importuj preset (Game Reader)", command=self.import_preset_dialog
+        )
         # Removed 'Wykryj optymalne ustawienia' as requested
         menubar.add_cascade(label="Lektor", menu=preset_menu)
 
@@ -275,110 +297,219 @@ class LektorApp:
         menubar.add_cascade(label="Pomoc", menu=help_menu)
         self.root.configure(menu=menubar)
 
-        panel = CTkFrame(self.root)
-        panel.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        panel = CTkFrame(self.root, fg_color="transparent")
+        panel.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
-        CTkLabel(panel, text="Aktywny lektor (Katalog):").pack(anchor=tk.W)
+        CTkLabel(panel, text="Aktywny lektor (Katalog):").pack(anchor=tk.W, pady=(0, 5))
         # Use factory for comboboxes (falls back to ttk.Combobox if CTk lacks one)
-        self.cb_preset = make_combobox(panel, textvariable=self.var_preset_display, state="readonly", width=60)
-        self.cb_preset.pack(fill=tk.X, pady=5)
-        self.cb_preset.bind("<<ComboboxSelected>>", self.on_preset_selected_from_combo)
+        self.cb_preset = make_combobox(
+            panel,
+            textvariable=self.var_preset_display,
+            state="readonly",
+            width=350,
+            command=self._on_preset_selection_changed,
+        )
+        self.cb_preset.pack(fill=tk.X, pady=(0, 15))
 
         # --- ROZDZIELCZOŚĆ ---
-        f_res = CTkFrame(panel)
-        f_res.pack(fill=tk.X, pady=5)
+        f_res = CTkFrame(panel, fg_color="transparent")
+        f_res.pack(fill=tk.X, pady=(0, 15))
         CTkLabel(f_res, text="Rozdzielczość:").pack(side=tk.LEFT)
-        self.cb_res = make_combobox(f_res, textvariable=self.var_resolution, values=self.resolutions)
+        self.cb_res = make_combobox(
+            f_res, textvariable=self.var_resolution, values=self.resolutions
+        )
         self.cb_res.pack(side=tk.LEFT, padx=5)
         self.cb_res.bind("<<ComboboxSelected>>", self._on_resolution_selected)
-        make_button(f_res, text="Dopasuj rozdz.", command=self.auto_detect_resolution, fg_color="#2980b9", hover_color="#21618c", text_color="#ffffff").pack(side=tk.LEFT, padx=5)
+        make_button(
+            f_res,
+            text="Dopasuj rozdz.",
+            command=self.auto_detect_resolution,
+            fg_color="#2980b9",
+            hover_color="#21618c",
+            text_color="#ffffff",
+        ).pack(side=tk.LEFT, padx=5)
 
+        self.btn_change_source = make_button(
+            f_res,
+            text="Zmień okno (F9)",
+            command=self.change_source,
+            fg_color="#8e44ad",
+            hover_color="#732d91",
+            text_color="#ffffff",
+        )
+        self.btn_change_source.pack(side=tk.LEFT, padx=5)
+
+        # Disable by default if not wayland
+        if SCREENSHOT_BACKEND != "pipewire_wayland":
+            self.btn_change_source.configure(state="disabled")
 
         # Actions Panel (Replaces Colors Panel)
-        grp_act = CTkFrame(panel)
-        grp_act.pack(fill=tk.X, pady=5)
+        grp_act = CTkFrame(panel, fg_color="transparent")
+        grp_act.pack(fill=tk.X, pady=(0, 15))
         # Big Buttons for main actions
-        btn_detect = make_button(grp_act, text="Wykryj Ustawienia", command=self.detect_optimal_settings, fg_color="#1f6aa5", hover_color="#145f8a", text_color="#ffffff")
+        btn_detect = make_button(
+            grp_act,
+            text="Wykryj Ustawienia",
+            command=self.detect_optimal_settings,
+            fg_color="#1f6aa5",
+            hover_color="#145f8a",
+            text_color="#ffffff",
+        )
         btn_detect.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
-        btn_areas = make_button(grp_act, text="Zarządzaj Obszarami", command=self.open_area_manager, fg_color="#6c757d", hover_color="#5a6268", text_color="#ffffff")
+        btn_areas = make_button(
+            grp_act,
+            text="Zarządzaj Obszarami",
+            command=self.open_area_manager,
+            fg_color="#6c757d",
+            hover_color="#5a6268",
+            text_color="#ffffff",
+        )
         btn_areas.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
         # Przycisk Ustawienia
-        self.btn_settings = make_button(grp_act, text="⚙ Ustawienia", command=self.open_settings, fg_color="#7f8c8d", hover_color="#6c7a7b", text_color="#ffffff")
+        self.btn_settings = make_button(
+            grp_act,
+            text="⚙ Ustawienia",
+            command=self.open_settings,
+            fg_color="#7f8c8d",
+            hover_color="#6c7a7b",
+            text_color="#ffffff",
+        )
         self.btn_settings.pack(side=tk.LEFT, padx=5)
 
         # Removed old subtitle colors section
         # grp_sub = ttk.LabelFrame(panel, text="Kolory napisów", padding=10) ...
 
-
         # --- AUDIO + SKALA OCR ---
-        grp_aud = CTkFrame(panel)
-        grp_aud.pack(fill=tk.X, pady=10)
+        grp_aud = CTkFrame(panel, fg_color="transparent")
+        grp_aud.pack(fill=tk.X, pady=(0, 20))
 
         CTkLabel(grp_aud, text="Prędkość:").grid(row=0, column=0)
-        s_spd = make_slider(grp_aud, from_=0.9, to=1.5, variable=self.var_speed,
-                  command=lambda v: self.lbl_spd.configure(text=f"{float(v):.2f}x") if hasattr(self, 'lbl_spd') else None)
+        s_spd = make_slider(
+            grp_aud,
+            from_=0.9,
+            to=1.5,
+            variable=self.var_speed,
+            command=lambda v: (
+                self.lbl_spd.configure(text=f"{float(v):.2f}x")
+                if hasattr(self, "lbl_spd")
+                else None
+            ),
+        )
         s_spd.grid(row=0, column=1, sticky="ew", padx=10)
         try:
-            s_spd.bind("<ButtonRelease-1>", lambda e: setattr(self.config_mgr, "audio_speed", round(self.var_speed.get(), 2)))
+            s_spd.bind(
+                "<ButtonRelease-1>",
+                lambda e: setattr(
+                    self.config_mgr, "audio_speed", round(self.var_speed.get(), 2)
+                ),
+            )
         except Exception:
             pass
         self.lbl_spd = CTkLabel(grp_aud, text="1.00x", width=5)
         self.lbl_spd.grid(row=0, column=2)
 
         CTkLabel(grp_aud, text="Głośność:").grid(row=1, column=0)
-        s_vol = make_slider(grp_aud, from_=0.0, to=1.5, variable=self.var_volume,
-                  command=lambda v: self.lbl_vol.configure(text=f"{float(v):.2f}"))
+        s_vol = make_slider(
+            grp_aud,
+            from_=0.0,
+            to=1.5,
+            variable=self.var_volume,
+            command=lambda v: self.lbl_vol.configure(text=f"{float(v):.2f}"),
+        )
         s_vol.grid(row=1, column=1, sticky="ew", padx=10)
         try:
-            s_vol.bind("<ButtonRelease-1>", lambda e: setattr(self.config_mgr, "audio_volume", round(self.var_volume.get(), 2)))
+            s_vol.bind(
+                "<ButtonRelease-1>",
+                lambda e: setattr(
+                    self.config_mgr, "audio_volume", round(self.var_volume.get(), 2)
+                ),
+            )
         except Exception:
             pass
         self.lbl_vol = CTkLabel(grp_aud, text="1.00", width=5)
         self.lbl_vol.grid(row=1, column=2)
 
         CTkLabel(grp_aud, text="Format:").grid(row=2, column=0)
-        CTkLabel(grp_aud, textvariable=self.var_audio_ext, font=("Arial", 8, "bold")).grid(row=2, column=1, sticky="w",
-                                                    padx=10)
+        CTkLabel(
+            grp_aud, textvariable=self.var_audio_ext, font=("Arial", 8, "bold")
+        ).grid(row=2, column=1, sticky="w", padx=10)
         grp_aud.columnconfigure(1, weight=1)
 
         # --- SKALA OCR ---
-        CTkLabel(grp_aud, text="Skala OCR:").grid(row=3, column=0, sticky="w", pady=(10,0))
-        s_ocr = make_slider(grp_aud, from_=0.1, to=1.0, variable=self.var_ocr_scale,
-                 command=lambda v: self.lbl_ocr_scale.configure(text=f"{float(v):.2f}"))
+        CTkLabel(grp_aud, text="Skala OCR:").grid(
+            row=3, column=0, sticky="w", pady=(10, 0)
+        )
+        s_ocr = make_slider(
+            grp_aud,
+            from_=0.1,
+            to=1.0,
+            variable=self.var_ocr_scale,
+            command=lambda v: self.lbl_ocr_scale.configure(text=f"{float(v):.2f}"),
+        )
         s_ocr.grid(row=3, column=1, sticky="ew", padx=10)
         try:
             s_ocr.bind("<ButtonRelease-1>", lambda e: self.on_manual_scale_change())
         except Exception:
             pass
-        self.lbl_ocr_scale = CTkLabel(grp_aud, text=f"{self.var_ocr_scale.get():.2f}", width=5)
+        self.lbl_ocr_scale = CTkLabel(
+            grp_aud, text=f"{self.var_ocr_scale.get():.2f}", width=5
+        )
         self.lbl_ocr_scale.grid(row=3, column=2)
 
         # --- STEROWANIE ---
         hk_start = self.config_mgr.hotkey_start_stop
-        frm_btn = CTkFrame(panel)
-        frm_btn.pack(side=tk.BOTTOM, fill=tk.X, pady=10)
+        frm_btn = CTkFrame(panel, fg_color="transparent")
+        frm_btn.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 0))
 
-        self.btn_start = make_button(frm_btn, text=f"START ({hk_start})", command=self.start_reading, fg_color="#27ae60", hover_color="#1e8449", text_color="#ffffff")
+        self.btn_start = make_button(
+            frm_btn,
+            text=f"START ({hk_start})",
+            command=self.start_reading,
+            fg_color="#27ae60",
+            hover_color="#1e8449",
+            text_color="#ffffff",
+        )
         self.btn_start.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        self.btn_stop = make_button(frm_btn, text=f"STOP ({hk_start})", command=self.stop_reading, state="disabled", fg_color="#c0392b", hover_color="#992d22", text_color="#ffffff")
+        self.btn_stop = make_button(
+            frm_btn,
+            text=f"STOP ({hk_start})",
+            command=self.stop_reading,
+            state="disabled",
+            fg_color="#c0392b",
+            hover_color="#992d22",
+            text_color="#ffffff",
+        )
         self.btn_stop.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
-        CTkLabel(self.root, text=f"Wersja: {APP_VERSION}", font=("Arial", 8)).pack(side=tk.BOTTOM, anchor=tk.E, padx=5)
+        CTkLabel(self.root, text=f"Wersja: {APP_VERSION}", font=("Arial", 8)).pack(
+            side=tk.BOTTOM, anchor=tk.E, padx=5
+        )
 
         self.root.after(200, self.refresh_color_canvas)
 
     def auto_detect_resolution(self):
-        # We prefer capture_fullscreen dimensions because it matches the 
+        # We prefer capture_fullscreen dimensions because it matches the
         # physical pixel grid used by the reader and coordinate mapping.
-        img = capture_fullscreen()
+        import app.capture
+
+        img = None
+        # Zapobiegaj wywołaniu portalu PipeWire przy starcie aplikacji (lazy loading)
+        if (
+            app.capture.SCREENSHOT_BACKEND == "pipewire_wayland"
+            and app.capture._PIPEWIRE_CAPTURE is None
+        ):
+            pass
+        else:
+            img = capture_fullscreen()
+
         if img:
             w, h = img.size
         else:
             w = self.root.winfo_screenwidth()
             h = self.root.winfo_screenheight()
-            
+
         res_str = f"{w}x{h}"
         self.var_resolution.set(res_str)
         # Persist and inform ConfigManager about current UI resolution
@@ -388,16 +519,21 @@ class LektorApp:
 
     def _load_initial_state(self, autostart_path):
         self._update_preset_list()
-        initial_path = autostart_path if autostart_path else (
-            self.full_preset_paths[0] if self.full_preset_paths else None)
+        initial_path = (
+            autostart_path
+            if autostart_path
+            else (self.full_preset_paths[0] if self.full_preset_paths else None)
+        )
         if initial_path and os.path.exists(initial_path):
             self.var_preset_full_path.set(initial_path)
-            try:
-                self.var_preset_display.set(os.path.basename(os.path.dirname(initial_path)))
-            except:
-                pass
+            # Find display name in map and set it
+            for d_name, p_path in self.preset_map.items():
+                if p_path == initial_path:
+                    self.var_preset_display.set(d_name)
+                    break
             self.on_preset_loaded()
-            if autostart_path: self.root.after(500, self.start_reading)
+            if autostart_path:
+                self.root.after(500, self.start_reading)
 
         self.var_regex_mode.set(self.config_mgr.last_regex_mode)
         self.var_custom_regex.set(self.config_mgr.last_custom_regex)
@@ -407,18 +543,65 @@ class LektorApp:
     def _update_preset_list(self):
         recents = self.config_mgr.recent_presets_list
         self.full_preset_paths = recents
-        self.cb_preset['values'] = [os.path.basename(os.path.dirname(p)) or p for p in recents]
 
-    def on_preset_selected_from_combo(self, event=None):
-        idx = self.cb_preset.current()
-        if idx >= 0 and idx < len(self.full_preset_paths):
-            self.var_preset_full_path.set(self.full_preset_paths[idx])
+        self.preset_map = {}
+        display_names = []
+
+        for path in recents:
+            if not path:
+                continue
+            # Extract the directory name containing the preset
+            dir_name = os.path.basename(os.path.dirname(path))
+            if not dir_name:
+                dir_name = "Unknown"
+
+            display_name = dir_name
+            counter = 1
+            # Ensure unique display name by checking mapping
+            while (
+                display_name in self.preset_map
+                and self.preset_map[display_name] != path
+            ):
+                parent_dir = os.path.basename(os.path.dirname(os.path.dirname(path)))
+                if parent_dir:
+                    display_name = f"{dir_name} ({parent_dir})"
+                else:
+                    display_name = f"{dir_name} ({counter})"
+
+                if (
+                    display_name in self.preset_map
+                    and self.preset_map[display_name] != path
+                ):
+                    display_name = f"{dir_name} ({counter})"
+                    counter += 1
+
+            self.preset_map[display_name] = path
+            if display_name not in display_names:
+                display_names.append(display_name)
+
+        self.cb_preset.configure(values=display_names)
+
+        current_path = self.var_preset_full_path.get()
+        if current_path:
+            # Find display name for current full path and update combobox
+            for d_name, p_path in self.preset_map.items():
+                if p_path == current_path:
+                    self.cb_preset.set(d_name)
+                    break
+
+    def _on_preset_selection_changed(self, choice):
+        """Handler for preset combobox selection."""
+        if choice and choice in self.preset_map:
+            full_path = self.preset_map[choice]
+            self.config_mgr.load_preset(full_path)
+            self.var_preset_full_path.set(full_path)
             self.on_preset_loaded()
 
     def on_preset_loaded(self):
         path = self.var_preset_full_path.get()
-        if not path or not os.path.exists(path): return
-        
+        if not path or not os.path.exists(path):
+            return
+
         # Mark as current in manager
         self.config_mgr.preset_path = path
         self.config_mgr.load_preset(path)
@@ -482,14 +665,20 @@ class LektorApp:
                 self.var_custom_regex.set(self.config_mgr.regex_pattern or "")
             self.on_regex_changed()
 
+        # Refresh Area Manager if open
+        if self.area_mgr_win and self.area_mgr_win.winfo_exists():
+            self.area_mgr_win.refresh_data()
+
         self.refresh_color_canvas()
 
     def on_regex_changed(self, event=None):
         mode = self.var_regex_mode.get()
 
-        if hasattr(self, 'ent_regex') and self.ent_regex:
+        if hasattr(self, "ent_regex") and self.ent_regex:
             try:
-                self.ent_regex.configure(state="normal" if mode == "Własny (Regex)" else "disabled")
+                self.ent_regex.configure(
+                    state="normal" if mode == "Własny (Regex)" else "disabled"
+                )
             except Exception:
                 self.ent_regex = None
 
@@ -500,31 +689,31 @@ class LektorApp:
 
     def browse_lector_folder(self):
         d = filedialog.askdirectory(title="Wybierz katalog z lektorem")
-        if not d: return
+        if not d:
+            return
         p = self.config_mgr.ensure_preset_exists(d)
         self.config_mgr.add_recent_preset(p)
-        self._update_preset_list()
         self.var_preset_full_path.set(p)
-        self.var_preset_display.set(os.path.basename(d))
+        self._update_preset_list()
         self.on_preset_loaded()
 
     def change_path(self, key):
-        if not self.var_preset_full_path.get(): return messagebox.showerror("Błąd", "Wybierz profil.")
+        if not self.var_preset_full_path.get():
+            return messagebox.showerror("Błąd", "Wybierz profil.")
         base = os.path.dirname(self.var_preset_full_path.get())
-        if key == 'audio_dir':
+        if key == "audio_dir":
             new = filedialog.askdirectory(initialdir=base)
         else:
-            new = filedialog.askopenfilename(initialdir=base, filetypes=[("Text", "*.txt")])
+            new = filedialog.askopenfilename(
+                initialdir=base, filetypes=[("Text", "*.txt")]
+            )
         if new:
             setattr(self.config_mgr, key, new)
 
-    def _scale_rect(self, rect, sx, sy):
-        return {'left': int(rect['left'] * sx), 'top': int(rect['top'] * sy), 'width': int(rect['width'] * sx),
-                'height': int(rect['height'] * sy)}
-
     def set_area(self, idx):
         path = self.var_preset_full_path.get()
-        if not path: return messagebox.showerror("Błąd", "Wybierz profil.")
+        if not path:
+            return messagebox.showerror("Błąd", "Wybierz profil.")
         self.root.withdraw()
         time.sleep(0.3)
         img = capture_fullscreen()
@@ -532,25 +721,28 @@ class LektorApp:
             self.root.deiconify()
             return
         sw, sh = img.size
-        
+
         old_disp = self.config_mgr.display_resolution
         try:
             self.config_mgr.display_resolution = (sw, sh)
-            areas = self.config_mgr.areas # Scaled to screen resolution
-            
+            areas = self.config_mgr.areas  # Scaled to screen resolution
+
             # Map index to IDs
             id_to_find = f"area_{idx}"
-            
+
             # Extract rects for AreaSelector [slot 0, slot 1, slot 2]
             disp_mons = [None, None, None]
             for area in areas:
-                 if area.id == "area_0": disp_mons[0] = area.rect
-                 elif area.id == "area_1": disp_mons[1] = area.rect
-                 elif area.id == "area_2": disp_mons[2] = area.rect
-            
+                if area.id == "area_0":
+                    disp_mons[0] = area.rect
+                elif area.id == "area_1":
+                    disp_mons[1] = area.rect
+                elif area.id == "area_2":
+                    disp_mons[2] = area.rect
+
             sel = AreaSelector(self.root, img, existing_regions=disp_mons)
             self.root.deiconify()
-            
+
             if sel.geometry:
                 rect = sel.geometry
                 found = False
@@ -561,7 +753,7 @@ class LektorApp:
                         break
                 if not found:
                     areas.append(AreaConfig(rect=rect, id=id_to_find, type="subtitle"))
-                
+
                 # Persist via authoritative ConfigManager property
                 self.config_mgr.areas = areas
         finally:
@@ -569,8 +761,9 @@ class LektorApp:
 
     def clear_area(self, idx):
         path = self.var_preset_full_path.get()
-        if not path: return
-        
+        if not path:
+            return
+
         id_to_clear = f"area_{idx}"
         areas = self.config_mgr.areas
         new_areas = [a for a in areas if a.id != id_to_clear]
@@ -583,6 +776,41 @@ class LektorApp:
         hk = self.config_mgr.hotkey_start_stop
         self.btn_start.configure(text=f"START ({hk})")
         self.btn_stop.configure(text=f"STOP ({hk})")
+
+        # Odśwież dostępność przycisku Zmień Okno
+        import app.capture
+
+        if app.capture._determine_backend() == "pipewire_wayland":
+            self.btn_change_source.configure(state="normal")
+        else:
+            self.btn_change_source.configure(state="disabled")
+
+    def change_source(self):
+        """Zmienia źródło okna/ekranu dla backendu PipeWire."""
+        import app.capture
+
+        if app.capture._determine_backend() != "pipewire_wayland":
+            messagebox.showinfo(
+                "Informacja",
+                "Dynamiczna zmiana źródła jest obsługiwana tylko przez backend PipeWire (Wayland).",
+            )
+            return
+
+        self.root.withdraw()
+        time.sleep(0.3)
+
+        # Zatrzymanie aktywnego czytania, aby zapobiec crashom przy wymianie portalu
+        was_running = self.is_running
+        if was_running:
+            self.stop_reading()
+
+        success = reset_pipewire_source()
+
+        self.root.deiconify()
+
+        if success:
+            if was_running:
+                self.start_reading()
 
     def show_logs(self):
         if not self.log_window or not self.log_window.winfo_exists():
@@ -598,7 +826,22 @@ class LektorApp:
 
     def start_reading(self):
         path = self.var_preset_full_path.get()
-        if not path or not os.path.exists(path): return messagebox.showerror("Błąd", "Brak profilu.")
+        if not path or not os.path.exists(path):
+            return messagebox.showerror("Błąd", "Brak profilu.")
+
+        # Trigger explicit portal if pipewire is active and not initialized
+        import app.capture
+
+        if (
+            app.capture.SCREENSHOT_BACKEND == "pipewire_wayland"
+            and app.capture._PIPEWIRE_CAPTURE is None
+        ):
+            try:
+                app.capture._get_pipewire_capture()
+            except Exception as e:
+                # Cancelled or failed silently
+                return
+
         self.config_mgr.add_recent_preset(path)
         self._update_preset_list()
 
@@ -608,7 +851,7 @@ class LektorApp:
         mode = self.var_regex_mode.get()
 
         res_str = self.var_resolution.get()
-        target_res = tuple(map(int, res_str.split('x'))) if "x" in res_str else None
+        target_res = tuple(map(int, res_str.split("x"))) if "x" in res_str else None
         if target_res:
             self.config_mgr.display_resolution = target_res
 
@@ -616,12 +859,20 @@ class LektorApp:
         with audio_queue.mutex:
             audio_queue.queue.clear()
 
-        self.player_thread = PlayerThread(stop_event, audio_queue,
-                                          base_speed_callback=lambda: self.var_speed.get(),
-                                          volume_callback=lambda: self.var_volume.get())
-        self.reader_thread = ReaderThread(config_manager=self.config_mgr, stop_event=stop_event, audio_queue=audio_queue,
-                                          target_resolution=target_res, log_queue=log_queue, debug_queue=debug_queue
-                                          )
+        self.player_thread = PlayerThread(
+            stop_event,
+            audio_queue,
+            base_speed_callback=lambda: self.var_speed.get(),
+            volume_callback=lambda: self.var_volume.get(),
+        )
+        self.reader_thread = ReaderThread(
+            config_manager=self.config_mgr,
+            stop_event=stop_event,
+            audio_queue=audio_queue,
+            target_resolution=target_res,
+            log_queue=log_queue,
+            debug_queue=debug_queue,
+        )
         self.player_thread.start()
         self.reader_thread.start()
         self.is_running = True
@@ -636,7 +887,8 @@ class LektorApp:
     def stop_reading(self):
         self.is_running = False
         stop_event.set()
-        if self.reader_thread: self.reader_thread.join(1.0)
+        if self.reader_thread:
+            self.reader_thread.join(1.0)
         self._toggle_ui(False)
 
     def _toggle_ui(self, running):
@@ -662,9 +914,12 @@ class LektorApp:
 
     def on_close(self):
         self.is_running = False
-        if self.reader_thread and self.reader_thread.is_alive(): self.stop_reading()
-        if self.game_process: self.game_process.terminate()
-        if hasattr(self, 'hotkey_listener') and self.hotkey_listener: self.hotkey_listener.stop()
+        if self.reader_thread and self.reader_thread.is_alive():
+            self.stop_reading()
+        if self.game_process:
+            self.game_process.terminate()
+        if hasattr(self, "hotkey_listener") and self.hotkey_listener:
+            self.hotkey_listener.stop()
         self.root.destroy()
 
     def _check_debug_queue(self):
@@ -672,7 +927,7 @@ class LektorApp:
         try:
             while True:
                 msg_type, data = debug_queue.get_nowait()
-                if msg_type == 'overlay':
+                if msg_type == "overlay":
                     x, y, w, h = data
                     self._show_debug_overlay(x, y, w, h)
         except queue.Empty:
@@ -689,7 +944,7 @@ class LektorApp:
             return
 
         thickness = 3
-        color = 'red'
+        color = "red"
         duration = 200  # Czas wyświetlania (ms)
 
         # Zabezpieczenie przed ujemnymi/zerowymi wymiarami
@@ -705,7 +960,7 @@ class LektorApp:
             top.geometry(geometry_str)
             top.configure(bg=color)
             try:
-                top.attributes('-topmost', True)
+                top.attributes("-topmost", True)
             except Exception:
                 pass
             return top
@@ -723,7 +978,11 @@ class LektorApp:
 
         # 4. Pasek prawy
         if h_inner > 0:
-            windows.append(create_strip(f"{thickness}x{h_inner}+{x + w - thickness}+{y + thickness}"))
+            windows.append(
+                create_strip(
+                    f"{thickness}x{h_inner}+{x + w - thickness}+{y + thickness}"
+                )
+            )
 
         # Funkcja zamykająca wszystkie paski naraz
         def close_overlay():
@@ -741,12 +1000,14 @@ class LektorApp:
     def import_preset_dialog(self):
         current_path = self.var_preset_full_path.get()
         if not current_path or not os.path.exists(current_path):
-            messagebox.showerror("Błąd", "Najpierw wybierz lub utwórz aktywny preset Lektora.")
+            messagebox.showerror(
+                "Błąd", "Najpierw wybierz lub utwórz aktywny preset Lektora."
+            )
             return
 
         file_path = filedialog.askopenfilename(
             title="Wybierz plik ustawień (Game Reader)",
-            filetypes=[("Pliki JSON", "*.json"), ("Wszystkie pliki", "*.*")]
+            filetypes=[("Pliki JSON", "*.json"), ("Wszystkie pliki", "*.*")],
         )
         if not file_path:
             return
@@ -754,16 +1015,23 @@ class LektorApp:
         if self.config_mgr.import_gr_preset(file_path, current_path):
             messagebox.showinfo("Sukces", "Zaimportowano obszar i przeskalowano do 4K.")
             # Odśwież UI wczytując ponownie preset
-            self.on_preset_selected_from_combo()
+            self.on_preset_loaded()
         else:
-            messagebox.showerror("Błąd", "Nie udało się zaimportować ustawień. Sprawdź plik.")
+            messagebox.showerror(
+                "Błąd", "Nie udało się zaimportować ustawień. Sprawdź plik."
+            )
 
     def _is_main_area(self, area_id):
-        return area_id == 1 or str(area_id).lower() == "area_0" or str(area_id).lower() == "area_1"
+        return (
+            area_id == 1
+            or str(area_id).lower() == "area_0"
+            or str(area_id).lower() == "area_1"
+        )
 
     def refresh_color_canvas(self):
         """Rysuje listę kolorów na nowym Canvasie."""
-        if not hasattr(self, 'color_canvas'): return
+        if not hasattr(self, "color_canvas"):
+            return
 
         self.color_canvas.delete("all")
 
@@ -772,7 +1040,8 @@ class LektorApp:
         colors = []
         if areas:
             a1 = next((a for a in areas if self._is_main_area(a.id)), None)
-            if a1: colors = a1.colors
+            if a1:
+                colors = a1.colors
         else:
             colors = self.config_mgr.colors
 
@@ -781,14 +1050,21 @@ class LektorApp:
         size = 20
 
         if not colors:
-            self.color_canvas.create_text(5, 12, text="(brak filtrów - domyślny tryb)", anchor=tk.W, fill="gray")
+            self.color_canvas.create_text(
+                5, 12, text="(brak filtrów - domyślny tryb)", anchor=tk.W, fill="gray"
+            )
             return
         for i, color in enumerate(colors):
             tag_name = f"color_{i}"
             try:
                 self.color_canvas.create_rectangle(
-                    x_offset, y_pos, x_offset + size, y_pos + size,
-                    fill=color, outline="#555555", tags=(tag_name, "clickable")
+                    x_offset,
+                    y_pos,
+                    x_offset + size,
+                    y_pos + size,
+                    fill=color,
+                    outline="#555555",
+                    tags=(tag_name, "clickable"),
                 )
             except Exception:
                 pass
@@ -807,7 +1083,9 @@ class LektorApp:
             selector = ColorSelector(self.root, full_img)
             self.root.wait_window(selector)
 
-            sel_color = selector.selected_color if hasattr(selector, 'selected_color') else None
+            sel_color = (
+                selector.selected_color if hasattr(selector, "selected_color") else None
+            )
             if not sel_color:
                 return
 
@@ -816,6 +1094,7 @@ class LektorApp:
 
             if not a1:
                 from app.config_manager import AreaConfig
+
                 a1 = AreaConfig(id=1, type="continuous", colors=[sel_color])
                 areas.insert(0, a1)
             else:
@@ -832,10 +1111,10 @@ class LektorApp:
     def add_white_subtitle_color(self):
         areas = self.config_mgr.get_areas()
         a1 = next((a for a in areas if a.id == 1), None)
-        
+
         if a1:
-            if '#ffffff' not in a1.colors:
-                a1.colors.append('#ffffff')
+            if "#ffffff" not in a1.colors:
+                a1.colors.append("#ffffff")
                 self.config_mgr.set_areas(areas)
                 self.refresh_color_canvas()
 
@@ -846,7 +1125,10 @@ class LektorApp:
         if a1:
             if idx < len(a1.colors):
                 color_to_remove = a1.colors[idx]
-                if messagebox.askyesno("Usuwanie koloru", f"Czy usunąć kolor {color_to_remove} z Obszaru 1?"):
+                if messagebox.askyesno(
+                    "Usuwanie koloru",
+                    f"Czy usunąć kolor {color_to_remove} z Obszaru 1?",
+                ):
                     del a1.colors[idx]
                     self.config_mgr.set_areas(areas)
                     self.refresh_color_canvas()
@@ -856,38 +1138,19 @@ class LektorApp:
     def open_area_manager(self):
         path = self.var_preset_full_path.get()
         if not path:
-             messagebox.showerror("Błąd", "Brak aktywnego profilu.")
-             return
-             
+            messagebox.showerror("Błąd", "Brak aktywnego profilu.")
+            return
+
         preset = self.config_mgr.load_preset(path)
-        
+
         # Load subtitles for testing inside manager
         txt_path = preset.text_file_path
         subs = []
         if txt_path and os.path.exists(txt_path):
-             subs = self.config_mgr.load_text_lines(txt_path)
-        
+            subs = self.config_mgr.load_text_lines(txt_path)
+
         # Open Manager: pass the LektorApp instance
-        AreaManagerWindow(self.root, self, subs)
-
-    def _normalize_area_to_4k(self, rect, img_w, img_h):
-        """
-        Przeskalowuje podany rect (dict) do bazy 4K (3840x2160) na podstawie rozmiaru obrazu img_w, img_h.
-        """
-        sx = 3840 / img_w
-        sy = 2160 / img_h
-        return {
-            'left': int(rect['left'] * sx),
-            'top': int(rect['top'] * sy),
-            'width': int(rect['width'] * sx),
-            'height': int(rect['height'] * sy)
-        }
-
-    def _normalize_areas_list_to_4k(self, areas, img_w, img_h):
-        """
-        Przeskalowuje wszystkie recty w liście obszarów do bazy 4K.
-        """
-        return [dict(a, rect=self._normalize_area_to_4k(a['rect'], img_w, img_h)) if 'rect' in a else a for a in areas]
+        self.area_mgr_win = AreaManagerWindow(self.root, self, subs)
 
     def _get_screen_size(self):
         """
@@ -896,9 +1159,9 @@ class LektorApp:
         W razie błędu zwraca fallback 4K (3840x2160).
         """
         try:
-            res = self.var_resolution.get() if hasattr(self, 'var_resolution') else None
-            if isinstance(res, str) and 'x' in res:
-                parts = res.split('x')
+            res = self.var_resolution.get() if hasattr(self, "var_resolution") else None
+            if isinstance(res, str) and "x" in res:
+                parts = res.split("x")
                 if len(parts) == 2:
                     w = int(parts[0])
                     h = int(parts[1])
@@ -915,12 +1178,15 @@ class LektorApp:
             sw, sh = self._get_screen_size()
             areas_objs = []
             from app.config_manager import AreaConfig
+
             for na in new_areas:
                 if isinstance(na, AreaConfig):
                     areas_objs.append(na)
                 else:
-                    areas_objs.append(AreaConfig._from_dict(na if isinstance(na, dict) else {}))
-            
+                    areas_objs.append(
+                        AreaConfig._from_dict(na if isinstance(na, dict) else {})
+                    )
+
             old_disp = self.config_mgr.display_resolution
             try:
                 self.config_mgr.display_resolution = (sw, sh)
@@ -939,7 +1205,7 @@ class LektorApp:
         self.root.withdraw()
         self.root.update()
         time.sleep(0.3)
-        
+
         try:
             img = capture_fullscreen()
             if not img:
@@ -963,28 +1229,31 @@ class LektorApp:
                     self.config_mgr.display_resolution = old_res
 
             sel = AreaSelector(self.root, img, existing_regions=existing)
-            
+
             if sel.geometry and path:
-                 sw, sh = self._get_screen_size()
-                 areas_objs = []
-                 old_res = self.config_mgr.display_resolution
-                 try:
-                     self.config_mgr.display_resolution = (sw, sh)
-                     areas_objs = self.config_mgr.get_areas()
-                 finally:
-                     self.config_mgr.display_resolution = old_res
+                sw, sh = self._get_screen_size()
+                areas_objs = []
+                old_res = self.config_mgr.display_resolution
+                try:
+                    self.config_mgr.display_resolution = (sw, sh)
+                    areas_objs = self.config_mgr.get_areas()
+                finally:
+                    self.config_mgr.display_resolution = old_res
 
-                 a1_obj = next((a for a in areas_objs if a.id == 1), None)
-                 if a1_obj:
-                     a1_obj.rect = sel.geometry
-                 else:
-                     from app.config_manager import AreaConfig
-                     a1_obj = AreaConfig(id=1, type='continuous', rect=sel.geometry)
-                     areas_objs.insert(0, a1_obj)
+                a1_obj = next((a for a in areas_objs if a.id == 1), None)
+                if a1_obj:
+                    a1_obj.rect = sel.geometry
+                else:
+                    from app.config_manager import AreaConfig
 
-                 # Persist via ConfigManager
-                 self.config_mgr.set_areas_from_display(areas_objs, src_resolution=(sw, sh))
-                 
+                    a1_obj = AreaConfig(id=1, type="continuous", rect=sel.geometry)
+                    areas_objs.insert(0, a1_obj)
+
+                # Persist via ConfigManager
+                self.config_mgr.set_areas_from_display(
+                    areas_objs, src_resolution=(sw, sh)
+                )
+
         except Exception as e:
             messagebox.showerror("Błąd", f"Wybór obszaru: {e}")
         finally:
@@ -1004,7 +1273,9 @@ class LektorApp:
 
         txt_path = preset.text_file_path
         if not txt_path or not os.path.exists(txt_path):
-            messagebox.showerror("Błąd", "Nie znaleziono pliku napisów w ustawieniach presetu.")
+            messagebox.showerror(
+                "Błąd", "Nie znaleziono pliku napisów w ustawieniach presetu."
+            )
             return
 
         subtitle_lines = self.config_mgr.load_text_lines(txt_path)
@@ -1014,12 +1285,14 @@ class LektorApp:
 
         def on_wizard_finish(frames_data, mode, initial_color=None):
             # frames_data: list of {'image': PIL, 'rect': (x,y,w,h) or None}
-            valid_images = [f['image'] for f in frames_data]
-            valid_rects = [f['rect'] for f in frames_data if f['rect']]
+            valid_images = [f["image"] for f in frames_data]
+            valid_rects = [f["rect"] for f in frames_data if f["rect"]]
 
             if not valid_rects:
                 if not valid_images:
-                    messagebox.showerror("Błąd", "Nie zdefiniowano żadnego obrazu do optymalizacji.")
+                    messagebox.showerror(
+                        "Błąd", "Nie zdefiniowano żadnego obrazu do optymalizacji."
+                    )
                     return
                 fw, fh = valid_images[0].size
                 valid_rects = [(0, 0, fw, fh)]
@@ -1031,40 +1304,62 @@ class LektorApp:
 
             # Uruchomienie optymalizatora w wątku i pokazanie okna postępu
             prog = ProcessingWindow(self.root, "Trwa optymalizacja...")
-            prog.set_status("Analiza obrazu i szukanie optymalnych ustawień...\nMoże to potrwać kilka minut. Nie zamykaj tego okna.")
+            prog.set_status("Przygotowanie danych...")
 
-            thread_context = {"result": None, "error": None, "img_size": (fw, fh), "match_mode": mode}
+            thread_context = {
+                "result": None,
+                "error": None,
+                "img_size": (fw, fh),
+                "match_mode": mode,
+            }
 
             def worker():
                 try:
                     optimizer = SettingsOptimizer(self.config_mgr)
-                    # Progress callback: schedule UI updates on the processing window
-                    def progress_cb(done, total, best=None):
-                        try:
-                            prog.after(0, lambda d=done, t=total, b=best: prog.set_progress(d, t, b))
-                        except Exception:
-                            pass
 
-                    res = optimizer.optimize(valid_images, target_rect, subtitle_lines, mode, initial_color=initial_color, progress_callback=progress_cb)
+                    # Progress callback: uses thread-safe set_progress (via queue)
+                    def progress_cb(done, total, best=None):
+                        prog.set_progress(done, total, best)
+                        # Switch status label based on stage
+                        candidates_stage1 = total - 100 * (len(valid_images) - 1)
+                        if done < candidates_stage1:
+                            prog.set_status(
+                                f"Etap 1: Testowanie wszystkich wariantów ({done}/{candidates_stage1})"
+                            )
+                        else:
+                            prog.set_status(
+                                f"Etap 2: Weryfikacja najlepszych 100 na kolejnych klatkach"
+                            )
+
+                    res = optimizer.optimize(
+                        valid_images,
+                        target_rect,
+                        subtitle_lines,
+                        mode,
+                        initial_color=initial_color,
+                        progress_callback=progress_cb,
+                        stop_event=prog.stop_event,
+                    )
                     thread_context["result"] = res
                 except Exception as e:
-                    thread_context["error"] = e
+                    import traceback
+
+                    traceback.print_exc()
+                    thread_context["error"] = str(e)
+                finally:
+                    # Signal completion via queue to trigger UI code on main thread
+                    def final_callback():
+                        try:
+                            prog.destroy()
+                        except:
+                            pass
+                        self.root.deiconify()
+                        self._on_optimization_finished(thread_context, path)
+
+                    prog.queue.put({"type": "complete", "callback": final_callback})
 
             t = threading.Thread(target=worker, daemon=True)
             t.start()
-
-            def check_thread():
-                if t.is_alive():
-                    self.root.after(100, check_thread)
-                    return
-                try:
-                    prog.destroy()
-                except Exception:
-                    pass
-                self.root.deiconify()
-                self._on_optimization_finished(thread_context, path)
-
-            check_thread()
 
         # Otwórz wizard (ten callback kończy cały przepływ optymalizacji)
         OptimizationWizard(self.root, on_wizard_finish)
@@ -1073,25 +1368,30 @@ class LektorApp:
 
     def _on_optimization_finished(self, context, preset_path):
         if context["error"]:
-            messagebox.showerror("Błąd", f"Błąd podczas optymalizacji: {context['error']}")
+            messagebox.showerror(
+                "Błąd", f"Błąd podczas optymalizacji: {context['error']}"
+            )
             return
 
         result = context["result"]
         if not result:
-             messagebox.showerror("Błąd", "Brak wyników z optymalizatora.")
-             return
-
-        score = result.get('score', 0)
-        
-        if score < 50:
-            display_score = min(score, 100)
-            messagebox.showwarning("Wynik", f"Nie znaleziono dobrych ustawień (Score: {display_score:.1f}%).\nSpróbuj zmienić obszar lub klatkę z gry. Najlepsze co mamy to: {display_score:.1f}%")
+            messagebox.showerror("Błąd", "Brak wyników z optymalizatora.")
             return
 
-        best_settings = result.get('settings') # This is a PresetConfig object
-        optimized_area = result.get('optimized_area')
-        img_size = context.get('img_size')
-        
+        score = result.get("score", 0)
+
+        if score < 50:
+            display_score = min(score, 100)
+            messagebox.showwarning(
+                "Wynik",
+                f"Nie znaleziono dobrych ustawień (Score: {display_score:.1f}%).\nSpróbuj zmienić obszar lub klatkę z gry. Najlepsze co mamy to: {display_score:.1f}%",
+            )
+            return
+
+        best_settings = result.get("settings")  # This is a PresetConfig object
+        optimized_area = result.get("optimized_area")
+        img_size = context.get("img_size")
+
         # UI Callback definition
         def on_apply(dialog_res):
             if not dialog_res or not dialog_res.get("confirmed"):
@@ -1101,7 +1401,7 @@ class LektorApp:
 
             target_id = dialog_res.get("target_id")
             sw, sh = self._get_screen_size()
-            
+
             # Get current areas as objects, scaled to screen
             old_res = self.config_mgr.display_resolution
             try:
@@ -1120,16 +1420,24 @@ class LektorApp:
                         sx = sw / iw
                         sy = sh / ih
                         ox, oy, ow, oh = ox * sx, oy * sy, ow * sx, oh * sy
-                new_rect = {'left': int(round(ox)), 'top': int(round(oy)), 'width': int(round(ow)), 'height': int(round(oh))}
+                new_rect = {
+                    "left": int(round(ox)),
+                    "top": int(round(oy)),
+                    "width": int(round(ow)),
+                    "height": int(round(oh)),
+                }
 
             # Find or create target area
             target_area = None
             if target_id is not None:
-                target_area = next((a for a in current_areas if str(a.id) == str(target_id)), None)
-            
+                target_area = next(
+                    (a for a in current_areas if str(a.id) == str(target_id)), None
+                )
+
             if not target_area and new_rect:
                 from app.config_manager import AreaConfig
                 import random
+
                 # Generujemy unikalny string ID jak area_XXXXXXXX
                 new_id = f"area_{random.randint(1000, 9999)}"
                 target_area = AreaConfig(id=new_id, type="continuous")
@@ -1138,16 +1446,20 @@ class LektorApp:
             if target_area:
                 if new_rect:
                     target_area.rect = new_rect
-                
+
                 # Apply settings from best_settings (must be PresetConfig object)
                 # Log values for debugging
-                print(f"APPLYING to Area #{target_area.id}: thick={best_settings.text_thickening}, brightness={best_settings.brightness_threshold}, mode={best_settings.subtitle_mode}")
+                print(
+                    f"APPLYING to Area #{target_area.id}: thick={best_settings.text_thickening}, brightness={best_settings.brightness_threshold}, mode={best_settings.subtitle_mode}"
+                )
                 target_area.text_thickening = int(best_settings.text_thickening)
-                target_area.brightness_threshold = int(best_settings.brightness_threshold)
+                target_area.brightness_threshold = int(
+                    best_settings.brightness_threshold
+                )
                 target_area.contrast = float(best_settings.contrast)
                 target_area.color_tolerance = int(best_settings.color_tolerance)
                 target_area.subtitle_mode = best_settings.subtitle_mode
-                
+
                 target_area.colors = list(best_settings.colors or [])
 
             # Save via ConfigManager
@@ -1164,29 +1476,30 @@ class LektorApp:
             if self.is_running:
                 self.stop_reading()
                 self.root.after(200, self.start_reading)
-            
+
             # Full sync reload
             self.on_preset_loaded()
 
         # Show result dialog
         OptimizationResultWindow(
-            self.root, 
-            score, 
-            best_settings, 
-            optimized_area, 
-            self.config_mgr.get_areas(), 
-            on_apply
+            self.root,
+            score,
+            best_settings,
+            optimized_area,
+            self.config_mgr.get_areas(),
+            on_apply,
         )
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--preset', type=str)
-    parser.add_argument('game_command', nargs=argparse.REMAINDER)
+    parser.add_argument("--preset", type=str)
+    parser.add_argument("game_command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     cmd = args.game_command
-    if cmd and cmd[0] == '--': cmd.pop(0)
-    root = ctk.CTk(className='Lektor')
+    if cmd and cmd[0] == "--":
+        cmd.pop(0)
+    root = ctk.CTk(className="Lektor")
     LektorApp(root, args.preset, cmd)
     root.mainloop()
 

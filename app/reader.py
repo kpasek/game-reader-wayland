@@ -5,26 +5,26 @@ import queue
 import copy
 from collections import deque
 from datetime import datetime
-from typing import Any, Optional, Tuple, Dict, List
+from typing import Any, Optional, Tuple, Dict
 # ImageChops jest wykorzystywany w funkcji _images_are_similar, a ImageStat w tej samej funkcji.
 from PIL import Image, ImageChops, ImageStat
 
 from app.capture import capture_region
 from app.ocr import preprocess_image, recognize_text
 from app.matcher import find_best_match, precompute_subtitles
-from app.config_manager import ConfigManager, AreaConfig
+from app.config_manager import ConfigManager
 
 
 class CaptureWorker(threading.Thread):
     """Wątek PRODUCENTA: Robi zrzuty ekranu."""
 
     def __init__(self, stop_event: threading.Event, img_queue: queue.Queue,
-                 unified_area: Dict[str, int], interval: float, log_queue=None):
+                 unified_area: Dict[str, int], config_manager: ConfigManager, log_queue=None):
         super().__init__(daemon=True)
         self.stop_event = stop_event
         self.img_queue = img_queue
         self.unified_area = unified_area
-        self.interval = interval
+        self.config_manager = config_manager
         self.log_queue = log_queue
         self.first_capture_done = False
 
@@ -34,7 +34,8 @@ class CaptureWorker(threading.Thread):
             
             self.capture()
             elapsed = time.monotonic() - loop_start
-            time.sleep(max(0.01, self.interval - elapsed))
+            current_interval = self.config_manager.capture_interval
+            time.sleep(max(0.01, current_interval - elapsed))
 
     def capture(self):
         t0 = time.perf_counter()
@@ -202,7 +203,7 @@ class ReaderThread(threading.Thread):
         audio_dir = self.config_manager.audio_dir
         audio_ext = self.config_manager.audio_ext
 
-        capture_worker = CaptureWorker(self.stop_event, self.img_queue, unified_area, interval, log_queue=self.log_queue)
+        capture_worker = CaptureWorker(self.stop_event, self.img_queue, unified_area, self.config_manager, log_queue=self.log_queue)
         capture_worker.start()
 
         if self.log_queue:

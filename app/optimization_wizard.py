@@ -22,7 +22,7 @@ class OptimizationWizard(CTkToplevel):
         self.current_area_data = None
         
         # UI
-        main_f = make_frame(self, padding=15)
+        main_f = make_frame(self, padding=20)
         main_f.pack(fill=tk.BOTH, expand=True)
 
         make_label(main_f, text="Kreator Optymalizacji", font=("Arial", 12, "bold")).pack(pady=10)
@@ -40,8 +40,8 @@ class OptimizationWizard(CTkToplevel):
         btn_instr.pack(anchor=tk.NE, pady=(0, 0), padx=(0, 5))
         create_tooltip(btn_instr, instrukcja)
         
-        self.list_frame = make_frame(main_f)
-        self.list_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        self.list_frame = make_frame(main_f, fg_color="transparent")
+        self.list_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
         
         from app.ctk_widgets import make_listbox
         self.lb_screens = make_listbox(self.list_frame, height=6)
@@ -51,16 +51,16 @@ class OptimizationWizard(CTkToplevel):
         btn_box.pack(side=tk.LEFT, fill=tk.Y, padx=5)
 
         self.btn_add_area = make_button(btn_box, text="Zrób zrzut [F4]", command=self._add_with_selection, fg_color="#1f6aa5", hover_color="#145f8a", text_color="#ffffff")
-        self.btn_add_area.pack(fill=tk.X, pady=2)
+        self.btn_add_area.pack(fill=tk.X, pady=(0, 5))
         self.btn_import = make_button(btn_box, text="Importuj zrzuty", command=self._import_screenshot, fg_color="#1f6aa5", hover_color="#145f8a", text_color="#ffffff")
-        self.btn_import.pack(fill=tk.X, pady=2)
+        self.btn_import.pack(fill=tk.X, pady=(0, 5))
 
         self.btn_rem = make_button(btn_box, text="Usuń", command=self._remove_screenshot, fg_color="#c0392b", hover_color="#992d22", text_color="#ffffff")
-        self.btn_rem.pack(fill=tk.X, pady=2)
+        self.btn_rem.pack(fill=tk.X, pady=(0, 5))
         
         # Options Frame
-        opt_frame = make_labelframe(main_f, text="Ustawienia Wstępne", padding=10)
-        opt_frame.pack(fill=tk.X, pady=5)
+        opt_frame = make_labelframe(main_f, text="Ustawienia Wstępne", padding=15)
+        opt_frame.pack(fill=tk.X, pady=(0, 15))
         
         # Match Mode
         make_label(opt_frame, text="Sposób dopasowania:").pack(anchor=tk.W)
@@ -79,8 +79,8 @@ class OptimizationWizard(CTkToplevel):
         make_label(opt_frame, text="Wymuś kolor (Np. dla niebieskich napisów):").pack(anchor=tk.W)
         self.var_color = tk.StringVar(value="#FFFFFF")
         
-        col_frame = make_frame(opt_frame)
-        col_frame.pack(fill=tk.X)
+        col_frame = make_frame(opt_frame, fg_color="transparent")
+        col_frame.pack(fill=tk.X, pady=(5, 0))
 
         # Color preview uses a plain tk.Label to allow background color changes
         initial_bg = self.var_color.get() or "#FFFFFF"
@@ -88,7 +88,7 @@ class OptimizationWizard(CTkToplevel):
         self.lbl_color_preview.pack(side=tk.LEFT, padx=(0, 5))
 
         make_button(col_frame, text="Wybierz...", command=self._pick_color, fg_color="#1f6aa5", hover_color="#145f8a", text_color="#ffffff").pack(side=tk.LEFT)
-        make_button(col_frame, text="X", width=3, command=self._clear_color, fg_color="#c0392b", hover_color="#992d22", text_color="#ffffff").pack(side=tk.LEFT, padx=2)
+        make_button(col_frame, text="X", width=5, command=self._clear_color, fg_color="#c0392b", hover_color="#992d22", text_color="#ffffff").pack(side=tk.LEFT, padx=5)
 
         # Start
         self.btn_run = make_button(main_f, text="Uruchom Optymalizację", command=self._start_opt, fg_color="#27ae60", hover_color="#1e8449", text_color="#ffffff")

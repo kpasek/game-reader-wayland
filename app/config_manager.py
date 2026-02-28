@@ -13,6 +13,7 @@ DEFAULT_CONFIG = {
     'last_regex': r"",
     'last_resolution_key': '1920x1080',
     'hotkey_start_stop': '<f2>',
+    'capture_backend': 'Auto',
 }
 
 DEFAULT_PRESET_CONTENT = {
@@ -233,6 +234,15 @@ class ConfigManager:
     @last_regex_mode.setter
     def last_regex_mode(self, value: str):
         self.settings['last_regex_mode'] = value
+        self.save_app_config()
+
+    @property
+    def capture_backend(self) -> str:
+        return self.settings.get('capture_backend', 'Auto')
+
+    @capture_backend.setter
+    def capture_backend(self, value: str):
+        self.settings['capture_backend'] = value
         self.save_app_config()
 
     @property

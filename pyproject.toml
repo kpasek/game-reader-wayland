@@ -24,6 +24,7 @@ dependencies = [
     "mss",
     "audioop-lts",
     "pyscreenshot",
+    "pipewire-capture",
 ]
 
 [project.scripts]

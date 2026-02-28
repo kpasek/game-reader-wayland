@@ -1,5 +1,5 @@
 import sys
-from typing import Any, Dict, TYPE_CHECKING, Optional
+from typing import Any, Dict, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from lektor import LektorApp
@@ -28,6 +28,8 @@ class SettingsDialog(CTkToplevel):
         # Zmienne UI (Globalne)
         self.var_brightness_threshold = tk.IntVar(value=app_instance.config_mgr.brightness_threshold)
         self.var_hk_start = tk.StringVar(value=settings.get('hotkey_start_stop', '<f10>'))
+        self.var_hk_area3 = tk.StringVar(value=settings.get('hotkey_area3', '<f3>'))
+        self.var_capture_backend = tk.StringVar(value=settings.get('capture_backend', 'Auto'))
 
         self._initialize_app_variables()
 
@@ -68,7 +70,7 @@ class SettingsDialog(CTkToplevel):
 
     def _build_ui(self):
         tabs = make_notebook(self)
-        tabs.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        tabs.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
         
         tab_main = make_notebook_tab(tabs, "Ustawienia")
         tab_hk = make_notebook_tab(tabs, "Skróty klawiszowe")
@@ -76,8 +78,8 @@ class SettingsDialog(CTkToplevel):
         self._fill_hk_tab(tab_hk)
 
         btn_f = make_frame(self)
-        btn_f.pack(side=tk.BOTTOM, fill=tk.X, pady=10, padx=10)
-        make_button(btn_f, text="Zapisz", command=self.save, fg_color="#27ae60", hover_color="#1e8449", text_color="#ffffff").pack(side=tk.RIGHT)
+        btn_f.pack(side=tk.BOTTOM, fill=tk.X, pady=(15, 10), padx=10)
+        make_button(btn_f, text="Zapisz", command=self.save, fg_color="#27ae60", hover_color="#1e8449", text_color="#ffffff").pack(side=tk.RIGHT, padx=(5, 0))
         make_button(btn_f, text="Anuluj", command=self.destroy, fg_color="#7f8c8d", hover_color="#6c7a7b", text_color="#ffffff").pack(side=tk.RIGHT, padx=5)
 
     def _setup_scroll_frame(self, parent, fill_function):
@@ -104,12 +106,20 @@ class SettingsDialog(CTkToplevel):
 
     def _fill_main_tab(self, pnl):
         # 1. Konfiguracja Obrazu (Filtry)
-        grp_img = make_labelframe(pnl, text="Filtry Obrazu", padding=10)
-        grp_img.pack(fill=tk.X, pady=10, padx=10)
+        grp_img = make_labelframe(pnl, text="Wideo i Obraz", padding=15)
+        grp_img.pack(fill=tk.X, pady=(0, 15), padx=10)
+
+        f_backend = make_frame(grp_img)
+        f_backend.pack(fill=tk.X, pady=5)
+        make_label(f_backend, text="Backend przechwytywania:").pack(side=tk.LEFT)
+        backend_choices = ["Auto", "pipewire_wayland", "kde_spectacle", "mss", "pyscreenshot"]
+        cb_backend = make_combobox(f_backend, textvariable=self.var_capture_backend, values=backend_choices, state="readonly", width=18)
+        cb_backend.pack(side=tk.LEFT, padx=5)
+        make_label(f_backend, text="(Wymaga restartu po zmianie)", font=("Arial", 8, "italic"), text_color="gray").pack(side=tk.LEFT, padx=5)
 
         # 2. Parametry OCR (bez skali)
-        grp_ocr = make_labelframe(pnl, text="Parametry OCR", padding=10)
-        grp_ocr.pack(fill=tk.X, pady=10, padx=10)
+        grp_ocr = make_labelframe(pnl, text="Parametry OCR", padding=15)
+        grp_ocr.pack(fill=tk.X, pady=(0, 15), padx=10)
 
         self._add_slider(grp_ocr, "Częstotliwość skanowania (s):", self.app.var_capture_interval, 0.3, 1.0, "capture_interval", fmt="{:.2f}s")
         self._add_slider(grp_ocr, "Minimalne podobieństwo zrzutów (%):", self.app.var_similarity, 1, 15,
@@ -120,8 +130,8 @@ class SettingsDialog(CTkToplevel):
             anchor=tk.W, pady=2)
 
         # 3. Optymalizacja
-        grp_opt = make_labelframe(pnl, text="Optymalizacja Tekstu", padding=10)
-        grp_opt.pack(fill=tk.X, pady=10, padx=10)
+        grp_opt = make_labelframe(pnl, text="Optymalizacja Tekstu", padding=15)
+        grp_opt.pack(fill=tk.X, pady=(0, 15), padx=10)
 
         self._add_slider(grp_opt, "Minimalna długość dla partial (zn):", self.app.var_partial_min_len, 5, 50,
                          "partial_mode_min_len", fmt="{:.0f}", resolution=1)
@@ -146,8 +156,8 @@ class SettingsDialog(CTkToplevel):
             side=tk.LEFT, padx=5)
 
         # 4. Audio, Filtracja i Logi (z dawnego _fill_dialogs_tab)
-        grp_audio = make_labelframe(pnl, text="Odtwarzanie Audio (Kolejkowanie)", padding=10)
-        grp_audio.pack(fill=tk.X, pady=10, padx=10)
+        grp_audio = make_labelframe(pnl, text="Odtwarzanie Audio (Kolejkowanie)", padding=15)
+        grp_audio.pack(fill=tk.X, pady=(0, 15), padx=10)
         self._add_slider(grp_audio, "Przyspieszenie (Kolejka > 0):", self.app.var_audio_speed, 1.0, 1.7,
                          "audio_speed_inc", fmt="{:.2f}")
 
@@ -216,8 +226,8 @@ class SettingsDialog(CTkToplevel):
             anchor=tk.W, pady=2)
 
     def _fill_hk_tab(self, pnl):
-        lf_hk = make_labelframe(pnl, text="Definicja skrótów (format pynput)", padding=10)
-        lf_hk.pack(fill=tk.X, pady=10, padx=10)
+        lf_hk = make_labelframe(pnl, text="Definicja skrótów (format pynput)", padding=15)
+        lf_hk.pack(fill=tk.X, pady=(0, 15), padx=10)
         make_label(lf_hk, text="Start / Stop:").pack(anchor=tk.W)
         make_entry(lf_hk, textvariable=self.var_hk_start).pack(fill=tk.X, pady=(0, 10))
         make_label(lf_hk, text="Przykłady: <ctrl>+<f10>, <alt>+x, <f9>", text_color="gray").pack(anchor=tk.W)
@@ -259,5 +269,6 @@ class SettingsDialog(CTkToplevel):
         # Zapisz ustawienia globalne
         self.settings['hotkey_start_stop'] = self.var_hk_start.get()
         self.settings['hotkey_area3'] = self.var_hk_area3.get()
+        self.settings['capture_backend'] = self.var_capture_backend.get()
         self.app.config_mgr.save_app_config()
         self.destroy()

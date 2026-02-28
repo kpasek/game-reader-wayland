@@ -2,10 +2,69 @@ from PIL import Image
 import itertools
 from collections import Counter
 from typing import Tuple, List, Dict, Any, Optional
+import multiprocessing
 
 from app.ocr import preprocess_image, recognize_text
 from app.matcher import find_best_match, precompute_subtitles, MATCH_MODE_FULL, MATCH_MODE_STARTS, MATCH_MODE_PARTIAL
 from app.config_manager import ConfigManager, PresetConfig
+
+# Global variables for worker processes to avoid repeated serialization
+_worker_crop = None
+_worker_db = None
+
+def _init_worker(crop, db):
+    global _worker_crop, _worker_db
+    _worker_crop = crop
+    _worker_db = db
+
+def _evaluate_worker(args):
+    """
+    Worker function for parallel settings evaluation.
+    args: (preset_obj, match_mode)
+    """
+    preset, match_mode = args
+    mock_cfg = OptimizerConfigManager(preset)
+
+    try:
+        # We use the globally stored _worker_crop and _worker_db for efficiency
+        processed_img, has_content, bbox = preprocess_image(_worker_crop.copy(), mock_cfg, area_config=preset)
+        if not has_content:
+            return 0, None
+
+        ocr_text = recognize_text(processed_img, mock_cfg)
+        if not ocr_text or len(ocr_text.strip()) < 2:
+            return 0, None
+
+        match_result = find_best_match(ocr_text, _worker_db, mode=match_mode, matcher_config=mock_cfg)
+    except Exception:
+        return 0, None
+
+    if not match_result:
+        return 0, bbox
+
+    _, score = match_result
+
+    from app.text_processing import clean_text, smart_remove_name
+    ocr_no_name = smart_remove_name(ocr_text)
+    cleaned_ocr = clean_text(ocr_no_name)
+    
+    if match_mode == MATCH_MODE_FULL:
+        if cleaned_ocr in _worker_db[1]:
+            score = 101
+    elif match_mode == MATCH_MODE_STARTS:
+        try:
+            exact_map_keys = list(_worker_db[1].keys())
+        except Exception:
+            exact_map_keys = []
+        for key in exact_map_keys:
+            if not key:
+                continue
+            if cleaned_ocr.startswith(key) or key.startswith(cleaned_ocr):
+                score = 101
+                break
+    
+    return score, bbox
+
 
 class OptimizerConfigManager(ConfigManager):
     """
@@ -13,7 +72,6 @@ class OptimizerConfigManager(ConfigManager):
     Używa obiektu PresetConfig w pamięci zamiast ładować z pliku.
     """
     def __init__(self, preset: 'PresetConfig'):
-        # Inicjalizujemy bez ładowania konfigu aplikacji
         self.settings = {} 
         self.preset_path = None
         self.display_resolution = None
@@ -26,11 +84,10 @@ class OptimizerConfigManager(ConfigManager):
         return self.preset_cache
 
     def save_preset(self, path, obj):
-        pass # Nie zapisujemy podczas optymalizacji
+        pass
 
 class SettingsOptimizer:
     def __init__(self, original_config_manager: ConfigManager = None):
-        # Use simple object to hold base candidates. We will copy it and adjust.
         self.base_preset = PresetConfig()
         if original_config_manager:
             loaded_preset = original_config_manager.load_preset()
@@ -38,45 +95,14 @@ class SettingsOptimizer:
             self.base_preset = copy.deepcopy(loaded_preset)
 
     def _extract_dominant_colors(self, image: Image.Image, num_colors: int = 3) -> List[str]:
-        # ... no changes here ...
-        # (Rest of _extract_dominant_colors omitted for brevity)
-        """
-        Znajduje domuniujące kolory na obrazie, ignorując ciemne tło (prawdopodobnie tło gry).
-        Zwraca listę kolorów w formacie HEX (np. ["#FFFFFF", "#FF0000"]).
-        """
-        # 1. Zmniejszamy obraz dla wydajności
         img_small = image.copy()
         img_small.thumbnail((100, 100))
-        img_small = img_small.convert("RGB") # Upewniamy się, że mamy RGB
-        
+        img_small = img_small.convert("RGB")
         pixels = list(img_small.getdata())
-        
-        # 2. Filtrowanie ciemnych pikseli (tła)
-        # Przyjmujemy próg luminancji, poniżej którego uznajemy kolor za tło
-        valid_pixels = []
-        for r, g, b in pixels:
-            # Wzór na luminancję: 0.299R + 0.587G + 0.114B
-            luminance = 0.299 * r + 0.587 * g + 0.114 * b
-            if luminance > 40: # Próg odcięcia tła (eksperymentalnie dobrany)
-                valid_pixels.append((r, g, b))
-        
-        # Jeśli po filtrowaniu nic nie zostało, zwracamy tylko biały
-        if not valid_pixels:
-            return ["#FFFFFF"]
-            
-        # 3. Zliczanie najczęstszych kolorów
+        valid_pixels = [p for p in pixels if (0.299*p[0] + 0.587*p[1] + 0.114*p[2]) > 40]
+        if not valid_pixels: return ["#FFFFFF"]
         counts = Counter(valid_pixels)
-        top_colors = counts.most_common(num_colors)
-        
-        # 4. Konwersja na HEX
-        hex_colors = []
-        for (r, g, b), _ in top_colors:
-            # Formatowanie hex stringa
-            hex_c = f"#{r:02x}{g:02x}{b:02x}"
-            hex_colors.append(hex_c)
-            
-        return hex_colors
-
+        return [f"#{r:02x}{g:02x}{b:02x}" for (r, g, b), _ in counts.most_common(num_colors)]
 
     def optimize(self, 
                  images: List[Image.Image], 
@@ -84,275 +110,212 @@ class SettingsOptimizer:
                  subtitle_db: List[str],
                  match_mode: str = MATCH_MODE_FULL,
                  initial_color: str = None,
-                 progress_callback=None) -> Dict[str, Any]:
+                 progress_callback=None,
+                 stop_event: multiprocessing.Event = None) -> Dict[str, Any]:
         """
-        Znajduje optymalne ustawienia OCR i matchingu dla zadanego wycinka ekranu (rough_area)
-        i bazy napisów.
+        Znajduje optymalne ustawienia OCR i matchingu dla zadanego wycinka ekranu.
+        Wykorzystuje jeden Pool procesów dla wszystkich etapów.
+        """
+        if not images: return {}
+        if not isinstance(images, list):
+            images = [images]
+        if stop_event and stop_event.is_set(): return {"score": 0, "settings": None, "optimized_area": rough_area}
         
-        Args:
-            images: Pojedynczy obraz PIL.Image lub lista obrazów [PIL.Image].
-                    Jeśli podano listę, optymalizacja odbywa się wieloetapowo.
-        """
-            
-        if not images:
-            return {}
-
         first_image = images[0]
         rx, ry, rw, rh = rough_area
 
-        # Przygotowanie funkcji pomocniczej do cropowania
         def create_crop(img):
-            cx = max(0, rx); cy = max(0, ry)
-            cw = min(rw, img.size[0] - cx); ch = min(rh, img.size[1] - cy)
-            if cw <= 0 or ch <= 0: return None
-            return img.crop((cx, cy, cx+cw, cy+ch))
+            cx, cy = max(0, rx), max(0, ry)
+            cw, ch = min(rw, img.size[0] - cx), min(rh, img.size[1] - cy)
+            return img.crop((cx, cy, cx+cw, cy+ch)) if cw > 0 and ch > 0 else None
 
         crop0 = create_crop(first_image)
-        if not crop0:
-            return {"error": "Invalid area", "score": 0, "settings": {}, "optimized_area": rough_area}
+        if not crop0: return {"score": 0, "settings": {}, "optimized_area": rough_area, "error": "Invalid area or empty crop"}
 
-        # 2. Przygotowanie bazy napisów (raz na całą optymalizację)
         precomputed_db = precompute_subtitles(subtitle_db)
-
-        # 3. Wykrywanie potencjalnych kolorów napisów (tylko na pierwszym zrzucie)
-        detected_colors = self._extract_dominant_colors(crop0, num_colors=3)
-        # Jeśli użytkownik wybrał kolor, używamy tylko tego koloru jako kandydata
-        if initial_color:
-            candidate_colors_list = [initial_color]
-        else:
-            candidate_colors = set(detected_colors)
-            candidate_colors.add("#FFFFFF")
-            candidate_colors_list = sorted(list(candidate_colors))
+        candidate_colors = [initial_color] if initial_color else sorted(list(set(self._extract_dominant_colors(crop0)) | {"#FFFFFF"}))
             
         candidates = []
-
         params = {
-            "color_tolerances": range(1, 30, 1),
+            "color_tolerances": range(1, 30, 2),
             "thickenings": [0, 1],
-            "contrasts": [round(x * 0.2, 2) for x in range(0, 11)],
-            "brightness_threshold": range(150, 255, 2)
+            "contrasts": [round(x * 0.4, 1) for x in range(0, 6)],
+            "brightness_threshold": range(150, 255, 10)
         }
 
         import copy
-        # Generujemy pełną listę wszystkich kombinacji ustawień do sprawdzenia
-        # Branch A: Color-based
-        for color in candidate_colors_list:
-            for tol, thick, contrast in itertools.product(params["color_tolerances"], params["thickenings"], params["contrasts"]):
-                s = copy.deepcopy(self.base_preset)
-                # Attach metadata for sorting/reporting
-                s._setting_mode = "color" 
-                s.auto_remove_names = True
-                s.colors = [color]
-                s.color_tolerance = tol
-                s.text_thickening = thick
-                s.ocr_scale_factor = 1.0
-                s.text_color_mode = "Light" 
-                s.brightness_threshold = 200 
-                s.contrast = contrast
-                s.subtitle_mode = match_mode  # Zastosuj wybrany tryb
-                candidates.append(s)
+        for color, tol, thick, contrast in itertools.product(candidate_colors, params["color_tolerances"], params["thickenings"], params["contrasts"]):
+            s = copy.deepcopy(self.base_preset)
+            s._setting_mode, s.auto_remove_names, s.colors = "color", True, [color]
+            s.color_tolerance, s.text_thickening, s.ocr_scale_factor = tol, thick, 1.0
+            s.text_color_mode, s.brightness_threshold, s.contrast, s.subtitle_mode = "Light", 200, contrast, match_mode
+            candidates.append(s)
         
-        # Branch B: Brightness Mode (Light/Dark/Mixed)
-        for mode, thick in itertools.product(["Light", "Dark"], params["thickenings"]):
-            for contrast, brightness in itertools.product(params["contrasts"], params["brightness_threshold"]):
-                s = copy.deepcopy(self.base_preset)
-                s._setting_mode = "brightness"
-                s.auto_remove_names = True
-                s.colors = []
-                s.text_color_mode = mode
-                s.text_thickening = thick
-                s.ocr_scale_factor = 1.0
-                s.brightness_threshold = brightness
-                s.contrast = contrast
-                s.subtitle_mode = match_mode  # Zastosuj wybrany tryb
-                candidates.append(s)
+        for mode, thick, contrast, bright in itertools.product(["Light", "Dark"], params["thickenings"], params["contrasts"], params["brightness_threshold"]):
+            s = copy.deepcopy(self.base_preset)
+            s._setting_mode, s.auto_remove_names, s.colors = "brightness", True, []
+            s.text_color_mode, s.text_thickening, s.ocr_scale_factor = mode, thick, 1.0
+            s.brightness_threshold, s.contrast, s.subtitle_mode = bright, contrast, match_mode
+            candidates.append(s)
 
+        best_amount = 100
+        total_steps = len(candidates) + (len(images) - 1) * best_amount
+        checked, best_score = 0, 0
 
-        # ETAP 1: Ewaluacja na pierwszym obrazie
-        survivors = []
-        best_score_st1 = 0
-        best_settings_st1 = None
-        best_candidates_amount = 100
-
-        ranked_candidates = []
-
-        total_candidates = len(candidates) + (len(images) -1) * best_candidates_amount
-        # Report initial zero progress (include best score placeholder)
-        if progress_callback:
-            try:
-                progress_callback(0, total_candidates, 0)
-            except Exception:
-                pass
-
-        checked = 0
-        for preset_obj in candidates:
-            score, bbox = self._evaluate_settings(crop0, preset_obj, precomputed_db, match_mode)
-
-            checked += 1
-            if progress_callback:
-                try:
-                    progress_callback(checked, total_candidates, best_score_st1)
-                except Exception:
-                    pass
-            if score > best_score_st1:
-                best_score_st1 = score
-                best_settings_st1 = preset_obj
-            
-            if score > 50:
-                ranked_candidates.append((score, preset_obj, bbox))
+        def update_progress(val, score=None):
+            nonlocal checked, best_score
+            checked += val
+            if score is not None and score > best_score: best_score = score
+            if progress_callback: progress_callback(checked, total_steps, best_score)
 
         def sort_key(item):
-            score, s, _ = item
-            mode_prio = 1 if s._setting_mode == 'color' else 0
+            data, s, _ = item
+            score = data if isinstance(data, (int, float)) else (sum(data)/len(data))
+            prio = 1 if s._setting_mode == 'color' else 0
+            if s._setting_mode == 'color': return (score, prio, -s.color_tolerance, -(s.text_thickening+1), -s.contrast)
+            return (score, prio, s.brightness_threshold, -s.contrast, 0)
 
-            if s._setting_mode == 'color':
-                return (score, mode_prio, -s.color_tolerance, -(s.text_thickening + 1), -s.contrast)
+        cpu_count = multiprocessing.cpu_count()
+        with multiprocessing.Pool(processes=cpu_count) as pool:
+            # Stage 1
+            pool.starmap(_init_worker, [(crop0, precomputed_db)] * cpu_count)
+            ranked = []
+            for i, (score, bbox) in enumerate(pool.imap(_evaluate_worker, [(s, match_mode) for s in candidates])):
+                if stop_event and stop_event.is_set():
+                    pool.terminate(); return {"score": 0, "settings": None, "optimized_area": rough_area}
+                update_progress(1, score)
+                if score > 50: 
+                    ranked.append((score, candidates[i], bbox))
 
-            return (score, mode_prio, -s.brightness_threshold, 0, -s.contrast)
+            ranked.sort(key=sort_key, reverse=True)
+            finalists = [([score], s, bbox) for score, s, bbox in ranked[:best_amount]]
 
-        ranked_candidates.sort(key=sort_key, reverse=True)
-        survivors = ranked_candidates[:best_candidates_amount]
-
-        # --- PODSUMOWANIE 5 NAJLEPSZYCH USTAWIEŃ po każdym zrzucie ---
-        def print_summary(ranked, img_idx, total_imgs):
-            print(f"\nPODSUMOWANIE 5 NAJLEPSZYCH USTAWIEŃ po zrzucie {img_idx+1}/{total_imgs}:")
-            for idx, (score_list, s, bbox) in enumerate(ranked[:5], 1):
-                color = s.colors[0] if s.colors else '-'
-                match_mode_str = match_mode
-                final_score = sum(score_list) / len(score_list) if score_list else 0
-                score_this_img = score_list[-1] if score_list else 0
-                print(f"{idx}. Final Score: {final_score:.1f}% | Score: {score_this_img:.1f}% | Kolor: {color} | Tryb: {match_mode_str} | Tolerancja: {s.color_tolerance} | Kontrast: {s.contrast} | Pogrubienie: {s.text_thickening}")
-
-        # Pierwszy zrzut: score_list = [score]
-        survivors = [([score], s, bbox) for score, s, bbox in survivors]
-        print_summary(survivors, 0, len(images))
-
-        # Jeśli mamy więcej obrazów, filtrujemy
-        rejected_screens = []
-        if len(images) > 1 and survivors:
-            finalists = survivors
-            # Sprawdzamy kolejne obrazy
-            for idx, img in enumerate(images[1:], start=1):
+            # Stage 2
+            rejected = []
+            for idx, img in enumerate(images[1:], 1):
+                if stop_event and stop_event.is_set():
+                    pool.terminate(); return {"score": 0, "settings": None, "optimized_area": rough_area}
+                
                 crop_n = create_crop(img)
-                if not crop_n: continue
+                if not crop_n: 
+                    update_progress(best_amount); continue
+                pool.starmap(_init_worker, [(crop_n, precomputed_db)] * cpu_count)
+                
+                results = pool.map(_evaluate_worker, [(f[1], match_mode) for f in finalists])
                 next_round = []
-                best_ocr = None
-                best_ocr_score = -1
-                best_ocr_img = None
-                for score_list, s, _ in finalists:
-                    score, bbox = self._evaluate_settings(crop_n, s, precomputed_db, match_mode)
-                    if score > best_ocr_score:
-                        best_ocr_score = score
-                        best_ocr_img = crop_n
-                        try:
-                            best_ocr = recognize_text(crop_n, OptimizerConfigManager(s))
-                        except Exception:
-                            best_ocr = "<OCR error>"
-                    if score > 50:
-                        next_round.append((score_list + [score], s, bbox))
+                for i, (score, bbox) in enumerate(results):
+                    scores, s, _ = finalists[i]
+                    update_progress(1, score)
+                    if score > 50: next_round.append((scores + [score], s, bbox))
+                
                 if not next_round:
-                    # Zapisz info o odrzuconym zrzucie
-                    # (Rest of loop remains mostly similar but uses s instead of settings)
-                    # Zapisz info o odrzuconym zrzucie
-                    preview_path = None
-                    if best_ocr_img is not None:
-                        try:
-                            preview_path = f"odrzucony_zrzut_{idx+1}.png"
-                            best_ocr_img.save(preview_path)
-                        except Exception as e:
-                            preview_path = f"Błąd zapisu: {e}"
-                    rejected_screens.append({
-                        "index": idx+1,
-                        "ocr": best_ocr,
-                        "score": best_ocr_score,
-                        "preview": preview_path
-                    })
-                    continue
+                    rejected.append({"index": idx+1, "score": 0}); continue
                 next_round.sort(key=sort_key, reverse=True)
                 finalists = next_round
-                print_summary(finalists, idx, len(images))
+
             if finalists:
                 finalists.sort(key=sort_key, reverse=True)
-                best_score_list, best_preset, best_bbox = finalists[0]
-                avg_score = sum(best_score_list) / len(best_score_list)
-                opt_rect = rough_area
-                print(f"best settings: {best_preset}")
-                return {
-                    "score": avg_score, 
-                    "settings": best_preset, 
-                    "optimized_area": opt_rect,
-                    "rejected_screens": rejected_screens
-                }
+                scores, s, _ = finalists[0]
+                
+                # Collect all bboxes from the best candidate across all successful frames
+                all_bboxes = []
+                # Re-evaluate the best settings on all images to get bboxes
+                # (Or we could have tracked them, but re-evaluating on a few images is safer and fast)
+                final_score = sum(scores)/len(scores)
+                
+                for img in images:
+                    c = create_crop(img)
+                    if c:
+                        sc, bb = self._evaluate_settings(c, s, precomputed_db, match_mode)
+                        if sc > 50 and bb:
+                            all_bboxes.append(bb)
+                
+                refined_area = self._apply_area_refinement(first_image.size, rough_area, all_bboxes)
+                return {"score": final_score, "settings": s, "optimized_area": refined_area, "rejected_screens": rejected}
 
-        # Fallback jeśli tylko 1 obraz LUB brak survivors
-        if best_settings_st1:
-            opt_rect = rough_area
-            print(f"best settings: {best_settings_st1}")
-            return {
-                "match_mode": match_mode,
-                "score": best_score_st1, 
-                "settings": best_settings_st1,
-                "optimized_area": opt_rect,
-                "rejected_screens": []
-            }
-        return {"score": 0, "settings": None, "optimized_area": rough_area, "match_mode": match_mode, "rejected_screens": []}
+        if finalists: # From survivors in Stage 1 if Stage 2 didn't run
+            scores, s, bbox = finalists[0]
+            # If only Stage 1 ran, we just have one bbox
+            refined_area = self._apply_area_refinement(first_image.size, rough_area, [bbox] if bbox else [])
+            return {"score": scores[0], "settings": s, "optimized_area": refined_area, "rejected_screens": []}
+        return {"score": 0, "settings": None, "optimized_area": rough_area}
 
-    def _evaluate_settings(self, 
-                           crop: Image.Image, 
-                           preset: PresetConfig, 
-                           precomputed_db: Any,
-                           match_mode: str = MATCH_MODE_FULL) -> Tuple[float, Optional[Tuple[int, int, int, int]]]:
+    def _apply_area_refinement(self, screen_size, rough_area, bboxes: List[Tuple[int, int, int, int]]):
         """
-        Pomocnicza funkcja wykonująca jeden krok ewaluacji: Preprocess -> OCR -> Match.
-        Zwraca (score, bbox) lub (0, None) w przypadku błędu/braku wyniku.
+        Calculates the union of all bboxes, applies padding, and constrains to rough_area and screen.
+        bboxes are relative to rough_area.
         """
-        mock_cfg = OptimizerConfigManager(preset)
+        valid_bboxes = [b for b in bboxes if b]
+        if not valid_bboxes: 
+            return rough_area
+            
+        rx, ry, rw, rh = rough_area
+        sw, sh = screen_size
+        
+        # Calculate Union (Aggregate Area)
+        # bbox format from ocr.py (preprocess_image): (left, top, right, bottom)
+        min_l = min(b[0] for b in valid_bboxes)
+        min_t = min(b[1] for b in valid_bboxes)
+        max_r = max(b[2] for b in valid_bboxes)
+        max_b = max(b[3] for b in valid_bboxes)
+        
+        agg_w = max_r - min_l
+        agg_h = max_b - min_t
+        
+        # Absolute coordinates of the union
+        abs_l = rx + min_l
+        abs_t = ry + min_t
+        
+        # Apply padding: 10% horizontal, 5% vertical of aggregate size
+        margin_h = agg_w * 0.10
+        margin_v = agg_h * 0.05
+        
+        final_x = int(abs_l - margin_h)
+        final_y = int(abs_t - margin_v)
+        final_w = int(agg_w + margin_h * 2)
+        final_h = int(agg_h + margin_v * 2)
+        
+        # Constraint 1: Keep within screen boundaries
+        if final_x < 0:
+            final_w += final_x # Reduce width if x was negative
+            final_x = 0
+        if final_y < 0:
+            final_h += final_y
+            final_y = 0
+            
+        if final_x + final_w > sw:
+            final_w = sw - final_x
+        if final_y + final_h > sh:
+            final_h = sh - final_y
+            
+        # Constraint 2: Must be contained within the original rough_area
+        # final_x should be at least rx, but not more than rx + rw
+        # We also need to be careful about not shrinking it too much if the detected text was outside? 
+        # Actually, the detection is performed ON the crop, so it's always within rough_area relative (0,0,rw,rh).
+        
+        # Re-constrain to rough_area just in case of over-padding
+        final_x = max(rx, final_x)
+        final_y = max(ry, final_y)
+        
+        # Adjust width/height if we moved final_x/y
+        if final_x + final_w > rx + rw:
+            final_w = (rx + rw) - final_x
+        if final_y + final_h > ry + rh:
+            final_h = (ry + rh) - final_y
+            
+        # Ensure non-negative dimensions
+        final_w = max(0, final_w)
+        final_h = max(0, final_h)
+        
+        return (final_x, final_y, final_w, final_h)
 
+    def _evaluate_settings(self, crop, preset, db, match_mode=MATCH_MODE_FULL):
+        mock = OptimizerConfigManager(preset)
         try:
-            # Pass the preset as area_config so preprocess_image can read per-preset values
-            processed_img, has_content, bbox = preprocess_image(crop.copy(), mock_cfg, area_config=preset)
-            if not has_content:
-                return 0, None
-
-            ocr_text = recognize_text(processed_img, mock_cfg)
-            if not ocr_text or len(ocr_text.strip()) < 2:
-                return 0, None
-
-            match_result = find_best_match(ocr_text, precomputed_db, mode=match_mode, matcher_config=mock_cfg)
-        except Exception:
-            # Jeśli cokolwiek pójdzie nie tak (preprocess/OCR/matching), traktujemy jako brak wyniku
-            return 0, None
-
-        if not match_result:
-            return 0, bbox
-
-        _, score = match_result
-
-        # Check for exact match (Score 101)
-        # precomputed_db[1] is the exact_map (cleaned_text -> index)
-        from app.text_processing import clean_text, smart_remove_name
-
-        ocr_no_name = smart_remove_name(ocr_text)
-        cleaned_ocr = clean_text(ocr_no_name)
-        # For exact/full-lines mode require full equality.
-        if match_mode == MATCH_MODE_FULL:
-            if cleaned_ocr in precomputed_db[1]:
-                score = 101
-        # For 'Starts' mode allow the recognized text to be a prefix or the
-        # original to be a prefix of the recognized text — treat as exact start.
-        elif match_mode == MATCH_MODE_STARTS:
-            try:
-                exact_map_keys = list(precomputed_db[1].keys())
-            except Exception:
-                exact_map_keys = []
-            for key in exact_map_keys:
-                if not key:
-                    continue
-                if cleaned_ocr.startswith(key) or key.startswith(cleaned_ocr):
-                    score = 101
-                    break
-        else:
-            # For other modes (partial etc.) keep existing behavior (no forced 101).
-            pass
-
-        return score, bbox
+            processed, has, bbox = preprocess_image(crop.copy(), mock, area_config=preset)
+            if not has: return 0, None
+            text = recognize_text(processed, mock)
+            if not text or len(text.strip()) < 2: return 0, None
+            res = find_best_match(text, db, mode=match_mode, matcher_config=mock)
+            return (res[1] if res else 0), bbox
+        except Exception: return 0, None

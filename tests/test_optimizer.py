@@ -45,12 +45,9 @@ class TestSettingsOptimizer(unittest.TestCase):
         self.assertIn('settings', result)
         self.assertIn('optimized_area', result)
         
-        # Sprawdź czy algorytm przeliczył obszar
-        # UPDATE: Now we expect the optimizer to return the rough_area without shrinking it
-        # to preserve margins added by the wizard.
-        # rough (10,10, 80, 40) should be returned as is.
+        # Sprawdź czy algorytm przeliczył obszar (powinien być mniejszy niż rough_area)
         opt_area = result['optimized_area']
-        self.assertEqual(opt_area, (10, 10, 80, 40))
+        self.assertEqual(opt_area, (10, 10, 60, 22))
     @patch('app.optimizer.preprocess_image')
     @patch('app.optimizer.recognize_text')
     def test_optimize_no_match(self, mock_recognize, mock_preprocess):
@@ -69,7 +66,7 @@ class TestSettingsOptimizer(unittest.TestCase):
     def test_invalid_area(self):
         """Testuje zabezpieczenie przed błędnym obszarem."""
         bad_area = (0, 0, 0, 0)
-        result = self.optimizer.optimize(self.image, bad_area, self.dummy_db)
+        result = self.optimizer.optimize([self.image], bad_area, self.dummy_db)
         self.assertIn("error", result)
 
 if __name__ == '__main__':
