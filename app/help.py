@@ -26,6 +26,12 @@ class HelpWindow(CTkToplevel):
             ("Aplikacja wykonuje cykliczne zrzuty zdefiniowanego obszaru ekranu, przetwarza je przez OCR (rozpoznawanie tekstu) i porównuje z załadowanym plikiem napisów. Gdy znajdzie dopasowanie, odtwarza przypisany plik audio.\n",
              'normal'),
 
+            ("UWAGA DLA WAYLAND\n", 'h1'),
+            ("Na systemach korzystających z Wayland aplikacja domyślnie wykonuje zrzuty tylko z wybranego okna (aplikacji), a nie z całego ekranu. Dotyczy to również testowania ustawień oraz narzędzia wyboru koloru z ekranu.\n", 'normal'),
+            ("Jeżeli przed naciśnięciem 'Start' nie wybrano okna, zostaniesz poproszony o wskazanie okna, z którego mają być robione zrzuty — wybierz aplikację, której zawartość ma być monitorowana.\n", 'normal'),
+            ("• Przykład: ", 'bold'),
+            ("Aby przetestować ustawienia lub pobrać kolor z innego okna, najpierw wybierz je w panelu wyboru okna, a dopiero potem uruchom monitorowanie.\n", 'normal'),
+
             ("PARAMETRY OCR\n", 'h1'),
 
 
