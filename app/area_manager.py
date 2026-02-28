@@ -60,6 +60,13 @@ class AreaManagerWindow(CTkToplevel):
         """Helper to identify the primary area which cannot be removed."""
         return area_id == 1 or str(area_id).lower() == "area_0" or str(area_id).lower() == "area_1"
 
+    def refresh_data(self):
+        """Public method to refresh the list of areas from the ConfigManager."""
+        if self.config_mgr:
+            self.areas = self.config_mgr.get_areas()
+            self.current_selection_idx = 0 if self.areas else -1
+            self._refresh_list()
+
     def _refresh_list(self):
         self.lb_areas.delete(0, tk.END)
         for i, area in enumerate(self.areas):
