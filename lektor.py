@@ -47,7 +47,12 @@ try:
 except ImportError:
     HAS_PYNPUT = False
 
-from app.config_manager import ConfigManager, AreaConfig, STANDARD_WIDTH, STANDARD_HEIGHT
+from app.config_manager import (
+    ConfigManager,
+    AreaConfig,
+    STANDARD_WIDTH,
+    STANDARD_HEIGHT,
+)
 from app.reader import ReaderThread
 from app.player import PlayerThread
 from app.log import LogWindow
@@ -65,7 +70,7 @@ audio_queue = queue.Queue()
 log_queue = queue.Queue()
 debug_queue = queue.Queue()
 
-APP_VERSION = "v1.8.0"
+APP_VERSION = "v1.8.2"
 
 
 class LektorApp:
@@ -93,7 +98,6 @@ class LektorApp:
         self.preset_map = {}
 
         # Opcje Lektora
-        self.var_text_color = tk.StringVar(value="Light")
 
         self.var_brightness_threshold = tk.IntVar(value=200)
         self.var_similarity = tk.DoubleVar(value=5.0)
@@ -129,7 +133,7 @@ class LektorApp:
         )
         self.var_speed = tk.DoubleVar(value=1.2)
         self.var_volume = tk.DoubleVar(value=1.0)
-        self.var_audio_ext = tk.StringVar(value=".ogg")
+        self.var_audio_ext = tk.StringVar(value=".mp3")
 
         self.regex_map = {
             "Brak": r"",
@@ -587,7 +591,6 @@ class LektorApp:
         self.var_auto_names.set(self.config_mgr.auto_remove_names)
         self.var_capture_interval.set(self.config_mgr.capture_interval)
         self.var_min_line_len.set(self.config_mgr.min_line_length)
-        self.var_text_color.set(self.config_mgr.text_color_mode)
         self.var_save_logs.set(self.config_mgr.save_logs)
         self.var_show_debug.set(self.config_mgr.show_debug)
         self.var_brightness_threshold.set(self.config_mgr.brightness_threshold)
@@ -813,6 +816,7 @@ class LektorApp:
             stop_event=stop_event,
             audio_queue=audio_queue,
             target_resolution=target_res,
+            player_thread=self.player_thread,
             log_queue=log_queue,
             debug_queue=debug_queue,
         )
@@ -1402,8 +1406,15 @@ class LektorApp:
                 target_area.contrast = float(best_settings.contrast)
                 target_area.color_tolerance = int(best_settings.color_tolerance)
                 target_area.subtitle_mode = best_settings.subtitle_mode
+
+                # Apply brightness mode if available
+                if hasattr(best_settings, "brightness_mode"):
+                    target_area.brightness_mode = best_settings.brightness_mode
+                elif hasattr(best_settings, "text_color_mode"):
+                    target_area.brightness_mode = best_settings.text_color_mode
+
                 # Set optimized scale (currently always 1.0 from optimizer)
-                if hasattr(best_settings, 'ocr_scale_factor'):
+                if hasattr(best_settings, "ocr_scale_factor"):
                     target_area.ocr_scale_factor = float(best_settings.ocr_scale_factor)
 
                 target_area.colors = list(best_settings.colors or [])

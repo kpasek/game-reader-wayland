@@ -66,6 +66,7 @@ class AreaConfig:
     setting_mode: str = ''
     show_debug: bool = False
     ocr_scale_factor: float = 1.0
+    brightness_mode: str = "Light"
 
     def _to_dict(self) -> Dict[str, Any]:
         """Returns a full dictionary representation of the AreaConfig for persistence."""
@@ -85,7 +86,8 @@ class AreaConfig:
             "color_tolerance": int(self.color_tolerance),
             "setting_mode": str(self.setting_mode or ''),
             "show_debug": bool(self.show_debug),
-            "ocr_scale_factor": float(self.ocr_scale_factor)
+            "ocr_scale_factor": float(self.ocr_scale_factor),
+            "brightness_mode": str(self.brightness_mode)
         }
 
     @classmethod
@@ -127,6 +129,7 @@ class AreaConfig:
         kw['setting_mode'] = str(_pick('setting_mode', ''))
         kw['show_debug'] = bool(_pick('show_debug', False))
         kw['ocr_scale_factor'] = float(_pick('ocr_scale_factor', 1.0))
+        kw['brightness_mode'] = str(_pick('brightness_mode', _pick('text_color_mode', 'Light')))
 
         return cls(**kw)
 
@@ -138,7 +141,6 @@ class PresetConfig:
     audio_dir: str = "audio"
     text_file_path: str = "subtitles.txt"
     subtitle_mode: str = "Full Lines"
-    text_color_mode: str = "Light"
     capture_interval: float = 0.5
     audio_ext: str = ".mp3"
     auto_remove_names: bool = True
@@ -461,17 +463,6 @@ class ConfigManager:
     def show_debug(self, value: bool):
         obj = self._get_preset_obj()
         obj.show_debug = bool(value)
-        if self.preset_path:
-            self.save_preset(self.preset_path, obj)
-
-    @property
-    def text_color_mode(self) -> str:
-        return self._get_preset_obj().text_color_mode
-
-    @text_color_mode.setter
-    def text_color_mode(self, value: str):
-        obj = self._get_preset_obj()
-        obj.text_color_mode = str(value)
         if self.preset_path:
             self.save_preset(self.preset_path, obj)
 

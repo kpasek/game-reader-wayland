@@ -6,6 +6,7 @@ import copy
 from collections import deque
 from datetime import datetime
 from typing import Any, Optional, Tuple, Dict
+
 # ImageChops jest wykorzystywany w funkcji _images_are_similar, a ImageStat w tej samej funkcji.
 from PIL import Image, ImageChops, ImageStat
 
@@ -18,8 +19,14 @@ from app.config_manager import ConfigManager
 class CaptureWorker(threading.Thread):
     """Wątek PRODUCENTA: Robi zrzuty ekranu."""
 
-    def __init__(self, stop_event: threading.Event, img_queue: queue.Queue,
-                 unified_area: Dict[str, int], config_manager: ConfigManager, log_queue=None):
+    def __init__(
+        self,
+        stop_event: threading.Event,
+        img_queue: queue.Queue,
+        unified_area: Dict[str, int],
+        config_manager: ConfigManager,
+        log_queue=None,
+    ):
         super().__init__(daemon=True)
         self.stop_event = stop_event
         self.img_queue = img_queue
@@ -31,7 +38,7 @@ class CaptureWorker(threading.Thread):
     def run(self):
         while not self.stop_event.is_set():
             loop_start = time.monotonic()
-            
+
             self.capture()
             elapsed = time.monotonic() - loop_start
             current_interval = self.config_manager.capture_interval
@@ -43,7 +50,7 @@ class CaptureWorker(threading.Thread):
             full_img = capture_region(self.unified_area)
         except Exception as e:
             full_img = None
-            
+
         t_cap = (time.perf_counter() - t0) * 1000
 
         if full_img:
@@ -68,19 +75,25 @@ class CaptureWorker(threading.Thread):
                     self.log_queue.put({"time": "ERROR", "line_text": msg})
 
 
-
 class ReaderThread(threading.Thread):
     """Wątek KONSUMENTA: OCR i Matching."""
 
-    def __init__(self, config_manager: ConfigManager,
-                 stop_event: threading.Event, audio_queue,
-                 target_resolution: Optional[Tuple[int, int]],
-                 log_queue=None,
-                 debug_queue: Optional[queue.Queue] = None, brightness_threshold: int = 200):
+    def __init__(
+        self,
+        config_manager: ConfigManager,
+        stop_event: threading.Event,
+        audio_queue,
+        target_resolution: Optional[Tuple[int, int]],
+        player_thread=None,
+        log_queue=None,
+        debug_queue: Optional[queue.Queue] = None,
+        brightness_threshold: int = 200,
+    ):
         super().__init__(daemon=True)
         self.config_manager = config_manager
         self.stop_event = stop_event
         self.audio_queue = audio_queue
+        self.player_thread = player_thread
         self.log_queue = log_queue
         self.debug_queue = debug_queue
         self.target_resolution = target_resolution
@@ -99,12 +112,9 @@ class ReaderThread(threading.Thread):
         self.empty_threshold = 0.15
         # config-managed values (access via ConfigManager when needed)
 
-        # Use ConfigManager for text color
-        self.text_color = config_manager.text_color_mode
-
         self.ocr_binarize = True
 
-        self.current_unified_area = {'left': 0, 'top': 0, 'width': 0, 'height': 0}
+        self.current_unified_area = {"left": 0, "top": 0, "width": 0, "height": 0}
 
     def trigger_area(self, area_id: Any):
         """Aktywuje jednorazowe pobranie i przetworzenie Obszaru o danym ID (manual/triggered)."""
@@ -118,11 +128,15 @@ class ReaderThread(threading.Thread):
         if area_id in self.enabled_continuous_areas:
             self.enabled_continuous_areas.remove(area_id)
             if self.log_queue:
-                self.log_queue.put({"time": "INFO", "line_text": f"Area #{area_id} deactivated."})
+                self.log_queue.put(
+                    {"time": "INFO", "line_text": f"Area #{area_id} deactivated."}
+                )
         else:
             self.enabled_continuous_areas.add(area_id)
             if self.log_queue:
-                self.log_queue.put({"time": "INFO", "line_text": f"Area #{area_id} activated."})
+                self.log_queue.put(
+                    {"time": "INFO", "line_text": f"Area #{area_id} activated."}
+                )
 
     def _is_main_area(self, area_id: Any, index: int = -1) -> bool:
         """Checks if the ID refers to the canonical 'Main' area (0, 1, 'area_0' or 'area_1'?).
@@ -131,16 +145,22 @@ class ReaderThread(threading.Thread):
         """
         if index == 0:
             return True
-        return area_id == 0 or area_id == 1 or str(area_id).lower() in ["area_0", "area_1"]
-
+        return (
+            area_id == 0 or area_id == 1 or str(area_id).lower() in ["area_0", "area_1"]
+        )
 
     # (Area-specific overrides handled explicitly during processing;
     # no helper methods for applying/restoring are used here.)
-                 
-    def _images_are_similar(self, img1: Image.Image, img2: Image.Image, similarity: float) -> bool:
-        if similarity == 0: return False
-        if img1 is None or img2 is None: return False
-        if img1.size != img2.size: return False
+
+    def _images_are_similar(
+        self, img1: Image.Image, img2: Image.Image, similarity: float
+    ) -> bool:
+        if similarity == 0:
+            return False
+        if img1 is None or img2 is None:
+            return False
+        if img1.size != img2.size:
+            return False
         diff = ImageChops.difference(img1, img2)
         stat = ImageStat.Stat(diff)
         return sum(stat.mean) < similarity
@@ -150,7 +170,8 @@ class ReaderThread(threading.Thread):
             self.config_manager.display_resolution = self.target_resolution
 
         preset = self.config_manager.load_preset()
-        if not preset: return
+        if not preset:
+            return
 
         # Ładowanie parametrów z ConfigManager (zawiera domyślne)
         interval = self.config_manager.capture_interval
@@ -160,42 +181,54 @@ class ReaderThread(threading.Thread):
         audio_speed = self.config_manager.audio_speed_inc
 
         raw_subtitles = self.config_manager.load_text_lines()
-        precomputed_data = precompute_subtitles(raw_subtitles, min_line_len) if raw_subtitles else ([], {})
+        precomputed_data = (
+            precompute_subtitles(raw_subtitles, min_line_len)
+            if raw_subtitles
+            else ([], {})
+        )
 
         # Get areas already scaled to the manager's display resolution
         areas_config = copy.deepcopy(self.config_manager.get_areas() or [])
         valid_areas = areas_config
 
-
         if not valid_areas:
             if self.log_queue:
-                self.log_queue.put({"time": "ERROR", "line_text": "Nie znaleziono aktywnych obszarów. Sprawdź konfigurację."})
+                self.log_queue.put(
+                    {
+                        "time": "ERROR",
+                        "line_text": "Nie znaleziono aktywnych obszarów. Sprawdź konfigurację.",
+                    }
+                )
             return
-        
-        
+
         # Initialize enabled continuous areas from config
         self.enabled_continuous_areas = set()
         for area in valid_areas:
             # area is AreaConfig
-            if area.type == 'continuous' and area.enabled:
+            if area.type == "continuous" and area.enabled:
                 self.enabled_continuous_areas.add(area.id)
 
         # Areas returned by `get_preset_for_display` are already scaled to the
         # manager's `display_resolution` (if set). No further scaling required.
 
-        monitors = [a.rect for a in valid_areas] # For Unified Calculation
+        monitors = [a.rect for a in valid_areas]  # For Unified Calculation
 
-        min_l = min(m['left'] for m in monitors)
-        min_t = min(m['top'] for m in monitors)
-        max_r = max(m['left'] + m['width'] for m in monitors)
-        max_b = max(m['top'] + m['height'] for m in monitors)
-        unified_area = {'left': min_l, 'top': min_t, 'width': max_r - min_l, 'height': max_b - min_t}
+        min_l = min(m["left"] for m in monitors)
+        min_t = min(m["top"] for m in monitors)
+        max_r = max(m["left"] + m["width"] for m in monitors)
+        max_b = max(m["top"] + m["height"] for m in monitors)
+        unified_area = {
+            "left": min_l,
+            "top": min_t,
+            "width": max_r - min_l,
+            "height": max_b - min_t,
+        }
 
         self.current_unified_area = {
-            'left': min_l,
-            'top': min_t,
-            'width': max_r - min_l,
-            'height': max_b - min_t
+            "left": min_l,
+            "top": min_t,
+            "width": max_r - min_l,
+            "height": max_b - min_t,
         }
 
         queue_size = 4
@@ -203,18 +236,33 @@ class ReaderThread(threading.Thread):
         audio_dir = self.config_manager.audio_dir
         audio_ext = self.config_manager.audio_ext
 
-        capture_worker = CaptureWorker(self.stop_event, self.img_queue, unified_area, self.config_manager, log_queue=self.log_queue)
+        capture_worker = CaptureWorker(
+            self.stop_event,
+            self.img_queue,
+            unified_area,
+            self.config_manager,
+            log_queue=self.log_queue,
+        )
         capture_worker.start()
 
         if self.log_queue:
-             self.log_queue.put({"time": "INFO", "line_text": f"Reader started. Areas: {len(valid_areas)}. Logging enabled."})
+            self.log_queue.put(
+                {
+                    "time": "INFO",
+                    "line_text": f"Reader started. Areas: {len(valid_areas)}. Logging enabled.",
+                }
+            )
 
         if self.config_manager.save_logs:
-            if self.log_queue: self.log_queue.put({"time": "INFO", "line_text": f"Saving logs to session_log.txt"})
-            with open("session_log.txt", "a", encoding='utf-8') as f:
+            if self.log_queue:
+                self.log_queue.put(
+                    {"time": "INFO", "line_text": f"Saving logs to session_log.txt"}
+                )
+            with open("session_log.txt", "a", encoding="utf-8") as f:
                 f.write(f"\n=== SESSION START {datetime.now()} ===\n")
-                f.write("Time | Monitor | Capture(ms) | Pre(ms) | OCR(ms) | Match(ms) | Text | MatchResult\n")
-
+                f.write(
+                    "Time | Monitor | Capture(ms) | Pre(ms) | OCR(ms) | Match(ms) | Text | MatchResult\n"
+                )
 
         while not self.stop_event.is_set():
             try:
@@ -228,36 +276,47 @@ class ReaderThread(threading.Thread):
                 except queue.Empty:
                     pass
 
-
             for idx, area_obj in enumerate(valid_areas):
                 t_start_proc = time.perf_counter()
                 area_id = area_obj.id
                 area_rect = area_obj.rect
                 area_type = area_obj.type
                 # Logika włączania/wyłączania obszarów
-                if area_type == 'manual':
+                if area_type == "manual":
                     if area_id not in self.triggered_area_ids:
                         continue
                     self.triggered_area_ids.remove(area_id)
                     self.last_monitor_crops.pop(idx, None)
-                elif area_type == 'continuous':
+                elif area_type == "continuous":
                     # First slot (Area 0 or 1 depending on slot naming) is always active.
-                    if not self._is_main_area(area_id, index=idx) and area_id not in self.enabled_continuous_areas:
+                    if (
+                        not self._is_main_area(area_id, index=idx)
+                        and area_id not in self.enabled_continuous_areas
+                    ):
                         continue
 
-                rel_x, rel_y = area_rect['left'] - min_l, area_rect['top'] - min_t
-                crop = full_img.crop((rel_x, rel_y, rel_x + area_rect['width'], rel_y + area_rect['height']))
+                rel_x, rel_y = area_rect["left"] - min_l, area_rect["top"] - min_t
+                crop = full_img.crop(
+                    (
+                        rel_x,
+                        rel_y,
+                        rel_x + area_rect["width"],
+                        rel_y + area_rect["height"],
+                    )
+                )
 
                 last_crop = self.last_monitor_crops.get(idx)
                 if self._images_are_similar(crop, last_crop, similarity):
                     continue
-                
+
                 self.last_monitor_crops[idx] = crop.copy()
 
                 t_pre_start = time.perf_counter()
 
                 # Use explicit area object for preprocessing (no mutation of global config)
-                processed, has_content, crop_bbox = preprocess_image(crop, self.config_manager, area_config=area_obj)
+                processed, has_content, crop_bbox = preprocess_image(
+                    crop, self.config_manager, area_config=area_obj
+                )
 
                 if not has_content:
                     continue
@@ -272,7 +331,11 @@ class ReaderThread(threading.Thread):
                 # Matching: log debug info, then use global ConfigManager and area-specific subtitle mode
                 current_subtitle_mode = area_obj.subtitle_mode
                 try:
-                    pre_lines_count = len(precomputed_data[0]) if precomputed_data and isinstance(precomputed_data, tuple) else 0
+                    pre_lines_count = (
+                        len(precomputed_data[0])
+                        if precomputed_data and isinstance(precomputed_data, tuple)
+                        else 0
+                    )
                 except Exception:
                     pre_lines_count = 0
 
@@ -283,12 +346,21 @@ class ReaderThread(threading.Thread):
                     f"match_len_diff_ratio={self.config_manager.match_len_diff_ratio}"
                 )
                 if self.log_queue:
-                    self.log_queue.put({"time": datetime.now().strftime('%H:%M:%S.%f')[:-3], "line_text": dbg_msg})
+                    self.log_queue.put(
+                        {
+                            "time": datetime.now().strftime("%H:%M:%S.%f")[:-3],
+                            "line_text": dbg_msg,
+                        }
+                    )
 
                 t_match_start = time.perf_counter()
-                match = find_best_match(text, precomputed_data, current_subtitle_mode,
-                                        last_index=self.last_matched_idx,
-                                        matcher_config=self.config_manager)
+                match = find_best_match(
+                    text,
+                    precomputed_data,
+                    current_subtitle_mode,
+                    last_index=self.last_matched_idx,
+                    matcher_config=self.config_manager,
+                )
                 t_match = (time.perf_counter() - t_match_start) * 1000
 
                 if not text:
@@ -298,12 +370,12 @@ class ReaderThread(threading.Thread):
                     continue
 
                 if has_content and crop_bbox and self.debug_queue:
-                    abs_x = area_rect['left'] + crop_bbox[0]
-                    abs_y = area_rect['top'] + crop_bbox[1]
+                    abs_x = area_rect["left"] + crop_bbox[0]
+                    abs_y = area_rect["top"] + crop_bbox[1]
 
                     abs_w = crop_bbox[2] - crop_bbox[0]
                     abs_h = crop_bbox[3] - crop_bbox[1]
-                    self.debug_queue.put(('overlay', (abs_x, abs_y, abs_w, abs_h)))
+                    self.debug_queue.put(("overlay", (abs_x, abs_y, abs_w, abs_h)))
 
                 self.last_ocr_texts.append(text)
 
@@ -312,40 +384,52 @@ class ReaderThread(threading.Thread):
                 if self.log_queue:
                     line_txt = raw_subtitles[match[0]] if match else ""
                     log_entry = {
-                        "time": datetime.now().strftime('%H:%M:%S.%f')[:-3],
-                        "ocr": text, "match": match, "line_text": line_txt,
+                        "time": datetime.now().strftime("%H:%M:%S.%f")[:-3],
+                        "ocr": text,
+                        "match": match,
+                        "line_text": line_txt,
                         "stats": {
                             "monitor": f"#{area_id}",
                             "cap_ms": t_cap,
                             "pre_ms": t_pre,
                             "ocr_ms": t_ocr,
-                            "match_ms": t_match
-                        }
+                            "match_ms": t_match,
+                        },
                     }
                     self.log_queue.put(log_entry)
                     if self.config_manager.save_logs:
-                        with open("session_log.txt", "a", encoding='utf-8') as f:
-                            match_str = f"MATCH({match[1]}%): {line_txt}" if match else "NO MATCH"
-                            log_line = (f"{log_entry['time']} | A{area_id} | "
-                                        f"Cap:{t_cap:.0f}ms | Pre:{t_pre:.0f}ms | OCR:{t_ocr:.0f}ms | Match:{t_match:.0f}ms | "
-                                        f"'{text}' | {match_str}\n")
+                        with open("session_log.txt", "a", encoding="utf-8") as f:
+                            match_str = (
+                                f"MATCH({match[1]}%): {line_txt}"
+                                if match
+                                else "NO MATCH"
+                            )
+                            log_line = (
+                                f"{log_entry['time']} | A{area_id} | "
+                                f"Cap:{t_cap:.0f}ms | Pre:{t_pre:.0f}ms | OCR:{t_ocr:.0f}ms | Match:{t_match:.0f}ms | "
+                                f"'{text}' | {match_str}\n"
+                            )
                             f.write(log_line)
 
                 if match:
                     idx_match, score = match
                     self.last_matched_idx = idx_match
                     if idx_match not in self.recent_match_indices:
-                        pass # Match log removed
+                        pass  # Match log removed
                         self.recent_match_indices.append(idx_match)
 
-                        audio_path = os.path.join(audio_dir, f"output1 ({idx_match + 1}){audio_ext}")
+                        audio_path = os.path.join(
+                            audio_dir, f"output1 ({idx_match + 1}){audio_ext}"
+                        )
                         if not os.path.exists(audio_path):
                             print(f"Audio file not found: {audio_path}")
 
                         q_size = self.audio_queue.qsize()
                         speed_multiplier = 1.0
 
-                        if q_size > 0:
+                        if q_size > 0 or (
+                            self.player_thread and self.player_thread.is_playing()
+                        ):
                             speed_multiplier = audio_speed
 
                         self.audio_queue.put((audio_path, speed_multiplier))

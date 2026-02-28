@@ -41,10 +41,10 @@ class HelpWindow(CTkToplevel):
             ("0.5s to standard. Jeśli gra ma bardzo szybkie dialogi, zmniejsz do 0.3s.\n",
              'normal'),
 
-            ("3. Czułość jasności\n", 'h2'),
-            ("Próg jasności napisów do wykrycia.\n", 'normal'),
+            ("3. Odcień napisów (Brightness Mode)\n", 'h2'),
+            ("Określa czy napisy są jasne czy ciemne (na potrzeby odwrócenia kolorów).\n", 'normal'),
             ("• Przykład: ", 'bold'),
-            ("Ustaw 255 jeżeli napisy w grze są białe. Zmniejsz proporcjonalnie do jasności napisów. Szare: 160-220 itd.\n",
+            ("Ustaw 'Jasne' jeśli napisy są białe/jasne na ciemnym tle. 'Ciemne' jeśli napisy są czarne/ciemne na jasnym tle (np. czarne napisy na białej ramce).\n",
              'normal'),
 
             ("4. Próg podobieństwa\n", 'h2'),
@@ -113,7 +113,7 @@ class HelpWindow(CTkToplevel):
             ("ZARZĄDZANIE OBSZARAMI I OPTYMALIZACJA\n", 'h1'),
 
             ("1. Konfiguracja Per-Obszar\n", 'h2'),
-            ("Wszystkie parametry obrazu (powiększenie, jasność, kontrast, tolerancja) są teraz przypisane oddzielnie do każdego zdefiniowanego obszaru. Pozwala to na jednoczesne czytanie napisów o różnej charakterystyce z różnych części ekranu.\n", 'normal'),
+            ("Wszystkie parametry obrazu (powiększenie, odcień napisów, jasność, kontrast, tolerancja i kolory) są przypisane oddzielnie do każdego obszaru. W zakładce 'Ogólne' znajdziesz ustawienia OCR (powiększenie, tryb dopasowania), a w zakładce 'Detekcja' możesz wybrać między trybem koloru (na górze) a trybem jasności. Kontrast jest zawsze dostępny i wpływa na oba tryby.\n", 'normal'),
 
             ("2. Kreator Optymalizacji\n", 'h2'),
             ("W oknie 'Zarządzaj Obszarami' w menu kontekstowym listy obszarów (Prawy Przycisk Myszy -> Kreator Optymalizacji) dostępny jest kreator. Należy dodać zrzuty ekranu z widocznym tekstem, a system automatycznie dobierze parametry OCR oraz dopasuje ramkę z marginesem 2%.\n", 'normal'),

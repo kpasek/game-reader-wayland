@@ -56,7 +56,6 @@ class SettingsDialog(CTkToplevel):
         self.app.var_partial_min_len.set(int(cm.partial_mode_min_len))
         self.app.var_similarity.set(int(cm.similarity))
         self.app.var_show_debug.set(bool(cm.show_debug))
-        self.app.var_text_color.set(str(cm.text_color_mode))
         
         self.app.var_regex_mode.set(str(cm.last_regex_mode))
         self.app.var_custom_regex.set(str(cm.last_custom_regex))
@@ -142,17 +141,6 @@ class SettingsDialog(CTkToplevel):
                          "match_score_short", fmt="{:.0f}", resolution=1)
         self._add_slider(grp_opt, "Min score (długie):", self.app.var_match_score_long, 50, 100,
                          "match_score_long", fmt="{:.0f}", resolution=1)
-
-        f_color = make_frame(grp_opt)
-        f_color.pack(fill=tk.X, pady=5)
-        make_label(f_color, text="Kolor napisów:").pack(side=tk.LEFT)
-        cb_color = make_combobox(f_color, textvariable=self.app.var_text_color, values=["Light", "Dark", "Mixed"],
-                    state="readonly", width=15)
-        cb_color.pack(side=tk.LEFT, padx=5)
-        cb_color.bind("<<ComboboxSelected>>",
-                      lambda e: setattr(self.app.config_mgr, "text_color_mode", self.app.var_text_color.get()))
-        make_label(f_color, text="(Light = Jasne napisy)", font=("Arial", 8, "italic"), text_color="gray").pack(
-            side=tk.LEFT, padx=5)
 
         # 4. Audio, Filtracja i Logi (z dawnego _fill_dialogs_tab)
         grp_audio = make_labelframe(pnl, text="Odtwarzanie Audio (Kolejkowanie)", padding=15)
