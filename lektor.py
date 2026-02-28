@@ -30,8 +30,7 @@ except Exception:
     pass
 
 from app.ctk_widgets import (
-    CTkFrame, CTkLabel, make_button, make_label, make_frame,
-    make_combobox, make_scale, make_slider
+    CTkFrame, CTkLabel, make_button, make_combobox, make_slider
 )
 
 
@@ -71,7 +70,7 @@ audio_queue = queue.Queue()
 log_queue = queue.Queue()
 debug_queue = queue.Queue()
 
-APP_VERSION = "v1.7.1"
+APP_VERSION = "v1.7.2"
 
 
 class LektorApp:
@@ -621,11 +620,8 @@ class LektorApp:
         self.root.deiconify()
         
         if success:
-            # Wznów czytanie
             if was_running:
                 self.start_reading()
-            messagebox.showinfo("Zmieniono okno", "Nowe okno zostało wybrane prawidłowo.")
-        # else: The user cancelled the portal silently. Fallback captures will be used or state is maintained.
 
     def show_logs(self):
         if not self.log_window or not self.log_window.winfo_exists():

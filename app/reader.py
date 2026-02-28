@@ -5,14 +5,14 @@ import queue
 import copy
 from collections import deque
 from datetime import datetime
-from typing import Any, Optional, Tuple, Dict, List
+from typing import Any, Optional, Tuple, Dict
 # ImageChops jest wykorzystywany w funkcji _images_are_similar, a ImageStat w tej samej funkcji.
 from PIL import Image, ImageChops, ImageStat
 
 from app.capture import capture_region
 from app.ocr import preprocess_image, recognize_text
 from app.matcher import find_best_match, precompute_subtitles
-from app.config_manager import ConfigManager, AreaConfig
+from app.config_manager import ConfigManager
 
 
 class CaptureWorker(threading.Thread):

@@ -1,5 +1,5 @@
 import sys
-from typing import Any, Dict, TYPE_CHECKING, Optional
+from typing import Any, Dict, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from lektor import LektorApp

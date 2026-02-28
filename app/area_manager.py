@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import messagebox
 from app.ctk_widgets import CTkToplevel, make_frame, make_label, make_button, make_combobox, make_scrollbar, make_separator, make_slider, make_entry, make_checkbutton, make_notebook, make_notebook_tab, make_listbox
 import os
 from typing import List, Dict, Any, Optional, TYPE_CHECKING

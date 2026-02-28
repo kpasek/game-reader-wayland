@@ -192,7 +192,7 @@ def get_text_bounds(image: Image.Image) -> Optional[Tuple[int, int, int, int]]:
                 max_b = max(max_b, y + h)
                 found = True
 
-        if found:
+        if found: 
             return (min_l, min_t, max_r, max_b)
         return None
 

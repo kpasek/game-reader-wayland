@@ -13,7 +13,7 @@ outside `ConfigManager` risks double-scaling or inconsistent conversions.
 STANDARD_W = 3840
 STANDARD_H = 2160
 
-from typing import List, Dict, Tuple
+from typing import List, Dict
 
 
 def scale_rect_to_physical(rect: Dict[str, int], dest_w: int, dest_h: int) -> Dict[str, int]:
