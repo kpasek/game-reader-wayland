@@ -1,6 +1,10 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
-from app.ctk_widgets import make_frame, make_label, make_button, make_combobox, CTkToplevel, make_labelframe
+from app.ctk_widgets import (
+    make_frame, make_label, make_button, make_combobox, 
+    CTkToplevel, make_labelframe, make_notebook, make_notebook_tab,
+    make_checkbutton, make_scale, make_entry
+)
 import os
 from PIL import Image
 from app.capture import capture_fullscreen
@@ -12,7 +16,7 @@ class OptimizationWizard(CTkToplevel):
     def __init__(self, parent, on_start):
         super().__init__(parent)
         self.title("Optymalizacja Ustawień")
-        self.geometry("600x600")
+        self.geometry("1000x850")
         
         # Shortcuts
         self.bind("<F4>", lambda e: self._add_with_selection())
@@ -21,24 +25,23 @@ class OptimizationWizard(CTkToplevel):
         self.frames = []
         self.current_area_data = None
         
-        # UI
-        main_f = make_frame(self, padding=20)
+        # Main layout replacing previous main_f
+        self.notebook = make_notebook(self)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        self.tab_detection = make_notebook_tab(self.notebook, "Wykrywanie")
+        self.tab_advanced = make_notebook_tab(self.notebook, "Zaawansowane")
+        self.tab_instruction = make_notebook_tab(self.notebook, "Instrukcja")
+        
+        self._build_detection_tab()
+        self._build_advanced_tab()
+        self._build_instruction_tab()
+
+    def _build_detection_tab(self):
+        main_f = make_frame(self.tab_detection, padding=20)
         main_f.pack(fill=tk.BOTH, expand=True)
 
-        make_label(main_f, text="Kreator Optymalizacji", font=("Arial", 12, "bold")).pack(pady=10)
-        instrukcja = (
-            "Jak poprawnie zoptymalizować ustawienia:\n"
-            "1. Najpierw dodaj zrzut ekranu, na którym napisy są dobrze widoczne – najlepiej taki, gdzie pojawia się cały tekst dialogu.\n"
-            "2. Dodaj kolejne zrzuty, jeśli chcesz sprawdzić, czy znalezione ustawienia działają także w innych sytuacjach.\n"
-            "3. Zaznacz na każdym zrzucie dokładnie ten fragment, gdzie pojawiają się napisy – im dokładniej, tym lepiej.\n"
-            "4. Jeśli napisy w grze mają inny kolor niż biały, wybierz ten kolor – program domyślnie testuje biały.\n"
-            "\n"
-            "Im lepiej przygotujesz zrzuty i zaznaczysz napisy, tym lepszy będzie efekt optymalizacji!"
-        )
-        # Przycisk "Instrukcja" z tooltipem zamiast okna
-        btn_instr = make_label(main_f, text="❓ Instrukcja")
-        btn_instr.pack(anchor=tk.NE, pady=(0, 0), padx=(0, 5))
-        create_tooltip(btn_instr, instrukcja)
+        make_label(main_f, text="Kreator Optymalizacji", font=("Arial", 12, "bold")).pack(pady=(0, 10))
         
         self.list_frame = make_frame(main_f, fg_color="transparent")
         self.list_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
@@ -89,10 +92,149 @@ class OptimizationWizard(CTkToplevel):
 
         make_button(col_frame, text="Wybierz...", command=self._pick_color, fg_color="#1f6aa5", hover_color="#145f8a", text_color="#ffffff").pack(side=tk.LEFT)
         make_button(col_frame, text="X", width=5, command=self._clear_color, fg_color="#c0392b", hover_color="#992d22", text_color="#ffffff").pack(side=tk.LEFT, padx=5)
-
+        
         # Start
         self.btn_run = make_button(main_f, text="Uruchom Optymalizację", command=self._start_opt, fg_color="#27ae60", hover_color="#1e8449", text_color="#ffffff")
         self.btn_run.pack(pady=10, fill=tk.X)
+
+    def _build_advanced_tab(self):
+        f = make_frame(self.tab_advanced, padding=20)
+        f.pack(fill=tk.BOTH, expand=True)
+
+        make_label(f, text="Tryby poszukiwania", font=("Arial", 11, "bold")).pack(anchor=tk.W, pady=(0, 5))
+        
+        self.var_use_color = tk.BooleanVar(value=True)
+        self.var_use_brightness = tk.BooleanVar(value=False)
+
+        cb_color = make_checkbutton(f, text="Włącz szukanie po kolorze tekstu (Zalecane)", variable=self.var_use_color)
+        cb_color.pack(anchor=tk.W, pady=2)
+        cb_bright = make_checkbutton(f, text="Włącz szukanie po jasności ekranu (Wolniejsze)", variable=self.var_use_brightness)
+        cb_bright.pack(anchor=tk.W, pady=2)
+
+        make_label(f, text="Zakresy tolerancji (Min - Max)", font=("Arial", 11, "bold")).pack(anchor=tk.W, pady=(15, 5))
+
+        # Color Mode
+        lf_color = make_labelframe(f, text="Kolor: Tolerancja kolorów [1-100]")
+        lf_color.pack(fill=tk.X, pady=5)
+        self.var_color_tol_min = tk.IntVar(value=1)
+        self.var_color_tol_max = tk.IntVar(value=30)
+        self._make_range_slider(lf_color, self.var_color_tol_min, self.var_color_tol_max, 1, 100)
+        
+        # Brightness Mode
+        lf_bright = make_labelframe(f, text="Jasność: Próg jasności [100-255]")
+        lf_bright.pack(fill=tk.X, pady=5)
+        self.var_bright_min = tk.IntVar(value=150)
+        self.var_bright_max = tk.IntVar(value=255)
+        self._make_range_slider(lf_bright, self.var_bright_min, self.var_bright_max, 100, 255)
+
+        # Common 
+        lf_common = make_labelframe(f, text="Wspólne parametry")
+        lf_common.pack(fill=tk.X, pady=5)
+
+        make_label(lf_common, text="Pogrubienie czcionki [0-3 px]").pack(anchor=tk.W, pady=(5,0))
+        self.var_thick_min = tk.IntVar(value=0)
+        self.var_thick_max = tk.IntVar(value=1)
+        self._make_range_slider(lf_common, self.var_thick_min, self.var_thick_max, 0, 3, step=1)
+
+        make_label(lf_common, text="Kontrast [Mnożnik]").pack(anchor=tk.W, pady=(5,0))
+        self.var_cont_min = tk.DoubleVar(value=0.0)
+        self.var_cont_max = tk.DoubleVar(value=2.0)
+        self._make_range_slider(lf_common, self.var_cont_min, self.var_cont_max, 0.0, 5.0, step=0.1)
+
+        make_label(lf_common, text="Skala wewn. OCR [Mnożnik]").pack(anchor=tk.W, pady=(5,0))
+        self.var_scale_min = tk.DoubleVar(value=0.3)
+        self.var_scale_max = tk.DoubleVar(value=0.75)
+        self._make_range_slider(lf_common, self.var_scale_min, self.var_scale_max, 0.1, 2.0, step=0.05)
+
+
+    def _make_range_slider(self, parent, var_min, var_max, min_val, max_val, is_grid=False, row=0, step=1):
+        f = make_frame(parent, fg_color="transparent")
+        f.pack(fill=tk.X, padx=10, pady=5)
+
+        is_float = isinstance(step, float)
+        fmt = "{:.2f}" if is_float else "{:.0f}"
+
+        lbl_min = make_label(f, text="Min:")
+        lbl_min.grid(row=0, column=0, padx=(0, 10))
+        scale_min = make_scale(f, from_=min_val, to=max_val, variable=var_min)
+        scale_min.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
+        val_min = make_label(f, text=fmt.format(var_min.get()), width=40)
+        val_min.grid(row=0, column=2, padx=(10, 0))
+
+        lbl_max = make_label(f, text="Max:")
+        lbl_max.grid(row=1, column=0, padx=(0, 10))
+        scale_max = make_scale(f, from_=min_val, to=max_val, variable=var_max)
+        scale_max.grid(row=1, column=1, sticky='ew', padx=5, pady=2)
+        val_max = make_label(f, text=fmt.format(var_max.get()), width=40)
+        val_max.grid(row=1, column=2, padx=(10, 0))
+
+        f.columnconfigure(1, weight=1)
+
+        def update_labels(*args):
+            # enforce limits (cross-over)
+            if var_min.get() > var_max.get():
+                if args and len(args) > 0 and args[0] == str(var_min): # min driven
+                    var_min.set(var_max.get())
+                else:
+                    var_max.set(var_min.get())
+                    
+            if not is_float:
+                # Snap to int
+                var_min.set(int(round(var_min.get())))
+                var_max.set(int(round(var_max.get())))
+                
+            val_min.configure(text=fmt.format(var_min.get()))
+            val_max.configure(text=fmt.format(var_max.get()))
+
+        scale_min.configure(command=lambda v: update_labels())
+        scale_max.configure(command=lambda v: update_labels())
+        # Initial update
+        update_labels()
+
+    def _build_instruction_tab(self):
+        f = make_frame(self.tab_instruction, padding=20)
+        f.pack(fill=tk.BOTH, expand=True)
+
+        instrukcja = (
+            "Jak poprawnie zoptymalizować ustawienia:\n\n"
+            "1. Najpierw dodaj zrzut ekranu, na którym napisy są dobrze widoczne\n"
+            "   – najlepiej taki, gdzie pojawia się cały tekst dialogu.\n"
+            "2. Dodaj kolejne zrzuty, jeśli chcesz sprawdzić, czy znalezione\n"
+            "   ustawienia działają także w innych sytuacjach.\n"
+            "3. Zaznacz na każdym zrzucie dokładnie ten fragment, gdzie pojawiają\n"
+            "   się napisy – im dokładniej, tym lepiej.\n"
+            "4. Jeśli napisy w grze mają inny kolor niż biały, wybierz ten kolor\n"
+            "   – program domyślnie testuje biały.\n\n"
+            "ZAAWANSOWANE:\n"
+            "Możesz przejść do zakładki 'Zaawansowane', aby zawęzić lub poszerzyć\n"
+            "zakres parametrów (tolerancja koloru, kontrast, skala OCR), które\n"
+            "są używane przy poszukiwaniu najlepszych ustawień. Opcje te\n"
+            "pozwalają znaleźć bardziej specyficzne konfiguracje lub\n"
+            "przyspieszyć proces przy mniejszym zakresie poszukiwań.\n\n"
+            "Im lepiej przygotujesz zrzuty i zaznaczysz napisy, tym lepszy\n"
+            "będzie efekt optymalizacji!"
+        )
+        
+        # We can use a Text widget or Label for scrollable text
+        # Since it's not a huge text, a normal Label inside a layout or disabled Text is good.
+        text_widget = tk.Text(f, wrap="word", bg=self._get_bg_color(), fg=self._get_fg_color(), font=("Arial", 11), borderwidth=0, highlightthickness=0)
+        text_widget.insert("1.0", instrukcja)
+        text_widget.config(state="disabled")
+        text_widget.pack(fill=tk.BOTH, expand=True)
+
+    def _get_bg_color(self):
+        try:
+            import customtkinter as ctk
+            if ctk.get_appearance_mode() == 'Dark': return '#2b2b2b'
+        except: pass
+        return '#ffffff'
+
+    def _get_fg_color(self):
+        try:
+            import customtkinter as ctk
+            if ctk.get_appearance_mode() == 'Dark': return '#eaeaea'
+        except: pass
+        return '#000000'
 
     def _pick_color(self):
         root = self.winfo_toplevel()
@@ -108,7 +250,7 @@ class OptimizationWizard(CTkToplevel):
         
         if not img:
             self.deiconify()
-            if self.area_manager: self.area_manager.deiconify()
+            if hasattr(self, 'area_manager') and self.area_manager: self.area_manager.deiconify()
             return
             
         try:
@@ -121,7 +263,6 @@ class OptimizationWizard(CTkToplevel):
             print(f"Error picking color: {e}")
         finally:
             self.deiconify()
-            
 
     def _clear_color(self):
         self.var_color.set("")
@@ -141,7 +282,7 @@ class OptimizationWizard(CTkToplevel):
         
         if not img:
             self.deiconify()
-            if self.area_manager: self.area_manager.deiconify()
+            if hasattr(self, 'area_manager') and self.area_manager: self.area_manager.deiconify()
             return
             
         try:
@@ -155,7 +296,6 @@ class OptimizationWizard(CTkToplevel):
             print(f"Error opening selector: {e}")
         finally:
             self.deiconify()
-            
 
     def _import_screenshot(self):
         from tkinter import filedialog
@@ -183,7 +323,6 @@ class OptimizationWizard(CTkToplevel):
             messagebox.showerror("Błąd", f"Błąd importu: {e}")
         finally:
             self.deiconify()
-            
 
     def _remove_screenshot(self):
         sel = self.lb_screens.curselection()
@@ -203,7 +342,27 @@ class OptimizationWizard(CTkToplevel):
         mode = self.mode_map.get(disp_mode, MATCH_MODE_FULL)
         color = self.var_color.get() if self.var_color.get() != "" else None
 
+        advanced_settings = {
+            "use_color_mode": self.var_use_color.get(),
+            "use_brightness_mode": self.var_use_brightness.get(),
+            "color_tol_min": self.var_color_tol_min.get(),
+            "color_tol_max": self.var_color_tol_max.get(),
+            "bright_min": self.var_bright_min.get(),
+            "bright_max": self.var_bright_max.get(),
+            "thick_min": self.var_thick_min.get(),
+            "thick_max": self.var_thick_max.get(),
+            "cont_min": self.var_cont_min.get(),
+            "cont_max": self.var_cont_max.get(),
+            "scale_min": self.var_scale_min.get(),
+            "scale_max": self.var_scale_max.get(),
+        }
+
         frames = self.frames
         callback = self.on_start
         self.destroy()
-        callback(frames, mode=mode, initial_color=color)
+        # callback teraz powinno pobierać kwargs z advanced settings; ponieważ lektor.py on_wizard_finish spodziewa się
+        # stałej sygnatury (uruchamianie optimizer.optimize), powinniśmy przekazać to jako nową właściwość lub rozszerzyć arguments
+        # W lektor.py callback on_wizard_finish() przyjmuje tylko 3 argumenty, więc wstrzykniemy w ten sam dictionary co kwargs lub przekażemy
+        # przez dodatkowy opcjonalny argument initial_color a nowo jako dict -> To wpłynie na zmianę w lektor.py
+        # Aby uniknąć modyfikowania w wielu miejscach, przekażemy advanced_settings jako dodatkowy **kwargs argument w on_wizard_finish
+        callback(frames, mode=mode, initial_color=color, advanced_settings=advanced_settings)
