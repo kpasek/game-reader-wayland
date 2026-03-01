@@ -70,7 +70,7 @@ audio_queue = queue.Queue()
 log_queue = queue.Queue()
 debug_queue = queue.Queue()
 
-APP_VERSION = "v1.8.3"
+APP_VERSION = "v1.9.0"
 
 
 class LektorApp:
@@ -1230,7 +1230,7 @@ class LektorApp:
             messagebox.showerror("Błąd", "Plik napisów jest pusty.")
             return
 
-        def on_wizard_finish(frames_data, mode, initial_color=None):
+        def on_wizard_finish(frames_data, mode, initial_color=None, advanced_settings=None):
             # frames_data: list of {'image': PIL, 'rect': (x,y,w,h) or None}
             valid_images = [f["image"] for f in frames_data]
             valid_rects = [f["rect"] for f in frames_data if f["rect"]]
@@ -1269,7 +1269,7 @@ class LektorApp:
                         target_rect,
                         subtitle_lines,
                         mode,
-                        initial_color=initial_color,
+                        initial_color=initial_color, **(advanced_settings or {}),
                         progress_callback=None, # Disabled for performance
                         stop_event=prog.stop_event,
                     )

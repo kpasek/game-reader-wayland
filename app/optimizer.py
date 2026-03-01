@@ -17,7 +17,10 @@ def _init_worker(crop, db):
     _worker_crop = crop
     _worker_db = db
 
-def _evaluate_worker(args):
+def _evaluate_worker(args, crop=None, db=None):
+    global _worker_crop, _worker_db
+    if crop: _worker_crop = crop
+    if db: _worker_db = db
     """
     Worker function for parallel settings evaluation.
     args: (preset_obj, match_mode)
@@ -140,6 +143,16 @@ class SettingsOptimizer:
         counts = Counter(valid_pixels)
         return [f"#{r:02x}{g:02x}{b:02x}" for (r, g, b), _ in counts.most_common(num_colors)]
 
+    def _generate_range(self, start, end, step):
+        res = []
+        curr = start
+        while curr <= end + 1e-9: # small delta for float comparison
+            res.append(round(curr, 2) if isinstance(step, float) else int(curr))
+            curr += step
+        if not res:
+            res.append(start)
+        return res
+
     def optimize(self, 
                  images: List[Image.Image], 
                  rough_area: Tuple[int, int, int, int], 
@@ -147,7 +160,8 @@ class SettingsOptimizer:
                  match_mode: str = MATCH_MODE_FULL,
                  initial_color: str = None,
                  progress_callback=None,
-                 stop_event: multiprocessing.Event = None) -> Dict[str, Any]:
+                 stop_event: multiprocessing.Event = None,
+                 **kwargs) -> Dict[str, Any]:
         """
         Znajduje optymalne ustawienia OCR i matchingu dla zadanego wycinka ekranu.
         Wykorzystuje jeden Pool procesów dla wszystkich etapów.
@@ -172,30 +186,61 @@ class SettingsOptimizer:
         candidate_colors = [initial_color] if initial_color else sorted(list(set(self._extract_dominant_colors(crop0)) | {"#FFFFFF"}))
             
         candidates = []
-        params = {
-            "color_tolerances": range(1, 30, 1),
-            "thickenings": [0, 1],
-            "contrasts": [round(x * 0.4, 1) for x in range(0, 6)],
-            "brightness_threshold": range(150, 255, 3),
-            "scale_factors": [round(x * 0.05, 2) for x in range(6, 16)]
-        }
+        
+        # Get advanced settings from kwargs or use defaults
+        use_color = kwargs.get("use_color_mode", True)
+        use_brightness = kwargs.get("use_brightness_mode", True)
+        
+        c_tol_min = kwargs.get("color_tol_min", 1)
+        c_tol_max = kwargs.get("color_tol_max", 30)
+        
+        b_min = kwargs.get("bright_min", 150)
+        b_max = kwargs.get("bright_max", 255)
+        
+        t_min = kwargs.get("thick_min", 0)
+        t_max = kwargs.get("thick_max", 1)
+        
+        cont_min = kwargs.get("cont_min", 0.0)
+        cont_max = kwargs.get("cont_max", 2.0)
+        
+        s_min = kwargs.get("scale_min", 0.3)
+        s_max = kwargs.get("scale_max", 0.75)
+
+        # Build dynamic ranges
+        color_tolerances = self._generate_range(c_tol_min, c_tol_max, 1)
+        brightness_thresholds = self._generate_range(b_min, b_max, 3) 
+        thickenings = self._generate_range(t_min, t_max, 1)
+        contrasts = self._generate_range(cont_min, cont_max, 0.4)
+        scale_factors = self._generate_range(s_min, s_max, 0.05)
+        
+        # If parameters didn't generate properly or user set max > min, just fix it
+        if not color_tolerances: color_tolerances = [1]
+        if not brightness_thresholds: brightness_thresholds = [200]
+        if not thickenings: thickenings = [0]
+        if not contrasts: contrasts = [0.0]
+        if not scale_factors: scale_factors = [1.0]
 
         import copy
-        for color, tol, thick, contrast, scale in itertools.product(candidate_colors, params["color_tolerances"], params["thickenings"], params["contrasts"], params["scale_factors"]):
-            s = copy.deepcopy(self.base_preset)
-            s._setting_mode, s.auto_remove_names, s.colors = "color", True, [color]
-            s.color_tolerance, s.text_thickening = tol, thick
-            s.ocr_scale_factor = scale
-            s.brightness_mode, s.brightness_threshold, s.contrast, s.subtitle_mode = "Light", 200, contrast, match_mode
-            candidates.append(s)
+        if use_color:
+            for color, tol, thick, contrast, scale in itertools.product(candidate_colors, color_tolerances, thickenings, contrasts, scale_factors):
+                s = copy.deepcopy(self.base_preset)
+                s._setting_mode, s.auto_remove_names, s.colors = "color", True, [color]
+                s.color_tolerance, s.text_thickening = tol, thick
+                s.ocr_scale_factor = scale
+                s.brightness_mode, s.brightness_threshold, s.contrast, s.subtitle_mode = "Light", 200, contrast, match_mode
+                candidates.append(s)
         
-        for mode, thick, contrast, bright, scale in itertools.product(["Light", "Dark"], params["thickenings"], params["contrasts"], params["brightness_threshold"], params["scale_factors"]):
-            s = copy.deepcopy(self.base_preset)
-            s._setting_mode, s.auto_remove_names, s.colors = "brightness", True, []
-            s.brightness_mode, s.text_thickening = mode, thick
-            s.ocr_scale_factor = scale
-            s.brightness_threshold, s.contrast, s.subtitle_mode = bright, contrast, match_mode
-            candidates.append(s)
+        if use_brightness:
+            for mode, thick, contrast, bright, scale in itertools.product(["Light", "Dark"], thickenings, contrasts, brightness_thresholds, scale_factors):
+                s = copy.deepcopy(self.base_preset)
+                s._setting_mode, s.auto_remove_names, s.colors = "brightness", True, []
+                s.brightness_mode, s.text_thickening = mode, thick
+                s.ocr_scale_factor = scale
+                s.brightness_threshold, s.contrast, s.subtitle_mode = bright, contrast, match_mode
+                candidates.append(s)
+
+        if not candidates:
+            return {"score": 0, "settings": None, "optimized_area": rough_area, "error": "No candidates generated. Check advanced settings."}
 
         best_amount = 200
         total_steps = len(candidates) + (len(images) - 1) * best_amount
@@ -219,9 +264,9 @@ class SettingsOptimizer:
         cpu_count = multiprocessing.cpu_count()
         with multiprocessing.Pool(processes=cpu_count) as pool:
             # Stage 1
-            pool.starmap(_init_worker, [(crop0, precomputed_db)] * cpu_count)
+            pool.starmap(_init_worker, [(crop0, precomputed_db)] * (cpu_count * 2))
             ranked = []
-            for i, (score, bbox) in enumerate(pool.imap(_evaluate_worker, [(s, match_mode) for s in candidates])):
+            for i, (score, bbox) in enumerate(pool.starmap(_evaluate_worker, [((s, match_mode), crop0, precomputed_db) for s in candidates])):
                 if stop_event and stop_event.is_set():
                     pool.terminate(); return {"score": 0, "settings": None, "optimized_area": rough_area}
                 update_progress(1, score)
@@ -240,9 +285,9 @@ class SettingsOptimizer:
                 crop_n = create_crop(img)
                 if not crop_n: 
                     update_progress(best_amount); continue
-                pool.starmap(_init_worker, [(crop_n, precomputed_db)] * cpu_count)
+                pool.starmap(_init_worker, [(crop_n, precomputed_db)] * (cpu_count * 2))
                 
-                results = pool.map(_evaluate_worker, [(f[1], match_mode) for f in finalists])
+                results = pool.starmap(_evaluate_worker, [((f[1], match_mode), crop_n, precomputed_db) for f in finalists])
                 next_round = []
                 for i, (score, bbox) in enumerate(results):
                     scores, s, _ = finalists[i]
