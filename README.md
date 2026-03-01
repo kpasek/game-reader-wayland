@@ -7,7 +7,7 @@
 * **OCR w czasie rzeczywistym:** Szybkie rozpoznawanie tekstu z wybranych obszarów ekranu.
 * **Inteligentne dopasowanie:** Wykorzystuje algorytmy fuzzy matching (Rapidfuzz), aby ignorować błędy OCR i drobne różnice w tekście.
 * **Działanie w tle:** Minimalistyczne GUI i sterowanie skrótami klawiszowymi.
-* **Wsparcie dla Wayland i Windows:** Automatyczny wybór backendu do zrzutów ekranu (`mss` dla Windows/X11, `pyscreenshot`/Gnome-screenshot dla Wayland).
+* **Wsparcie dla Wayland i Windows:** Automatyczny wybór backendu do zrzutów ekranu (`mss` dla Windows/X11, PipeWire dla Wayland).
 * **Filtrowanie:** Automatyczne usuwanie imion postaci (np. "Geralt: Witaj") i szumów.
 
 ---

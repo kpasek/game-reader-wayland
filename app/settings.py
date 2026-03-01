@@ -11,6 +11,11 @@ except ImportError:
 
 from app.ctk_widgets import CTkToplevel, make_frame, make_label, make_button, make_combobox, make_labelframe, make_notebook, make_notebook_tab, make_scale, make_entry, make_checkbutton, make_scrollbar
 
+try:
+    from pynput import keyboard
+except ImportError:
+    keyboard = None
+
 
 class SettingsDialog(CTkToplevel):
     """
@@ -27,7 +32,6 @@ class SettingsDialog(CTkToplevel):
         # Zmienne UI (Globalne)
         self.var_brightness_threshold = tk.IntVar(value=app_instance.config_mgr.brightness_threshold)
         self.var_hk_start = tk.StringVar(value=settings.get('hotkey_start_stop', '<f10>'))
-        self.var_hk_area3 = tk.StringVar(value=settings.get('hotkey_area3', '<f3>'))
         self.var_capture_backend = tk.StringVar(value=settings.get('capture_backend', 'Auto'))
 
         self._initialize_app_variables()
@@ -109,7 +113,7 @@ class SettingsDialog(CTkToplevel):
         f_backend = make_frame(grp_img)
         f_backend.pack(fill=tk.X, pady=5)
         make_label(f_backend, text="Backend przechwytywania:").pack(side=tk.LEFT)
-        backend_choices = ["Auto", "pipewire_wayland", "kde_spectacle", "mss", "pyscreenshot"]
+        backend_choices = ["Auto", "pipewire_wayland", "mss"]
         cb_backend = make_combobox(f_backend, textvariable=self.var_capture_backend, values=backend_choices, state="readonly", width=18)
         cb_backend.pack(side=tk.LEFT, padx=5)
         make_label(f_backend, text="(Wymaga restartu po zmianie)", font=("Arial", 8, "italic"), text_color="gray").pack(side=tk.LEFT, padx=5)
@@ -212,11 +216,51 @@ class SettingsDialog(CTkToplevel):
             anchor=tk.W, pady=2)
 
     def _fill_hk_tab(self, pnl):
-        lf_hk = make_labelframe(pnl, text="Definicja skrótów (format pynput)", padding=15)
+        lf_hk = make_labelframe(pnl, text="Definicja skrótów", padding=15)
         lf_hk.pack(fill=tk.X, pady=(0, 15), padx=10)
-        make_label(lf_hk, text="Start / Stop:").pack(anchor=tk.W)
-        make_entry(lf_hk, textvariable=self.var_hk_start).pack(fill=tk.X, pady=(0, 10))
-        make_label(lf_hk, text="Przykłady: <ctrl>+<f10>, <alt>+x, <f9>", text_color="gray").pack(anchor=tk.W)
+
+        def setup_hotkey_row(parent, label_text, str_var):
+            from tkinter import messagebox
+            row = make_frame(parent)
+            row.pack(fill=tk.X, pady=5)
+            make_label(row, text=label_text, width=150, anchor=tk.W).pack(side=tk.LEFT)
+            ent = make_entry(row, textvariable=str_var, state="readonly")
+            ent.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+
+            btn_record = make_button(row, text="Nagraj", fg_color="#1f6aa5", hover_color="#145f8a", text_color="#ffffff", width=80)
+            btn_record.pack(side=tk.LEFT, padx=5)
+
+            def record():
+                if not keyboard:
+                    messagebox.showerror("Błąd", "Biblioteka pynput niedostępna.")
+                    return
+
+                btn_record.configure(text="Naciśnij...", state=tk.DISABLED)
+                self.update()
+
+                def on_press(key):
+                    try:
+                        k = f"<{key.name}>"
+                    except AttributeError:
+                        k = f"<{key.char}>"
+                    self.after(0, lambda: set_val(k))
+                    return False
+
+                listener = keyboard.Listener(on_press=on_press)
+                listener.start()
+
+            def set_val(val):
+                str_var.set(val)
+                btn_record.configure(text="Nagraj", state=tk.NORMAL)
+
+            def clear():
+                str_var.set("")
+
+            btn_record.configure(command=record)
+            make_button(row, text="X", width=30, command=clear, fg_color="#c0392b", hover_color="#992d22", text_color="#ffffff").pack(side=tk.LEFT)
+
+        setup_hotkey_row(lf_hk, "Przełącz (Start / Stop):", self.var_hk_start)
+
 
     def _add_slider(self, parent, label, variable, from_, to, config_key, fmt="{:.2f}", resolution=None):
         f = make_frame(parent)
@@ -254,7 +298,6 @@ class SettingsDialog(CTkToplevel):
     def save(self):
         # Zapisz ustawienia globalne
         self.settings['hotkey_start_stop'] = self.var_hk_start.get()
-        self.settings['hotkey_area3'] = self.var_hk_area3.get()
         self.settings['capture_backend'] = self.var_capture_backend.get()
         self.app.config_mgr.save_app_config()
         self.destroy()

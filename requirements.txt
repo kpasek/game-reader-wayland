@@ -3,7 +3,6 @@ pytesseract
 thefuzz
 rapidfuzz
 python-Levenshtein
-pyscreenshot
 mss
 # build
 nuitka

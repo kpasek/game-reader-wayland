@@ -23,7 +23,6 @@ dependencies = [
     "thefuzz",
     "mss",
     "audioop-lts",
-    "pyscreenshot",
     "pipewire-capture",
 ]
 

@@ -1,35 +1,22 @@
 import sys
 import platform
 import os
-import uuid
-import subprocess
 import time
 import atexit
 import logging
+import json
 from typing import Optional, Dict
 
-logger = logging.getLogger(__name__)
-
-try:
-    import mss
-    HAS_MSS = True
-except ImportError:
-    HAS_MSS = False
-
-import pyscreenshot as ImageGrab
+import mss
+import numpy as np
 from PIL import Image
+from pipewire_capture import (
+    PortalCapture,
+    CaptureStream,
+    is_available as pw_is_available,
+)
 
-try:
-    from pipewire_capture import (
-        PortalCapture,
-        CaptureStream,
-        is_available as pw_is_available,
-    )
-    HAS_PIPEWIRE_CAPTURE = True
-except ImportError as e:
-    HAS_PIPEWIRE_CAPTURE = False
-    def pw_is_available() -> bool:
-        return False
+logger = logging.getLogger(__name__)
 
 
 def _is_wayland() -> bool:
@@ -37,36 +24,28 @@ def _is_wayland() -> bool:
         return False
     return 'wayland' in os.environ.get('XDG_SESSION_TYPE', '').lower()
 
-def _is_kde_wayland() -> bool:
-    """Sprawdza czy działamy w sesji KDE Plasma na Waylandzie."""
-    if not _is_wayland():
-        return False
-    desktop = os.environ.get('XDG_CURRENT_DESKTOP', '').lower()
-    return 'kde' in desktop
-
 
 # ---------------------------------------------------------------------------
-# Backend 2: PipeWire (GNOME, Gamescope, inne Wayland)
+# Backend: PipeWire (GNOME, Gamescope, inne Wayland)
 # Streaming, ~0ms per frame po inicjalizacji.
 # ---------------------------------------------------------------------------
 
 class PipewireWaylandCapture:
     """
-    Backend oparty o PipeWire + xdg-desktop-portal (pipewire-capture 0.2.9+).
+    Backend oparty o PipeWire + xdg-desktop-portal (pipewire-capture).
 
     Portal (okno wyboru ekranu) wyświetla się tylko raz przy starcie.
     CaptureStream działa w tle, get_frame() zwraca aktualną klatkę.
     """
 
     def __init__(self, capture_interval: float = 0.1) -> None:
-        if not HAS_PIPEWIRE_CAPTURE or not pw_is_available():
+        if not pw_is_available():
             raise RuntimeError("PipeWire capture nie jest dostępne w tym środowisku.")
 
         self._portal = PortalCapture()
         self._session = None
         self._stream = None
 
-        # select_window() jest synchroniczne w 0.2.9 — zwraca PortalSession lub None
         session = self._portal.select_window()
         if session is None:
             raise RuntimeError("Wybór okna został anulowany w portalu.")
@@ -86,8 +65,6 @@ class PipewireWaylandCapture:
 
     def _get_latest_frame_array(self, timeout: float = 0.5):
         """Pobiera najnowszą klatkę jako numpy array (H, W, 3) RGB."""
-        import numpy as np
-
         if getattr(self._stream, "window_invalid", False):
             raise RuntimeError("Okno przechwytywane przez PipeWire zostało zamknięte.")
 
@@ -101,7 +78,7 @@ class PipewireWaylandCapture:
         if frame is None:
             raise RuntimeError("Brak dostępnej ramki z PipeWire w zadanym czasie.")
 
-        arr = __import__('numpy').array(frame)  # BGRA: (H, W, 4)
+        arr = np.array(frame)  # BGRA: (H, W, 4)
         if arr.ndim != 3 or arr.shape[2] < 3:
             raise RuntimeError(f"Nieoczekiwany kształt ramki: {arr.shape}")
 
@@ -137,51 +114,6 @@ class PipewireWaylandCapture:
             pass
 
 
-class KWinSpectacleWrapper:
-    """
-    Wrapper na narzędzie Spectacle, który wymusza zapis do RAM (/dev/shm).
-    Jest to najszybsza metoda na KDE Wayland jeśli bezpośredni DBus/Grim nie działa.
-    """
-
-    def grab(self, x=None, y=None, width=None, height=None) -> Image.Image:
-        temp_path = f"/dev/shm/kwin_shot_{uuid.uuid4()}.png"
-
-        try:
-            cmd = ["spectacle", "-b", "-n", "-f", "-o", temp_path]
-
-            subprocess.run(
-                cmd,
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=10
-            )
-
-            if not os.path.exists(temp_path):
-                raise RuntimeError("Spectacle nie utworzył pliku w /dev/shm")
-
-            img = Image.open(temp_path)
-            img.load()
-
-
-            if x is not None and width is not None:
-                box = (int(x), int(y), int(x + width), int(y + height))
-                img = img.crop(box)
-
-            return img
-
-        except subprocess.TimeoutExpired:
-            raise RuntimeError("Spectacle przekroczył limit czasu.")
-        except subprocess.CalledProcessError:
-            raise RuntimeError("Błąd wywołania narzędzia Spectacle.")
-        finally:
-            if os.path.exists(temp_path):
-                try:
-                    os.remove(temp_path)
-                except OSError:
-                    pass
-
-
 # ---------------------------------------------------------------------------
 # Singletony
 # ---------------------------------------------------------------------------
@@ -212,9 +144,6 @@ def reset_pipewire_source():
         _PIPEWIRE_CAPTURE.stop()
         _PIPEWIRE_CAPTURE = None
     
-    # Próba re-inicjalizacji
-    # Błąd (np. anulowanie wyboru) zostanie zignorowany z zewnątrz, 
-    # a `_PIPEWIRE_CAPTURE = None` upewni się że backendy awaryjne przejmą zadanie
     try:
         _get_pipewire_capture()
         return True
@@ -227,31 +156,20 @@ def _determine_backend() -> str:
     """
     Automatycznie dobiera najlepszy backend do zrzutów ekranu.
     """
-    import json
     app_config_path = os.path.expanduser('~/.config/app_config.json')
     try:
         with open(app_config_path, 'r', encoding='utf-8') as f:
             cfg = json.load(f)
             user_backend = cfg.get('capture_backend', 'Auto')
-            if user_backend != 'Auto':
+            if user_backend in ('pipewire_wayland', 'mss'):
                 return user_backend
     except Exception:
         pass
 
-    if _is_wayland():
-        if HAS_PIPEWIRE_CAPTURE and pw_is_available():
-            return 'pipewire_wayland'
-        if _is_kde_wayland():
-            return 'kde_spectacle'
-        return 'pyscreenshot'
+    if _is_wayland() and pw_is_available():
+        return 'pipewire_wayland'
 
-    if not HAS_MSS:
-        return 'pyscreenshot'
-
-    system = platform.system().lower()
-    if system == 'windows' or system == 'linux':
-        return 'mss'
-    return 'pyscreenshot'
+    return 'mss'
 
 
 SCREENSHOT_BACKEND = _determine_backend()
@@ -267,37 +185,19 @@ def capture_fullscreen() -> Optional[Image.Image]:
                 grabber = _get_pipewire_capture()
                 return grabber.grab_fullscreen()
             except Exception as e:
-                logger.error(f"Błąd backendu PipeWire: {e}, fallback...")
-                # Fallback on the fly if PipeWire fails (e.g. portal cancelled)
-                if HAS_MSS and platform.system().lower() != 'linux':
-                    pass
-                elif _is_kde_wayland():
-                    return KWinSpectacleWrapper().grab()
-                elif HAS_MSS:
-                    with mss.mss() as sct:
-                        monitor = sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0]
-                        sct_img = sct.grab(monitor)
-                        return Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
-                return ImageGrab.grab()
+                logger.error(f"Błąd backendu PipeWire: {e}, fallback do mss...")
+                with mss.mss() as sct:
+                    monitor = sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0]
+                    sct_img = sct.grab(monitor)
+                    return Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
 
-        if SCREENSHOT_BACKEND == 'kde_spectacle':
-            try:
-                grabber = KWinSpectacleWrapper()
-                return grabber.grab()
-            except Exception as e:
-                print(f"Błąd backendu Spectacle: {e}, fallback...", file=sys.stderr)
-
-        if SCREENSHOT_BACKEND == 'mss':
-            with mss.mss() as sct:
-                monitor = sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0]
-                sct_img = sct.grab(monitor)
-                return Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
-
-        return ImageGrab.grab()
-
+        with mss.mss() as sct:
+            monitor = sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0]
+            sct_img = sct.grab(monitor)
+            return Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
 
     except Exception as e:
-        print(f"BŁĄD (capture_fullscreen): {e}", file=sys.stderr)
+        logger.error(f"BŁĄD (capture_fullscreen): {e}")
         return None
 
 
@@ -316,31 +216,17 @@ def capture_region(region: Dict[str, int]) -> Optional[Image.Image]:
                 grabber = _get_pipewire_capture()
                 return grabber.grab_region(left=left, top=top, width=width, height=height)
             except Exception as e:
-                logger.error(f"Błąd backendu PipeWire (region): {e}, fallback...")
-                if _is_kde_wayland():
-                    return KWinSpectacleWrapper().grab(x=left, y=top, width=width, height=height)
-                elif HAS_MSS:
-                    with mss.mss() as sct:
-                        rect = {"top": top, "left": left, "width": width, "height": height}
-                        sct_img = sct.grab(rect)
-                        return Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
-                return ImageGrab.grab(bbox=(left, top, left + width, top + height))
+                logger.error(f"Błąd backendu PipeWire (region): {e}, fallback do mss...")
+                with mss.mss() as sct:
+                    rect = {"top": top, "left": left, "width": width, "height": height}
+                    sct_img = sct.grab(rect)
+                    return Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
 
-        if SCREENSHOT_BACKEND == 'kde_spectacle':
-            try:
-                grabber = KWinSpectacleWrapper()
-                return grabber.grab(x=left, y=top, width=width, height=height)
-            except Exception as e:
-                print(f"Błąd backendu Spectacle (region): {e}, fallback...", file=sys.stderr)
-
-        if SCREENSHOT_BACKEND == 'mss':
-            with mss.mss() as sct:
-                rect = {"top": top, "left": left, "width": width, "height": height}
-                sct_img = sct.grab(rect)
-                img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
-                return img
-        return ImageGrab.grab(bbox=(left, top, left + width, top + height))
+        with mss.mss() as sct:
+            rect = {"top": top, "left": left, "width": width, "height": height}
+            sct_img = sct.grab(rect)
+            return Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
 
     except Exception as e:
-        print(f"BŁĄD (capture_region): {e}", file=sys.stderr)
+        logger.error(f"BŁĄD (capture_region): {e}")
         return None

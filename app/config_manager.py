@@ -754,7 +754,7 @@ class ConfigManager:
                 "id": 2,
                 "type": "manual",
                 "rect": monitors[2],
-                "hotkey": self.settings.get('hotkey_area3', '<f3>'),
+                "hotkey": "", 
                 "colors": []
             })
             
