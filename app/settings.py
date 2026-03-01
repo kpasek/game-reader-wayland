@@ -6,7 +6,6 @@ if TYPE_CHECKING:
 
 try:
     import tkinter as tk
-    from tkinter import ttk
 except ImportError:
     sys.exit(1)
 

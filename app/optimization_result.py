@@ -1,5 +1,4 @@
 import tkinter as tk
-from tkinter import ttk
 from app.ctk_widgets import CTkToplevel, make_frame, make_label, make_button, make_combobox, make_separator
 
 

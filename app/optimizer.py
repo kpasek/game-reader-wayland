@@ -1,7 +1,7 @@
 from PIL import Image
 import itertools
 from collections import Counter
-from typing import Tuple, List, Dict, Any, Optional
+from typing import Tuple, List, Dict, Any
 import multiprocessing
 
 from app.ocr import preprocess_image, recognize_text

@@ -14,7 +14,7 @@ from typing import Optional
 
 try:
     import tkinter as tk
-    from tkinter import ttk, filedialog, messagebox, font
+    from tkinter import filedialog, messagebox
 except ImportError:
     print("Błąd: Brak biblioteki tkinter.", file=sys.stderr)
     sys.exit(1)
