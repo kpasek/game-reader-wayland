@@ -70,7 +70,7 @@ audio_queue = queue.Queue()
 log_queue = queue.Queue()
 debug_queue = queue.Queue()
 
-APP_VERSION = "v1.9.0"
+APP_VERSION = "v1.10.0"
 
 
 class LektorApp:
