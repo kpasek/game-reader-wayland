@@ -286,7 +286,7 @@ class LektorApp:
         self.cb_res = make_combobox(
             f_res, textvariable=self.var_resolution, values=self.resolutions
         )
-        self.cb_res.pack(side=tk.LEFT, padx=5)
+        self.cb_res.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         self.cb_res.bind("<<ComboboxSelected>>", self._on_resolution_selected)
         make_button(
             f_res,
