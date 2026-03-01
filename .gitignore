@@ -6,6 +6,7 @@ build_win
 preset.json
 app_config.json
 dist
+dist_pyinstaller
 .idea
 __pycache__
 
