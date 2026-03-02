@@ -40,7 +40,9 @@ if platform.system() == "Windows":
         if os.path.exists(path_tessdata):
             os.environ['TESSDATA_PREFIX'] = path_tessdata
 elif platform.system() == "Linux":
-    # Fallback paths for Linux - check relative to application base dir
+    import shutil
+    
+    # Fallback paths for Linux - check relative to application base dir (for Steam Deck portable)
     base_dir = get_base_dir()
     local_tesseract_path = os.path.join(base_dir, "vendor", "tesseract_deck", "tesseract")
     local_tesseract_path_legacy = os.path.join(base_dir, "lib", "tesseract", "tesseract")
@@ -49,6 +51,11 @@ elif platform.system() == "Linux":
         pytesseract.pytesseract.tesseract_cmd = local_tesseract_path
     elif os.path.exists(local_tesseract_path_legacy):
         pytesseract.pytesseract.tesseract_cmd = local_tesseract_path_legacy
+    else:
+        # Fallback to system-wide tesseract if available
+        system_tesseract = shutil.which("tesseract")
+        if system_tesseract:
+            pytesseract.pytesseract.tesseract_cmd = system_tesseract
 
 def check_alignment(bbox: Tuple[int, int, int, int], width: int, align_mode: str, column_ratio: float = 0.25) -> bool:
     """
