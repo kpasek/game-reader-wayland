@@ -5,6 +5,7 @@ import tempfile
 from typing import Optional, Tuple, List
 
 from app.config_manager import ConfigManager, AreaConfig
+from app.path_utils import get_base_dir
 
 try:
     import pytesseract
@@ -39,9 +40,10 @@ if platform.system() == "Windows":
         if os.path.exists(path_tessdata):
             os.environ['TESSDATA_PREFIX'] = path_tessdata
 elif platform.system() == "Linux":
-    # Fallback paths for Linux
-    local_tesseract_path = os.path.abspath(os.path.join("vendor", "tesseract_deck", "tesseract"))
-    local_tesseract_path_legacy = os.path.abspath(os.path.join("lib", "tesseract", "tesseract"))
+    # Fallback paths for Linux - check relative to application base dir
+    base_dir = get_base_dir()
+    local_tesseract_path = os.path.join(base_dir, "vendor", "tesseract_deck", "tesseract")
+    local_tesseract_path_legacy = os.path.join(base_dir, "lib", "tesseract", "tesseract")
     
     if os.path.exists(local_tesseract_path):
         pytesseract.pytesseract.tesseract_cmd = local_tesseract_path

@@ -4,6 +4,9 @@ set -e
 
 echo "Budowanie paczki Tesseract-OCR dla Steam Deck (Debian)..."
 
+# Przejdź do głównego katalogu (tam gdzie jest README.md/pyproject.toml) jeśli odpalono skrypt bedąc w vendor
+cd "$(dirname "$0")/.."
+
 podman run --rm -v "$PWD":/app:Z -w /app python:3.12-bookworm bash -c "
     apt-get update -qq
     apt-get install -y -qq tesseract-ocr curl xz-utils
