@@ -24,6 +24,7 @@
 1.  **Tesseract OCR**: Silnik rozpoznawania tekstu.
     * *Windows:* Zainstaluj [Tesseract installer](https://github.com/UB-Mannheim/tesseract/wiki). Ścieżka domyślna: `C:\Program Files\Tesseract-OCR`.
     * *Linux:* `sudo apt install tesseract-ocr tesseract-ocr-pol`
+    * *SteamOS (Steam Deck):* Rozpakuj przygotowaną [paczkę pod Steam Deck](vendor/README.md) za pomocą skryptu `./vendor/build_tesseract.sh` aby ominąć blokady systemowe read-only.
 2.  **FFmpeg (ffplay)**: Do odtwarzania dźwięku.
     * Musi być dostępny w zmiennej środowiskowej PATH (polecenie `ffplay` musi działać w terminalu).
 

@@ -39,9 +39,14 @@ if platform.system() == "Windows":
         if os.path.exists(path_tessdata):
             os.environ['TESSDATA_PREFIX'] = path_tessdata
 elif platform.system() == "Linux":
-    local_tesseract_path = os.path.abspath(os.path.join("lib", "tesseract", "tesseract"))
+    # Fallback paths for Linux
+    local_tesseract_path = os.path.abspath(os.path.join("vendor", "tesseract_deck", "tesseract"))
+    local_tesseract_path_legacy = os.path.abspath(os.path.join("lib", "tesseract", "tesseract"))
+    
     if os.path.exists(local_tesseract_path):
         pytesseract.pytesseract.tesseract_cmd = local_tesseract_path
+    elif os.path.exists(local_tesseract_path_legacy):
+        pytesseract.pytesseract.tesseract_cmd = local_tesseract_path_legacy
 
 def check_alignment(bbox: Tuple[int, int, int, int], width: int, align_mode: str, column_ratio: float = 0.25) -> bool:
     """
