@@ -37,57 +37,41 @@ $ENGINE run --rm \
     /bin/bash -c "
     set -e
     
-    # Tworzymy wirtualne środowisko wewnątrz kontenera (aby nie śmiecić systemowym pythonem kontenera, choć w Dockerze to mniej istotne)
-    # W tym przypadku możemy użyć globalnego środowiska w kontenerze, bo jest on efemeryczny, ale venv jest bezpieczniejszy dla niektórych narzędzi.
     python -m venv .venv-build
     source .venv-build/bin/activate
 
     echo '--- [Container] Instalacja zależności Python ---'
-    # Odinstalowujemy potencjalnie zainstalowane wersje z cache (żeby wymusić reinstalację później)
     pip uninstall -y pipewire-capture || true
-    # Filtrujemy pipewire-capture z requirements - budujemy go ręcznie
     grep -v 'pipewire-capture' requirements.txt > requirements_build.tmp
-    # Instalujemy resztę. Używamy cache pip jeśli zamontowany volume (opcjonalnie), tutaj prosto.
     pip install -r requirements_build.tmp
     rm requirements_build.tmp
-    # Upewnij się, że pyinstaller/maturin są dostępne w venv (mogły być zainstalowane globalnie w Dockerfile, ale venv je przykrył)
     pip install maturin pyinstaller
 
     echo '--- [Container] Budowanie pipewire-capture ze źródeł ---'
     if [ -d \"vendor/pipewire-capture\" ]; then
         cd vendor/pipewire-capture
-        # Czyścimy stare buildy, aby uniknąć konfliktów i starych bibliotek z auditwheel
-        echo '--- [Container] Czyszczenie cargo ---'
         cargo clean || true
         rm -rf target/wheels
         
-        # Budujemy wheel. Flaga --strip zmniejsza rozmiar.
-        # WAŻNE: 'maturin build' może wyprodukować wiele wheel (linux, manylinux etc.)
-        # Używamy --auditwheel skip, aby nie próbował bundlować bibliotek systemowych (libpipewire),
-        # które i tak muszą być w systemie hosta.
-        
+        # Używamy flagi --auditwheel skip, aby nie dołączać bibliotek systemowych (np. libpipewire)
+        # do paczki wheel. Dzięki temu aplikacja na Steam Decku użyje systemowego PipeWire'a.
         maturin build --release --strip --auditwheel skip
         
-        # Instalujemy PIERWSZY znaleziony plik .whl
-        # Ponieważ używamy --auditwheel skip, powstanie wheel typu 'linux_x86_64', nie 'manylinux'
         WHEEL_FILE=\$(ls target/wheels/*.whl 2>/dev/null | head -n 1)
-        
         if [ -z \"\$WHEEL_FILE\" ]; then
-            echo '❌ Błąd: Nie znaleziono zbudowanego paczki wheel dla pipewire-capture!'
+            echo '❌ Błąd: Nie znaleziono zbudowanego paczki wheel!'
             exit 1
         fi
         
         echo \"📦 Instaluję wheel: \$WHEEL_FILE\"
         pip install \"\$WHEEL_FILE\" --force-reinstall
-        
         cd ../..
-    else
-        echo '⚠️ Ostrzeżenie: Brak katalogu vendor/pipewire-capture'
     fi
 
     echo '--- [Container] Budowanie binarki (PyInstaller) ---'
     mkdir -p $DIST_DIR
     
+    # Powrót do standardowej metody budowania (bez manipulacji plikiem .spec)
     pyinstaller --noconfirm --onefile --windowed --clean \
         --name \"$BINARY_NAME\" \
         --collect-all \"customtkinter\" \

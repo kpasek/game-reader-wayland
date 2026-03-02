@@ -438,7 +438,7 @@ class ConfigManager:
                 area.rect = self._scale_rect_to_4k(area.rect, dw, dh)
                 # Normalize area-level ocr_scale_factor to 4K
                 if hasattr(area, 'ocr_scale_factor'):
-                    area.ocr_scale_factor = float(area.ocr_scale_factor) / ratio
+                    area.ocr_scale_factor = float(area.ocr_scale_factor) * ratio
         
         obj.areas = new_areas
         if self.preset_path:
@@ -779,7 +779,7 @@ class ConfigManager:
             for area in res_obj.areas:
                 area.rect = self._scale_rect_to_physical(area.rect, dw, dh)
                 if hasattr(area, 'ocr_scale_factor'):
-                    area.ocr_scale_factor = float(area.ocr_scale_factor) * ratio
+                    area.ocr_scale_factor = float(area.ocr_scale_factor) / ratio
         
         return res_obj._to_dict()
 
@@ -796,7 +796,7 @@ class ConfigManager:
             for area in areas_copy:
                 area.rect = self._scale_rect_to_physical(area.rect, dw, dh)
                 if hasattr(area, 'ocr_scale_factor'):
-                    area.ocr_scale_factor = float(area.ocr_scale_factor) * ratio
+                    area.ocr_scale_factor = float(area.ocr_scale_factor) / ratio
         
         return areas_copy
 

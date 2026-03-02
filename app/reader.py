@@ -34,6 +34,7 @@ class CaptureWorker(threading.Thread):
         self.config_manager = config_manager
         self.log_queue = log_queue
         self.first_capture_done = False
+        self._logged_fail = False
 
     def run(self):
         while not self.stop_event.is_set():

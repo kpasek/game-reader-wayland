@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('app_config.json', '.')]
+datas = []
 binaries = []
 hiddenimports = ['PIL._tkinter_finder']
 tmp_ret = collect_all('customtkinter')

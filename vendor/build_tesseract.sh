@@ -23,10 +23,11 @@ podman run --rm -v "$PWD":/app:Z -w /app python:3.12-bookworm bash -c "
     echo \"Pobieranie zależności...\"
     ldd \${tesseract_path} | awk '/=>/ {print \$3}' | grep -v 'libc.so' | grep -v 'ld-linux' | xargs -I '{}' cp -v '{}' \$v_dir/lib/
 
-    echo \"Pobieranie modeli językowych (pol, eng, osd - fast)...\"
-    curl -sL https://github.com/tesseract-ocr/tessdata_fast/raw/main/pol.traineddata -o \$v_dir/tessdata/pol.traineddata
-    curl -sL https://github.com/tesseract-ocr/tessdata_fast/raw/main/eng.traineddata -o \$v_dir/tessdata/eng.traineddata
-    curl -sL https://github.com/tesseract-ocr/tessdata_fast/raw/main/osd.traineddata -o \$v_dir/tessdata/osd.traineddata
+    echo \"Pobieranie modeli językowych (pol, eng, osd - standard)...\"
+    # Używamy standardowych modeli (nie fast), aby poprawić jakość na trudnych obrazach
+    curl -sL https://github.com/tesseract-ocr/tessdata/raw/main/pol.traineddata -o \$v_dir/tessdata/pol.traineddata
+    curl -sL https://github.com/tesseract-ocr/tessdata/raw/main/eng.traineddata -o \$v_dir/tessdata/eng.traineddata
+    curl -sL https://github.com/tesseract-ocr/tessdata/raw/main/osd.traineddata -o \$v_dir/tessdata/osd.traineddata
 
     echo \"Tworzenie nowej binarki opakowującej...\"
     cat << 'WRAPPER' > \$v_dir/tesseract
