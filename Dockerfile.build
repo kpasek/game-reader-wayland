@@ -1,0 +1,35 @@
+# Używamy oficjalnego obrazu Pythona opartego na Debianie Bookworm (glibc 2.36)
+FROM python:3.11-bookworm
+
+# Ustawienie zmiennych środowiskowych
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV CARGO_HOME=/opt/rust/cargo
+ENV RUSTUP_HOME=/opt/rust/rustup
+ENV PATH="/opt/rust/cargo/bin:$PATH"
+
+# Instalacja zależności systemowych
+RUN apt-get update -qq && \
+    apt-get install -y -qq --no-install-recommends \
+    build-essential \
+    libpipewire-0.3-dev \
+    libclang-dev \
+    pkg-config \
+    curl \
+    python3-tk \
+    libgirepository1.0-dev \
+    patchelf \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Instalacja Rust (wymagany do budowania pipewire-capture)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+
+# Instalacja narzędzi Pythonowych
+RUN pip install --no-cache-dir --upgrade pip wheel setuptools maturin pyinstaller
+
+# Ustawienie katalogu roboczego
+WORKDIR /app
+
+# Domyślne polecenie (można nadpisać przy uruchomieniu)
+CMD ["/bin/bash"]
