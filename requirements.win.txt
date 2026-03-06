@@ -1,0 +1,13 @@
+Pillow
+pytesseract
+thefuzz
+rapidfuzz
+python-Levenshtein
+mss
+# build
+nuitka
+ordered-set
+zstandard
+# inputs
+pynput
+customtkinter

@@ -4,5 +4,19 @@
         "tests"
     ],
     "python.testing.unittestEnabled": false,
-    "python.testing.pytestEnabled": true
+    "python.testing.pytestEnabled": true,
+    "chat.tools.terminal.autoApprove": {
+        "/^Write-Host \"Sprawdzam dostępność Pythona 3\\.13 oraz ścieżki\\.\\.\\.\"; py -0p; Write-Host \"py -3\\.13 --version:\"; py -3\\.13 --version 2>\\$null; Write-Host \"python3\\.13 --version:\"; python3\\.13 --version 2>\\$null; Write-Host \"where python\"; where python 2>\\$null$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^Write-Host \"Tworzę venv z py -3\\.13 -m venv \\.venv\"; py -3\\.13 -m venv \\.venv; Write-Host \"Exit code: \\$LASTEXITCODE\"; Write-Host \"Lista plików \\.venv:\"; if \\(Test-Path \\.\\\\\\.venv\\) \\{ Get-ChildItem -Path \\.\\\\\\.venv -Recurse -Depth 2 \\| Select-Object FullName -First 20 \\} else \\{ Write-Host \"\\.venv nie istnieje\" \\}$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^\\.\\\\\\.venv\\\\Scripts\\\\python -m pip install --upgrade pip setuptools wheel; \\.\\\\\\.venv\\\\Scripts\\\\python -m pip install -r requirements\\.txt$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
 }

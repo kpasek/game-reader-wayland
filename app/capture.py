@@ -10,11 +10,21 @@ from typing import Optional, Dict
 import mss
 import numpy as np
 from PIL import Image
-from pipewire_capture import (
-    PortalCapture,
-    CaptureStream,
-    is_available as pw_is_available,
-)
+if platform.system().lower() == 'linux':
+    try:
+        from pipewire_capture import (
+            PortalCapture,
+            CaptureStream,
+            is_available as pw_is_available,
+        )
+    except ImportError:
+        PortalCapture = None
+        CaptureStream = None
+        pw_is_available = lambda: False
+else:
+    PortalCapture = None
+    CaptureStream = None
+    pw_is_available = lambda: False
 
 logger = logging.getLogger(__name__)
 
